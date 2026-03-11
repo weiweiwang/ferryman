@@ -1,0 +1,38 @@
+# Reference repositories
+references/
+
+# Backend
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+env/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+
+# SQLite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+backend/app/db/ferryman.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/src-tauri/target/
+frontend/src-tauri/binaries/
+frontend/src-tauri/gen/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo

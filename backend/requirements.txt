@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+websockets
+pydantic-ai
+sqlmodel
+lancedb
+python-frontmatter
+playwright
+jsonrpcserver
+python-dotenv
+keyring
+aiohttp
+PyYAML
+shortuuid
+pydantic-settings
+python-json-logger
+orjson

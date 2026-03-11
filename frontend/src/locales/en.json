@@ -1,0 +1,55 @@
+{
+  "app": {
+    "title": "Ferryman",
+    "subtitle": "Tasks done before the coffee cools.",
+    "ready": "system ready",
+    "reconnecting": "reconnecting...",
+    "active_environment": "Active Environment",
+    "realtime_intelligence": "Real-time Intelligence",
+    "system_configuration": "System Configuration",
+    "kernel_stable": "RISC KERNEL STABLE",
+    "byok_enabled": "Byok enabled",
+    "deterministic_kernel": "Deterministic Kernel"
+  },
+  "nav": {
+    "chat": "Chat",
+    "sessions": "Sessions",
+    "tasks": "Tasks",
+    "settings": "Settings"
+  },
+  "sessions": {
+    "subtitle": "Manage your conversation history and context"
+  },
+  "chat": {
+    "welcome_title": "Ferryman OS",
+    "welcome_subtitle": "\"Bridging intent to action through deterministic web control.\"",
+    "placeholder": "Issue an instruction to Ferryman...",
+    "quick_actions": {
+      "web_research": "Web Research",
+      "repo_analysis": "Repo Analysis",
+      "p1": "Search latest AI news",
+      "p2": "Summarize my active workspace"
+    }
+  },
+  "settings": {
+    "providers_title": "LLM Providers",
+    "providers_subtitle": "Configure your own API keys for logical isolation and maximum control.",
+    "infra_title": "System Master Model",
+    "active_model_label": "Active Model",
+    "master_model_title": "Global Master Model",
+    "api_key": "API Key",
+    "base_url": "Base URL",
+    "save": "Save Configuration",
+    "linked": "Linked",
+    "missing": "Missing"
+  },
+  "tasks": {
+    "monitor_title": "Task Monitor",
+    "status": {
+      "running": "running",
+      "success": "success",
+      "failed": "failed",
+      "pending": "pending"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "app": {
+    "title": "Ferryman",
+    "subtitle": "杯中咖啡尚温，繁杂琐事已了。",
+    "ready": "系统就绪",
+    "reconnecting": "正在重新连接...",
+    "active_environment": "运行环境",
+    "realtime_intelligence": "实时语义分析",
+    "system_configuration": "系统内核配置",
+    "kernel_stable": "RISC内核稳定",
+    "byok_enabled": "自有密钥环境",
+    "deterministic_kernel": "确定性执行内核"
+  },
+  "nav": {
+    "chat": "对话",
+    "sessions": "会话历史",
+    "tasks": "任务队列",
+    "settings": "系统设置"
+  },
+  "sessions": {
+    "subtitle": "管理您的历史对话与上下文"
+  },
+  "chat": {
+    "welcome_title": "Ferryman OS",
+    "welcome_subtitle": "“通过确定性的网页控制，将意图转化为行动。”",
+    "placeholder": "向Ferryman下达指令...",
+    "quick_actions": {
+      "web_research": "网页调研",
+      "repo_analysis": "仓库分析代办",
+      "p1": "搜索最新的AI新闻",
+      "p2": "总结我当前的工作空间"
+    }
+  },
+  "settings": {
+    "providers_title": "LLM模型供应商",
+    "providers_subtitle": "配置您自己的API密钥，实现数据逻辑隔离与最大化可控性。",
+    "infra_title": "系统主模型",
+    "active_model_label": "当前使用模型",
+    "master_model_title": "全局主模型",
+    "api_key": "API密钥",
+    "base_url": "代理/接口地址",
+    "save": "保存配置",
+    "linked": "已连接",
+    "missing": "待配置"
+  },
+  "tasks": {
+    "monitor_title": "任务监控",
+    "status": {
+      "running": "运行中",
+      "success": "成功",
+      "failed": "失败",
+      "pending": "排队中"
+    }
+  }
+}
