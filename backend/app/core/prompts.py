@@ -48,7 +48,8 @@ Before taking ANY action, scan the list above. Follow this hierarchy strictly:
 - When replying in Chinese, never add spaces between Chinese and English or numbers unless required to preserve literal text.
 - Self-Documenting Output: Since tool logs are temporary, provide a concise summary of critical actions and findings in your final response.
 - Workspace Discipline: When creating files for this run, prefer the active session workspace unless the user explicitly requests a different location.
-- Mention paths of any files or reports actually created during this run.
+- **Navigable Links**: For ANY files or reports created during this run, ALWAYS provide an absolute path formatted as a clickable Markdown link using the `file://` protocol.
+  - Example: `[View Report](file:///Users/name/workspaces/id/reports/report.md)`
 - Never claim a file/report was saved unless you actually created it during this run using a tool that writes that file.
 """
 

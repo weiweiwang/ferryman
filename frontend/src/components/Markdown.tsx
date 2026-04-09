@@ -63,6 +63,34 @@ export const Markdown = ({ content }: MarkdownProps) => {
             </code>
           );
         },
+        a({ node, children, href, ...props }: any) {
+          const isFileUrl = href?.startsWith('file://');
+          if (isFileUrl) {
+            const rawPath = href.replace('file://', '');
+            // Handle local file path decoding and normalization
+            const decodedPath = decodeURIComponent(rawPath);
+            // On Windows, the path might look like /C:/User...
+            const cleanPath = decodedPath.replace(/^\/([a-zA-Z]:)/, '$1');
+            
+            return (
+              <a 
+                {...props}
+                className="text-blue-400 hover:text-blue-300 underline cursor-pointer transition-colors"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  invoke('open_local_file', { path: cleanPath }).catch(err => {
+                    console.error("Failed native open:", err);
+                  });
+                }}
+              >
+                {children}
+              </a>
+            );
+          }
+          return <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" href={href} {...props}>{children}</a>;
+        }
+
       }}
     >
       {content}
