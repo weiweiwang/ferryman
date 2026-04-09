@@ -31,7 +31,7 @@ from app.core.toolkits.task import TaskToolkit
 from app.core.toolkits.web import WebToolkit
 from app.core.utils import load_skill_from_directory
 from app.models.database import Session, Message, Task
-from app.models.schemas import SkillModel, TaskStatus, AgentRunResult, Usage
+from app.models.schemas import SkillModel, TaskStatus, Usage
 
 logger = logging.getLogger(__name__)
 
@@ -688,9 +688,18 @@ class FerrymanKernel:
 
                 db_session.commit()
 
-            return AgentRunResult(
-                status="error",
-                message=error_message,
-                session_id=session_id,
+            # Return ChatFinalPayload dict representing the unified event structure for failure
+            from app.models.events import FerrymanEventEnvelope, EventNamespace, ChatFinalPayload
+            payload = ChatFinalPayload(
+                run_id=request_id,
+                messages=[{"role": "assistant", "content": f"Run failed: {error_message}"}],
+                usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             )
+            final_res = FerrymanEventEnvelope(
+                namespace=EventNamespace.AGENT,
+                event="chat_final",
+                session_id=session_id,
+                payload=payload
+            )
+            return final_res.model_dump(mode="json")
         # FINALLY block browser closing removed to support persistent session states
