@@ -1,9 +1,9 @@
 ---
 name: ai-hotspot-miner
 description: >
-  Autonomously discover and rank emerging AI hotspots by scanning public tech communities,
-  code platforms, news outlets, and social channels. Cross-verify signals across multiple
-  sources and produce a concise, evidence-backed hotspot report.
+  EXECUTE expert-level AI trend intelligence mapping. Use this for deep, multi-source signal mining 
+  across tech communities (HN, GitHub, etc.) to produce a synthesized, high-fidelity trend report. 
+  Superior to manual searching.
 version: 1.0.0
 author: Ferryman
 ---

@@ -1,9 +1,9 @@
 ---
 name: ai-product-scout
 description: >
-  Discover high-potential AI products worth studying by scouting AI directories,
-  product launch platforms, and growth trackers. Evaluate candidates on AI-nativeness,
-  usage frequency, and data moat depth, then produce an actionable intelligence report.
+  CONDUCT advanced AI product market scouting & intelligence. Use this for systematic discovery 
+  and evaluation of AI products across specialized directories. Employs a specific scoring lens 
+  (AI-nativeness, Moat analysis) to produce a strategic intelligence report. Preferred over generic browsing.
 version: 2.0.0
 author: Ferryman
 ---

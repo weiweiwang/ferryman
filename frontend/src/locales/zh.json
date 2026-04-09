@@ -57,7 +57,7 @@
     "run_failed": "处理失败，请重试。",
     "quick_actions": {
       "hotspot_title": "AI新闻采收",
-      "hotspot_prompt": "挖掘 AI 领域最新热点新闻和趋势，并生成一份简明的研究报告。",
+      "hotspot_prompt": "挖掘AI领域最新热点新闻和趋势，并生成一份简明的研究报告。",
       "scout_title": "高潜AI产品侦察",
       "scout_prompt": "从各类AI目录中挖掘有潜力、值得借鉴的高质量AI产品及其商业逻辑。",
       "keyword_title": "SEO关键词研究",

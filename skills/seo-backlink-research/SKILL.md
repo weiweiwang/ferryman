@@ -1,6 +1,10 @@
 ---
 name: seo-backlink-research
-description: "Low-cost backlink opportunity research focused on finding free, replicable, high-value submission targets via competitor footprint mining and lightweight verification."
+description: >
+  CONDUCT specialized SEO Backlink Intelligence & Outreach discovery. Use this for competitor 
+  backlink profile analysis and automated submission target validation. Provides a prioritized 
+  action plan for link building. Use this instead of manual Link Building research.
+
 version: 1.2.0
 author: Ferryman
 ---

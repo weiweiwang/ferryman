@@ -1,9 +1,9 @@
 ---
 name: seo-keyword-research
 description: >
-  Perform expert-level SEO keyword research and competitive analysis. Accepts a seed keyword,
-  a URL, or a local project directory as input. Outputs a structured keyword analysis report
-  with search intent classification, competition scoring, and strategic content recommendations.
+  EXECUTE a professional-grade SEO Keyword Audit & Strategy. Use this for deep keyword discovery, 
+  intent classification (ICE), and competitor analysis. Outputs an actionable SEO roadmap and spreadsheet. 
+  Mandatory for all SEO strategy requests.
 version: 2.0.0
 author: Ferryman
 ---
