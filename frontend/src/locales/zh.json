@@ -56,10 +56,16 @@
     "header_title": "对话",
     "run_failed": "处理失败，请重试。",
     "quick_actions": {
-      "web_research": "AI前沿挖掘",
-      "repo_analysis": "SEO深度调研",
-      "p1": "帮我挖掘Hacker News等主要站点的最新AI前沿技术讨论，并输出简明的研究报告。",
-      "p2": "为网站geosolver.app挖掘SEO关键词。"
+      "hotspot_title": "AI新闻采收",
+      "hotspot_prompt": "挖掘 AI 领域最新热点新闻和趋势，并生成一份简明的研究报告。",
+      "scout_title": "高潜产品侦察",
+      "scout_prompt": "从各类 AI 目录中挖掘有潜力、值得借鉴的高质量 AI 产品及其商业逻辑。",
+      "keyword_title": "SEO关键词研究",
+      "keyword_prompt": "为 [输入网站点或关键词] 进行深度的 SEO 关键词研究，分析竞争对手并给出行动方案。",
+      "backlink_title": "外链机会挖掘",
+      "backlink_prompt": "为 [输入目标站点] 寻找免费、可复刻的高价值外链提交机会。",
+      "creator_title": "技能开发助手",
+      "creator_prompt": "帮我开发一个新技能：[描述技能的工作流、输入和输出]"
     }
   },
   "settings": {

@@ -56,10 +56,16 @@
     "header_title": "Chat",
     "run_failed": "Request failed. Please try again.",
     "quick_actions": {
-      "web_research": "AI Hotspot Mining",
-      "repo_analysis": "SEO Keyword Research",
-      "p1": "Mine the latest AI tech discussions from Hacker News and provide a concise research report.",
-      "p2": "Mine SEO keywords for the website geosolver.app."
+      "hotspot_title": "AI Hotspot Miner",
+      "hotspot_prompt": "Research the latest AI trends and news, and generate a concise summary report.",
+      "scout_title": "Product Scout",
+      "scout_prompt": "Identify high-potential AI products and business models from various directories.",
+      "keyword_title": "Keyword Research",
+      "keyword_prompt": "Perform deep SEO keyword research for [target site/keyword], analyze competitors, and provide an action plan.",
+      "backlink_title": "Backlink Research",
+      "backlink_prompt": "Discover free, replicable, and high-value backlink submission opportunities for [target site].",
+      "creator_title": "Skill Creator",
+      "creator_prompt": "Help me build a new skill: [describe the workflow, inputs, and outputs]"
     }
   },
   "settings": {

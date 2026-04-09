@@ -17,7 +17,12 @@ import {
   Trash2,
   RefreshCw,
   Check,
-  X
+  X,
+  Flame,
+  Radar,
+  Target,
+  Link,
+  PlusCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
@@ -439,14 +444,29 @@ export default function App() {
                       <div className="flex flex-wrap justify-center gap-5 w-full max-w-3xl pt-8 relative">
                          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                          <QuickAction 
-                           icon={<Globe size={20} className="text-blue-400" />}
-                           title={t('chat.quick_actions.web_research')}
-                           onClick={() => setInput(t('chat.quick_actions.p1'))}
+                           icon={<Flame size={20} className="text-orange-400" />}
+                           title={t('chat.quick_actions.hotspot_title')}
+                           onClick={() => setInput(t('chat.quick_actions.hotspot_prompt'))}
                          />
                          <QuickAction 
-                           icon={<Activity size={20} className="text-orange-400" />}
-                           title={t('chat.quick_actions.repo_analysis')}
-                           onClick={() => setInput(t('chat.quick_actions.p2'))}
+                           icon={<Radar size={20} className="text-blue-400" />}
+                           title={t('chat.quick_actions.scout_title')}
+                           onClick={() => setInput(t('chat.quick_actions.scout_prompt'))}
+                         />
+                         <QuickAction 
+                           icon={<Target size={20} className="text-emerald-400" />}
+                           title={t('chat.quick_actions.keyword_title')}
+                           onClick={() => setInput(t('chat.quick_actions.keyword_prompt'))}
+                         />
+                         <QuickAction 
+                           icon={<Link size={20} className="text-purple-400" />}
+                           title={t('chat.quick_actions.backlink_title')}
+                           onClick={() => setInput(t('chat.quick_actions.backlink_prompt'))}
+                         />
+                         <QuickAction 
+                           icon={<PlusCircle size={20} className="text-pink-400" />}
+                           title={t('chat.quick_actions.creator_title')}
+                           onClick={() => setInput(t('chat.quick_actions.creator_prompt'))}
                          />
                       </div>
                     </div>
