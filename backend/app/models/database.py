@@ -9,7 +9,7 @@ from sqlmodel import SQLModel, Field, JSON
 class Session(SQLModel, table=True):
     __tablename__ = "sessions"
     id: str = Field(default_factory=shortuuid.uuid, primary_key=True)
-    title: str
+    title: str = Field(default="")
     memory: Optional[str] = None
     input_tokens: int = Field(default=0)
     output_tokens: int = Field(default=0)

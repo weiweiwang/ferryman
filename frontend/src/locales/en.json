@@ -1,7 +1,7 @@
 {
   "app": {
     "title": "Ferryman",
-    "subtitle": "Tasks done before the coffee cools.",
+    "subtitle": "Busywork, handled.",
     "byok_enabled": "Bring Your Own Key",
     "deterministic_kernel": "Reliable Execution"
   },
@@ -31,14 +31,35 @@
     "welcome_title": "Ferryman",
     "welcome_subtitle": "\"Turn intent into results.\"",
     "placeholder": "Issue an instruction to Ferryman...",
+    "placeholder_full": "Issue an instruction to Ferryman... (⌘/Ctrl + Enter)",
     "untitled": "New Chat",
+    "schedules_drawer_title": "Schedules",
+    "tools": {
+      "navigating_to": "Navigating to page",
+      "distilling_content": "Distilling core content",
+      "clicking_element": "Clicking element",
+      "typing_text": "Typing text",
+      "executing_applescript": "Executing local command",
+      "running_bash": "Running script",
+      "reading_file": "Reading file",
+      "writing_file": "Writing to file",
+      "reading_directory": "Scanning directory",
+      "searching_files": "Searching files",
+      "creating_task": "Creating subtask",
+      "getting_task": "Reading task status",
+      "updating_task": "Updating task progress",
+      "listing_tasks": "Checking task board",
+      "listing_skills": "Fetching skills",
+      "installing_skill": "Installing new skill",
+      "reading_skill": "Reading skill SOP"
+    },
     "header_title": "Chat",
     "run_failed": "Request failed. Please try again.",
     "quick_actions": {
-      "web_research": "Web Research",
-      "repo_analysis": "Repo Analysis",
-      "p1": "Search latest AI news",
-      "p2": "Summarize my active workspace"
+      "web_research": "AI Hotspot Mining",
+      "repo_analysis": "SEO Keyword Research",
+      "p1": "Mine the latest AI tech discussions from Hacker News and provide a concise research report.",
+      "p2": "Mine SEO keywords for the website geosolver.app."
     }
   },
   "settings": {
@@ -70,6 +91,7 @@
   "tasks": {
     "monitor_title": "Task Monitor",
     "subtitle": "Track running tasks and their latest progress.",
+    "refresh": "Refresh Tasks",
     "active_count": "Active Tasks",
     "empty": "There are no running tasks right now.",
     "initializing": "Initializing...",
@@ -78,6 +100,9 @@
     "input_tokens": "Input",
     "output_tokens": "Output",
     "total_tokens": "Total Tokens",
+    "token_in": "IN",
+    "token_out": "OUT",
+    "token_total": "TOT",
     "status": {
       "running": "running",
       "success": "success",

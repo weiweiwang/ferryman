@@ -20,6 +20,7 @@ from app.models.database import Session, Message, Task
 from app.models.schemas import JsonRpcError, JsonRpcErrorCode, JsonRpcErrorResponse
 
 logger = logging.getLogger(__name__)
+DEFAULT_FERRYMAN_BEARER_TOKEN = "dev-token"
 
 
 def is_websocket_authorized(websocket: WebSocket) -> bool:
@@ -130,7 +131,7 @@ async def lifespan(fastapi_app: FastAPI):
     logger.info("🚀 Ferryman Sidecar starting...")
 
     fastapi_app.state.kernel = FerrymanKernel(get_settings())
-    fastapi_app.state.bearer_token = os.environ.get("FERRYMAN_BEARER_TOKEN") or secrets.token_urlsafe(32)
+    fastapi_app.state.bearer_token = os.environ.get("FERRYMAN_BEARER_TOKEN") or DEFAULT_FERRYMAN_BEARER_TOKEN
 
     # Pre-scan skills
     fastapi_app.state.kernel.scan_skills()
@@ -263,6 +264,29 @@ async def read_backend_logs(context, source: str = "app", lines: int = 200):
     })
 
 
+async def background_generate_title(kernel, session_id: str, instruction: str):
+    try:
+        from pydantic_ai.agent import Agent
+        from app.models.database import Session
+        logger.info(f"Generating auto-title for session {session_id}")
+
+        llm = kernel._init_llm_model()
+        agent = Agent(llm, system_prompt="You are a helpful assistant. Summarize the user's instruction into a very short chat title (MAX 5 words). Output ONLY the title, no quotes, no extra text.")
+        result = await agent.run(f"User instruction: {instruction}")
+        
+        generated_title = result.output.strip(' \'"')
+        logger.info(f"Generated title for session {session_id}: {generated_title}")
+
+        with get_session() as db_session:
+            session_obj = db_session.get(Session, session_id)
+            if session_obj and not session_obj.title:
+                session_obj.title = generated_title
+                db_session.add(session_obj)
+                db_session.commit()
+    except Exception as e:
+        logger.error(f"Failed to auto-generate title for session {session_id}: {e}")
+
+
 @method
 async def execute(context, instruction: str, session_id: str = "default"):
     """
@@ -271,23 +295,52 @@ async def execute(context, instruction: str, session_id: str = "default"):
     logger.info(f"📥 OS Instruction Received: {instruction} (Session: {session_id})")
 
     if context and hasattr(context, "kernel"):
+        # Provide an emit callback that uses the active websocket
+        async def emit_ws_event(event_model) -> None:
+            try:
+                ws = getattr(context, "active_ws", None)
+                if ws and ws.client_state.name == "CONNECTED":
+                    to_send = {
+                        "jsonrpc": "2.0",
+                        "method": "ferryman_event",
+                        "params": event_model.model_dump(mode="json", exclude_none=True)
+                    }
+                    import json
+                    await ws.send_text(json.dumps(to_send))
+            except Exception as e:
+                logger.error(f"Failed to emit WS event {event_model.event}: {e}")
+
         # 调用 Kernel 的 Master Agent 入口
         # 这里 Master Agent 会根据 OS Prompt 和可用 Skills 决定下一步
         result = await context.kernel.run_master_agent(
             instruction=instruction,
-            session_id=session_id
+            session_id=session_id,
+            emit_event_cb=emit_ws_event
         )
-        return Success(result.model_dump(mode="json"))
+
+        need_title_gen = False
+        with get_session() as db_session:
+            session_obj = db_session.get(Session, session_id)
+            if session_obj and not session_obj.title:
+                need_title_gen = True
+
+        if need_title_gen:
+            import asyncio
+            asyncio.create_task(background_generate_title(context.kernel, session_id, instruction))
+
+        # result is already dumped as a dict in run_master_agent in the new unified format
+        return Success(result)
 
     return Success({"status": "error", "message": "Kernel not initialized"})
 
 
 @method
-async def create_session(context, session_id: Optional[str] = None, title: str = "New Chat"):
+async def create_session(context, session_id: Optional[str] = None, title: Optional[str] = None):
     """Creates a new chat session."""
     logger.info(f"🆕 Creating new session: {title} (ID: {session_id})")
     with get_session() as db_session:
-        new_session = Session(id=session_id, title=title) if session_id else Session(title=title)
+        normalized_title = title or ""
+        new_session = Session(id=session_id, title=normalized_title) if session_id else Session(title=normalized_title)
         db_session.add(new_session)
         db_session.commit()
         db_session.refresh(new_session)
@@ -477,6 +530,7 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     await websocket.accept()
+    websocket.app.state.active_ws = websocket
     logger.info("🔌 WebSocket connection established")
 
     try:

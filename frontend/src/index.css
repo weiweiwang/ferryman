@@ -1,17 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  /* High-end unopinionated modern sans as base */
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
 }
 
 body {
-  @apply bg-[#0a0a0a] text-[#ededed] overflow-hidden;
+  /* Extreme stark contrast base */
+  @apply bg-[#080808] text-[#FAFAFA] overflow-hidden;
   margin: 0;
   display: flex;
   place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
@@ -21,27 +25,73 @@ body {
 
 @layer components {
   .glass {
-    @apply bg-white/5 backdrop-blur-md border border-white/10 shadow-xl;
+    @apply bg-white/[0.02] backdrop-blur-3xl border border-white/5;
   }
 
   .glass-hover {
-    @apply hover:bg-white/10 transition-all duration-300;
+    @apply hover:bg-white/[0.05] transition-all duration-300;
   }
 
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-500 font-bold;
+  .display-title {
+    /* Premium editorial serif stack */
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    @apply font-normal tracking-tight text-white/90;
+  }
+
+  .monochrome-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40;
+  }
+
+  /* Editorial Markdown Formatting for Bot Output (Award-Winning Readability) */
+  .markdown-container {
+    @apply text-white/80;
+  }
+  .markdown-container p {
+    /* Refined leading for comfortable reading without breaking apart */
+    @apply mb-4 leading-[1.8] tracking-wide;
+  }
+  .markdown-container p:last-child {
+    @apply mb-0;
+  }
+  .markdown-container strong, .markdown-container b {
+    /* Piercing white for bold terms */
+    @apply font-black text-white;
+  }
+  .markdown-container h1, .markdown-container h2, .markdown-container h3, .markdown-container h4 {
+    /* Sharp hierarchical contrast */
+    @apply font-black text-white mt-8 mb-4 tracking-tight;
+  }
+  .markdown-container h1 { @apply text-2xl; }
+  .markdown-container h2 { @apply text-xl; }
+  .markdown-container h3 { @apply text-lg; }
+  .markdown-container code {
+    @apply bg-white/10 px-1.5 py-0.5 rounded font-mono text-white/90 text-[0.9em];
+  }
+  .markdown-container pre {
+    @apply bg-[#050505] p-6 rounded-[1.5rem] border border-white/5 my-6 overflow-x-auto shadow-2xl;
+  }
+  .markdown-container pre code {
+    @apply bg-transparent p-0 text-white/70;
+  }
+  .markdown-container ul, .markdown-container ol {
+    @apply my-4 ml-6 space-y-2;
+  }
+  .markdown-container li {
+    /* Balanced list height */
+    @apply leading-[1.8] pl-1;
+  }
+  .markdown-container blockquote {
+    @apply border-l-2 border-white/30 pl-6 my-6 italic text-white/50 text-[15px];
   }
 }
 
-/* Custom Scrollbar */
+/* Ultra Minimal Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 3px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+  @apply bg-white/[0.15] rounded-full hover:bg-white/30 transition-colors;
 }

@@ -36,3 +36,5 @@ frontend/src-tauri/gen/
 .DS_Store
 *.swp
 *.swo
+
+dist

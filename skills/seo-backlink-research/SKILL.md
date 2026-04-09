@@ -189,9 +189,6 @@ For each final candidate, explicitly classify the likely entry path as one of:
 
 ### Priority 4: Browser Fallback
 
-When this skill uses browser tools, it must use `headless=False`.
-Do not use hidden browser mode for this skill.
-
 Important boundary:
 
 - "Browser fallback" means explicit agent-level use of browser tools such as `browser_navigate`.
@@ -233,11 +230,8 @@ Task creation rules:
 
 ## File Output Policy
 
-- Always save a markdown report in the session workspace for a successful run.
-- Always call `write_file` for the final report.
-- Prefer concise filenames such as:
-  - `backlink_research_<slug>.md`
-  - `submission_targets_<slug>.md`
+- Always save a markdown report for a successful run.
+- Save as `reports/backlink-research-<domain>-<current_date>.md` (e.g., `reports/backlink-research-geosolver-2026-04-09.md`).
 
 ## Report Structure
 

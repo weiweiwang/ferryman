@@ -45,7 +45,12 @@ class SkillToolkit:
             # and request budgeting are shared across the master agent and delegated skills.
             request_limit = kernel.get_setting("system.llm.request_limit", 100)
             augmented_instruction = kernel.build_runtime_augmented_instruction(instruction, session_id)
-            skill_deps = AgentDeps(kernel=kernel, session_id=session_id, skill_name=skill_name)
+            skill_deps = AgentDeps(
+                kernel=kernel,
+                session_id=session_id,
+                skill_name=skill_name,
+                emit_event_cb=ctx.deps.emit_event_cb,
+            )
             result = await skill_agent.run(
                 augmented_instruction,
                 deps=skill_deps,

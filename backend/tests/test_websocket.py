@@ -172,13 +172,18 @@ def test_websocket_backend_log_endpoints(client, monkeypatch):
 
 
 def test_websocket_execute_serializes_agent_result(client, monkeypatch):
-    async def fake_run_master_agent(instruction: str, session_id: str):
-        return AgentRunResult(
-            status="success",
-            session_id=session_id,
-            response="处理完成",
-            usage=Usage(input_tokens=12, output_tokens=34, total_tokens=46),
-        )
+    async def fake_run_master_agent(instruction: str, session_id: str, emit_event_cb=None):
+        return {
+            "namespace": "agent",
+            "event": "chat_final",
+            "session_id": session_id,
+            "ts": "2026-04-09T00:00:00Z",
+            "payload": {
+                "run_id": "run-10",
+                "messages": [{"role": "assistant", "content": "处理完成"}],
+                "usage": {"input_tokens": 12, "output_tokens": 34, "total_tokens": 46}
+            }
+        }
 
     monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
 
@@ -190,16 +195,31 @@ def test_websocket_execute_serializes_agent_result(client, monkeypatch):
             request_id=10,
         )
         assert response["result"] == {
-            "status": "success",
+            "namespace": "agent",
+            "event": "chat_final",
             "session_id": "session-1",
-            "response": "处理完成",
-            "message": None,
-            "usage": {
-                "input_tokens": 12,
-                "output_tokens": 34,
-                "total_tokens": 46,
-            },
+            "ts": "2026-04-09T00:00:00Z",
+            "payload": {
+                "run_id": "run-10",
+                "messages": [{"role": "assistant", "content": "处理完成"}],
+                "usage": {"input_tokens": 12, "output_tokens": 34, "total_tokens": 46}
+            }
         }
+
+
+def test_websocket_create_session_without_title_defaults_to_empty_string(client, session):
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "create_session",
+            {"session_id": "session-untitled"},
+            request_id=10,
+        )
+        assert response["result"] == {"id": "session-untitled", "title": ""}
+
+    created = session.get(Session, "session-untitled")
+    assert created is not None
+    assert created.title == ""
 
 
 def test_websocket_session_message_and_task_flows(client, session):

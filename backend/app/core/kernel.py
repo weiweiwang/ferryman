@@ -403,8 +403,64 @@ class FerrymanKernel:
     def _register_toolkit(agent: Agent, toolkit_class: Any) -> None:
         """Register all tools from a toolkit class using its get_tools() method."""
         if hasattr(toolkit_class, "get_tools"):
+            from functools import wraps
+            from pydantic_ai import RunContext
+            from asgi_correlation_id import correlation_id
+            import time
+            import json
+
             for tool_func in toolkit_class.get_tools():
-                agent.tool(tool_func)
+
+                def make_wrapped_tool(bound_tool_func):
+                    @wraps(bound_tool_func)
+                    async def wrapped_tool(ctx: RunContext[AgentDeps], *args, **kwargs):
+                        start_time = time.time()
+                        tool_name = bound_tool_func.__name__
+                        run_id = correlation_id.get() or "unknown-run"
+
+                        input_summary = {}
+                        try:
+                            for k, v in kwargs.items():
+                                if hasattr(v, "model_dump"):
+                                    input_summary[k] = v.model_dump()
+                                else:
+                                    input_summary[k] = v
+                            raw_input = json.dumps(input_summary, default=str)
+                            if len(raw_input) > 2000:
+                                input_summary = {"_truncated": True, "size": len(raw_input)}
+                        except Exception:
+                            input_summary = {"_serialization_error": True}
+
+                        await ctx.deps.emit_tool_event(
+                            run_id=run_id,
+                            tool_name=tool_name,
+                            phase="start",
+                            input=input_summary
+                        )
+
+                        try:
+                            result = await bound_tool_func(ctx, *args, **kwargs)
+                            duration = int((time.time() - start_time) * 1000)
+                            await ctx.deps.emit_tool_event(
+                                run_id=run_id,
+                                tool_name=tool_name,
+                                phase="complete",
+                                duration_ms=duration
+                            )
+                            return result
+                        except Exception as e:
+                            duration = int((time.time() - start_time) * 1000)
+                            await ctx.deps.emit_tool_event(
+                                run_id=run_id,
+                                tool_name=tool_name,
+                                phase="error",
+                                duration_ms=duration
+                            )
+                            raise e
+
+                    return wrapped_tool
+
+                agent.tool(make_wrapped_tool(tool_func))
 
     def _get_master_agent(self, session_id: str) -> Agent:
         return self.build_agent(self._build_system_prompt(session_id))
@@ -436,7 +492,7 @@ class FerrymanKernel:
                     history.append(ModelResponse(parts=[TextPart(content=msg.content)]))
             return history
 
-    async def run_master_agent(self, instruction: str, session_id: str) -> AgentRunResult:
+    async def run_master_agent(self, instruction: str, session_id: str, emit_event_cb: Optional[Any] = None) -> dict:
         """
         The single entry-point called by the JSON-RPC `execute` method.
         """
@@ -451,7 +507,7 @@ class FerrymanKernel:
                 session_obj = db_session.get(Session, session_id)
                 if not session_obj:
                     # Create new session if it doesn't exist
-                    session_obj = Session(id=session_id, title="New Chat")
+                    session_obj = Session(id=session_id, title=None)
                     db_session.add(session_obj)
                     db_session.commit()
                     db_session.refresh(session_obj)
@@ -483,8 +539,11 @@ class FerrymanKernel:
 
             # 2. Execute agent
             master_agent = self._get_master_agent(session_id)
-            deps = AgentDeps(kernel=self, session_id=session_id)
-
+            deps = AgentDeps(
+                kernel=self,
+                session_id=session_id,
+                emit_event_cb=emit_event_cb
+            )
             # Use configurable shared request limit, defaults to 100
             request_limit = self.get_setting("system.llm.request_limit", 100)
             augmented_instruction = self.build_runtime_augmented_instruction(instruction, session_id)
@@ -504,7 +563,7 @@ class FerrymanKernel:
                 else None
             )
 
-            # 3. Handle Usage and Persistence in one transaction
+            # 3. Handle Usage and Persistence
             usage = result.usage()
             usage_data = {
                 "input_tokens": usage.input_tokens,
@@ -573,12 +632,20 @@ class FerrymanKernel:
 
                 db_session.commit()
 
-            return AgentRunResult(
-                status="success",
-                response=result_data,
-                session_id=session_id,
-                usage=Usage(**usage_data)
+            # Return ChatFinalPayload dict representing the unified event structure
+            from app.models.events import FerrymanEventEnvelope, EventNamespace, ChatFinalPayload
+            payload = ChatFinalPayload(
+                run_id=request_id,
+                messages=[{"role": "assistant", "content": str(result_data)}],
+                usage=usage_data
             )
+            final_res = FerrymanEventEnvelope(
+                namespace=EventNamespace.AGENT,
+                event="chat_final",
+                session_id=session_id,
+                payload=payload
+            )
+            return final_res.model_dump(mode="json")
 
         except Exception as e:
             logger.exception(f"Master Agent failed for session {session_id}")

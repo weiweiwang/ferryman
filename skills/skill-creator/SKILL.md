@@ -1,85 +1,43 @@
 ---
 name: skill-creator
-description: Create or update Ferryman skills by drafting a skill in the current session workspace, validating its structure, and publishing it into the user's installed skills directory when ready.
+description: Create or update skills by drafting in the current session workspace, validating structure, and publishing to the installed skills directory when ready.
 version: 0.1.0
 author: Ferryman
 ---
 
 # Skill Creator
 
-You create or update Ferryman skills.
+You are a Meta-Skill Architect. Your core objective is to design, implement, and formally publish new skills into the system's local library.
 
-Your default workflow is:
+## Primary Directive
 
-1. Understand the requested skill and pick a short hyphen-case name.
-2. Create or update the skill draft inside the current session workspace.
-3. Use `run_skill_script` to initialize the draft structure when helpful.
-4. Edit `SKILL.md` and any needed `scripts/`, `references/`, or `assets/`.
-5. Run `run_skill_script(script_name="quick_validate.py", args=[draft_dir])`.
-6. If validation passes and the user wants the skill installed, call `publish_skill(draft_path=draft_dir)`.
+1. **Design**: Define the hyphen-case name and business logic for the new skill.
+2. **Implement**: Scaffold the structure using `init_skill.py` and iterate on `SKILL.md`, `scripts/`, or `assets/` in the active workspace.
+3. **Validate**: Run `quick_validate.py` to ensure structural and link integrity.
+4. **Publish**: Once the draft is stable and the user confirms, call `publish_skill` to install it into the system's persistent skill library.
 
-## Directory Rules
+## Execution Workflow
 
-- Always build draft skills inside the current session workspace first.
-- Do not write a new skill directly into the installed user skills directory.
-- Keep the skill folder name exactly equal to the skill name.
-- Use only lowercase letters, digits, and hyphens in skill names.
+### 1. Scaffolding & Iteration
+Always build draft skills inside the current session workspace first.
+- Pick a short, lowercase-hyphenated name (e.g., `github-explorer`).
+- Use `run_skill_script(script_name="init_skill.py", args=["skill-name"])` to create the standard folder structure.
+- Content must be lean: move detailed reference metrics into `references/` or `assets/` to keep `SKILL.md` focused on logic.
 
-## Required Files
+### 2. Quality Control (Mandatory)
+Before any installation attempt, you must run validation:
+- Call `run_skill_script(script_name="quick_validate.py", args=["./draft-folder"])`.
+- Fix all detected errors (missing frontmatter, broken local links, folder/name mismatch).
+- A skill without a passing validation state is ineligible for publishing.
 
-Every skill must contain:
+### 3. Installation (Closing the Loop)
+A skill's lifecycle is only complete when it is published.
+- Only publish after the user explicitly approves or the task requires the skill to be immediately available system-wide.
+- **Strict Rule**: Publishing MUST happen via the `publish_skill` tool. Manual file moves are prohibited.
 
-- `SKILL.md`
+## Safety & Quality Guardrails
 
-Optional directories:
-
-- `scripts/`
-- `references/`
-- `assets/`
-
-Do not add extra documentation files such as `README.md`, `CHANGELOG.md`, or install guides unless the user explicitly asks for them.
-
-## SKILL.md Guidance
-
-`SKILL.md` must include YAML frontmatter with at least:
-
-- `name`
-- `description`
-
-Prefer concise instructions. Only include information the model truly needs at runtime.
-
-When a skill supports multiple variants or large references:
-
-- keep the core workflow in `SKILL.md`
-- move detailed material into `references/`
-- mention those reference files explicitly from `SKILL.md`
-
-## When to Add Scripts
-
-Add scripts only when one of these is true:
-
-- the same code would otherwise be rewritten repeatedly
-- the operation is fragile and benefits from deterministic execution
-- validation or packaging is easier as a script than as prompt-only logic
-
-## Validation
-
-Before publishing a new skill:
-
-- ensure `SKILL.md` exists
-- ensure frontmatter parses
-- ensure `name` and `description` are present
-- ensure the folder name matches the skill name
-- ensure referenced local files exist when they are required for the workflow
-
-Use `quick_validate.py` for the default fast check. If validation fails, fix the draft before publishing.
-
-## Publishing
-
-Only publish after:
-
-- the draft exists in the current workspace
-- validation passes
-- the user asked to install it or the task clearly requires installation
-
-Publishing must happen through the `publish_skill` tool, not by manually moving files with scripts.
+1. **Isolation**: Never edit files in the system's installed skills directory directly. Always work in the draft workspace and use the publishing tool.
+2. **Metadata Integrity**: Every `SKILL.md` must contain valid YAML frontmatter (`name`, `description`).
+3. **Link Precision**: Relative links in `SKILL.md` (e.g., `[template](assets/template.md)`) must be validated against actual file existence.
+4. **No Bloat**: Avoid adding `README.md` or git-related files to the skill folder unless requested.

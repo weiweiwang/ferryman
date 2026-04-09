@@ -16,13 +16,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=os.environ.get("ENV_FILE", ".env"),
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
+        populate_by_name=True
     )
 
     # Base directory for all Ferryman persistence
     root_dir: Path = Field(default=Path.home() / ".ferryman", validation_alias="FERRYMAN_ROOT_DIR")
     port: int = 8000
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"
 
     @property
     def user_dir(self) -> Path:

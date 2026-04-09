@@ -25,13 +25,13 @@ export interface Session {
 interface UseSessionsArgs {
   call: (method: string, params?: any) => Promise<any>;
   executeInstruction: (instruction: string, sessionId: string) => Promise<any>;
-  newSessionTitle: string;
+  clearToolActivities: () => void;
 }
 
 export function useSessions({
   call,
   executeInstruction,
-  newSessionTitle,
+  clearToolActivities,
 }: UseSessionsArgs) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -82,14 +82,14 @@ export function useSessions({
     setCurrentUsage({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
 
     try {
-      await call('create_session', { session_id: newId, title: newSessionTitle });
+      await call('create_session', { session_id: newId });
       await refreshSessions();
     } catch (error) {
       console.error('Failed to create session:', error);
     }
 
     return newId;
-  }, [call, newSessionTitle, refreshSessions]);
+  }, [call, refreshSessions]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
@@ -120,18 +120,24 @@ export function useSessions({
     ]);
 
     try {
+      clearToolActivities();
       const result = await executeInstruction(instruction, currentSessionId);
-      if (result?.status && result.status !== 'success') {
-        throw new Error(result?.message || translateStatic('chat.run_failed'));
+      
+      // result is now FerrymanEventEnvelope format
+      const payload = result?.payload;
+      if (!payload) {
+        throw new Error(translateStatic('chat.run_failed'));
       }
-      const usage = result?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
-      const response = result?.response || '';
+
+      const usage = payload.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+      const responseMessages = payload.messages || [];
+      const latestAssistantResponse = responseMessages.reverse().find((m: any) => m.role === 'assistant')?.content || '';
 
       setMessages((prev) => prev.map((message) => (
         message.id === pendingMessageId
           ? {
               ...message,
-              content: response,
+              content: latestAssistantResponse,
               metadata: { usage },
             }
           : message
