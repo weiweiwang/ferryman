@@ -94,10 +94,10 @@
   },
   "tasks": {
     "monitor_title": "Task Monitor",
-    "subtitle": "Track running tasks and their latest progress.",
+    "subtitle": "Track task status and the latest execution progress.",
     "refresh": "Refresh Tasks",
-    "active_count": "Active Tasks",
-    "empty": "There are no running tasks right now.",
+    "total_count": "Total Tasks",
+    "empty": "There are no tasks right now.",
     "initializing": "Initializing...",
     "identifier": "ID",
     "tokens_unit": "Tokens",
@@ -111,7 +111,8 @@
       "running": "running",
       "success": "success",
       "failed": "failed",
-      "pending": "pending"
+      "pending": "pending",
+      "canceled": "canceled"
     }
   }
 }

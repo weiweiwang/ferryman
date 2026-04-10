@@ -1,6 +1,6 @@
 import React, { useState, useEffect, ReactNode, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useBackendConnection } from './hooks/useBackendConnection';
+import { useBackendConnection, type Task } from './hooks/useBackendConnection';
 import { useSessions } from './hooks/useSessions';
 import { useI18n } from './hooks/useI18n';
 import { 
@@ -55,6 +55,15 @@ function isTauriRuntime() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+function getPathBasename(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const parts = value.split(/[\\/]/);
+  return parts[parts.length - 1] || value;
+}
+
 export default function App() {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const connection = useBackendConnection(wsUrl);
@@ -92,6 +101,63 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const taskCounts: Record<Task['status'], number> = {
+    pending: 0,
+    running: 0,
+    success: 0,
+    failed: 0,
+    canceled: 0,
+  };
+
+  for (const task of tasks) {
+    taskCounts[task.status] += 1;
+  }
+
+  const taskStatusSummary = [
+    {
+      key: 'pending',
+      count: taskCounts.pending,
+      label: t('tasks.status.pending'),
+      dotClassName: 'bg-amber-400',
+      valueClassName: 'text-amber-50',
+    },
+    {
+      key: 'running',
+      count: taskCounts.running,
+      label: t('tasks.status.running'),
+      dotClassName: 'bg-white',
+      valueClassName: 'text-white',
+    },
+    {
+      key: 'success',
+      count: taskCounts.success,
+      label: t('tasks.status.success'),
+      dotClassName: 'bg-green-400',
+      valueClassName: 'text-green-300',
+    },
+    {
+      key: 'failed',
+      count: taskCounts.failed,
+      label: t('tasks.status.failed'),
+      dotClassName: 'bg-red-400',
+      valueClassName: 'text-red-300',
+    },
+    {
+      key: 'canceled',
+      count: taskCounts.canceled,
+      label: t('tasks.status.canceled'),
+      dotClassName: 'bg-white/45',
+      valueClassName: 'text-white/70',
+    },
+    {
+      key: 'total',
+      count: tasks.length,
+      label: t('tasks.total_count'),
+      dotClassName: 'bg-white/80',
+      valueClassName: 'text-white',
+    },
+  ];
+  const visibleTaskStatusSummary = taskStatusSummary.filter((item) => item.key === 'total' || item.count > 0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -491,7 +557,7 @@ export default function App() {
                                         : <Check size={12} className="text-green-400 shrink-0" />
                                 }
                                 <span className="flex-1 truncate">
-                                   {
+                                  {
                                       // @ts-ignore
                                       (t(`tools.${activity.tool_name}`) !== `tools.${activity.tool_name}`) ? t(`tools.${activity.tool_name}`) : activity.tool_name
                                    }
@@ -499,8 +565,13 @@ export default function App() {
                                    {activity.input && activity.input.skill_name && <span className="ml-2 text-blue-400 font-bold truncate">[{activity.input.skill_name}]</span>}
                                    {activity.input && activity.input.command && <span className="ml-2 text-orange-400 truncate font-normal">`{activity.input.command}`</span>}
                                    {activity.input && (activity.input.path || activity.input.directory || activity.input.file_path) && (
-                                       <span className="ml-2 text-green-400 truncate font-normal">
-                                           {activity.input.path || activity.input.directory || activity.input.file_path}
+                                       <span
+                                           className="ml-2 text-green-400 truncate font-normal"
+                                           title={String(activity.input.path || activity.input.directory || activity.input.file_path)}
+                                       >
+                                           {activity.tool_name === 'write_file' || activity.tool_name === 'read_file'
+                                             ? getPathBasename(String(activity.input.path || activity.input.directory || activity.input.file_path))
+                                             : String(activity.input.path || activity.input.directory || activity.input.file_path)}
                                        </span>
                                    )}
                                    {activity.input && activity.input.title && <span className="ml-2 text-white/40 italic truncate">"{activity.input.title}"</span>}
@@ -565,17 +636,37 @@ export default function App() {
               className="flex-1 overflow-y-auto p-12"
             >
               <div className="max-w-5xl mx-auto space-y-12">
-                <header className="flex items-end justify-between">
+                <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
                   <div>
                     <h2 className="text-4xl font-black tracking-tight mb-2">{t('nav.tasks')}</h2>
                     <p className="text-sm text-white/30 font-medium">{t('tasks.subtitle')}</p>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex w-full flex-col items-start gap-3 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
+                     <div className="max-w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-sm backdrop-blur-xl">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                          {visibleTaskStatusSummary.map((item, index) => (
+                            <React.Fragment key={item.key}>
+                              {index > 0 && <div className="hidden h-4 w-px bg-white/10 sm:block" />}
+                              <div className="flex items-center gap-2">
+                                <div className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
+                                <span className={cn("text-sm font-black tracking-tight tabular-nums", item.valueClassName)}>
+                                  {item.count}
+                                </span>
+                                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/35">
+                                  {item.label}
+                                </span>
+                              </div>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                     </div>
                      <button
                         onClick={handleRefreshTasks}
                         disabled={!isConnected || isRefreshingTasks}
+                        aria-label={t('tasks.refresh')}
+                        title={t('tasks.refresh')}
                         className={cn(
-                          "px-4 py-2 rounded-xl border flex items-center gap-2 shadow-sm text-[10px] font-bold uppercase tracking-widest transition-all",
+                          "shrink-0 h-10 w-10 rounded-xl border flex items-center justify-center shadow-sm transition-all",
                           isConnected
                             ? "bg-white/5 border-white/10 text-white hover:bg-white/10"
                             : "bg-white/[0.03] border-white/5 text-white/20 cursor-not-allowed",
@@ -583,12 +674,7 @@ export default function App() {
                         )}
                       >
                         <RefreshCw size={14} className={cn(isRefreshingTasks && 'animate-spin')} />
-                        {t('tasks.refresh')}
                       </button>
-                     <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2 shadow-sm">
-                        <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                        <span className="text-[10px] font-bold text-white uppercase tracking-widest">{tasks.length} {t('tasks.active_count')}</span>
-                     </div>
                   </div>
                 </header>
 
@@ -605,8 +691,10 @@ export default function App() {
                         <div className={cn(
                           "w-14 h-14 rounded-[1.25rem] flex items-center justify-center shrink-0 shadow-xl border border-white/5 relative z-10",
                           task.status === 'running' ? "bg-white/10 text-white" :
+                          task.status === 'pending' ? "bg-amber-500/10 text-amber-300" :
                           task.status === 'success' ? "bg-green-500/10 text-green-500" :
                           task.status === 'failed' ? "bg-red-500/10 text-red-500" :
+                          task.status === 'canceled' ? "bg-white/5 text-white/35" :
                           "bg-white/5 text-white/20"
                         )}>
                           {task.status === 'running' ? <Activity size={24} className="animate-spin-slow" /> : <Terminal size={24} />}
@@ -618,7 +706,10 @@ export default function App() {
                             <span className={cn(
                               "text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest shadow-sm",
                               task.status === 'running' ? "bg-white text-[#080808]" :
+                              task.status === 'pending' ? "bg-amber-500/15 text-amber-300 border border-amber-400/15" :
                               task.status === 'success' ? "bg-green-600/20 text-green-400 border border-green-500/20" :
+                              task.status === 'failed' ? "bg-red-600/15 text-red-300 border border-red-500/20" :
+                              task.status === 'canceled' ? "bg-white/10 text-white/45 border border-white/10" :
                               "bg-white/10 text-white/40"
                             )}>
                               {t(`tasks.status.${task.status}`)}

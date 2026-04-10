@@ -96,8 +96,8 @@
     "monitor_title": "任务监控",
     "subtitle": "查看当前任务状态与执行进展。",
     "refresh": "刷新任务",
-    "active_count": "活跃任务",
-    "empty": "当前没有正在运行的任务。",
+    "total_count": "全部任务",
+    "empty": "当前没有任务。",
     "initializing": "正在初始化...",
     "identifier": "ID",
     "tokens_unit": "Token",
@@ -111,7 +111,8 @@
       "running": "运行中",
       "success": "成功",
       "failed": "失败",
-      "pending": "排队中"
+      "pending": "排队中",
+      "canceled": "已取消"
     }
   }
 }

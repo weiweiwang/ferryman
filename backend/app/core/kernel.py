@@ -1,6 +1,7 @@
 import logging
 import platform
 import time
+import inspect
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any, Dict
@@ -34,6 +35,23 @@ from app.models.database import Session, Message, Task
 from app.models.schemas import SkillModel, TaskStatus, Usage
 
 logger = logging.getLogger(__name__)
+
+
+def _summarize_tool_input_value(key: str, value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+
+    if isinstance(value, str):
+        if key in {"content", "text", "body", "markdown", "html", "instruction", "prompt"}:
+            return {"_summary": "omitted", "length": len(value)}
+        if len(value) > 240:
+            return f"{value[:237]}..."
+        return value
+
+    if isinstance(value, (bytes, bytearray)):
+        return {"_summary": "binary", "length": len(value)}
+
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -423,14 +441,24 @@ class FerrymanKernel:
 
                         input_summary = {}
                         try:
-                            for k, v in kwargs.items():
-                                if hasattr(v, "model_dump"):
-                                    input_summary[k] = v.model_dump()
-                                else:
-                                    input_summary[k] = v
+                            param_names = [
+                                name for name in inspect.signature(bound_tool_func).parameters.keys() if name != "ctx"
+                            ]
+                            merged_args: Dict[str, Any] = {}
+                            for name, value in zip(param_names, args):
+                                merged_args[name] = value
+                            merged_args.update(kwargs)
+
+                            for k, v in merged_args.items():
+                                input_summary[k] = _summarize_tool_input_value(k, v)
                             raw_input = json.dumps(input_summary, default=str)
                             if len(raw_input) > 2000:
-                                input_summary = {"_truncated": True, "size": len(raw_input)}
+                                preserved_keys = ("url", "file_path", "path", "directory", "command", "title", "skill_name")
+                                input_summary = {
+                                    k: v for k, v in input_summary.items() if k in preserved_keys
+                                }
+                                input_summary["_truncated"] = True
+                                input_summary["_size"] = len(raw_input)
                         except Exception:
                             input_summary = {"_serialization_error": True}
 

@@ -265,6 +265,15 @@ class MultiToolDummyToolkit:
 
         return [first_tool, second_tool]
 
+
+class FileSummaryDummyToolkit:
+    @staticmethod
+    def get_tools():
+        async def write_file(ctx, file_path: str, content: str):
+            return f"Wrote {file_path} ({len(content)})"
+
+        return [write_file]
+
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_wrapper():
     kernel = FerrymanKernel(settings=create_test_settings())
@@ -328,3 +337,33 @@ async def test_kernel_register_toolkit_preserves_each_tool_binding():
     assert await second_registered(ctx) == "second"
     assert first_registered.__name__ == "first_tool"
     assert second_registered.__name__ == "second_tool"
+
+
+@pytest.mark.asyncio
+async def test_kernel_register_toolkit_preserves_file_path_when_input_is_large():
+    kernel = FerrymanKernel(settings=create_test_settings())
+    agent = Agent('test')
+
+    import unittest.mock
+    agent.tool = unittest.mock.MagicMock()
+
+    kernel._register_toolkit(agent, FileSummaryDummyToolkit)
+    registered_tool = agent.tool.call_args[0][0]
+
+    mock_emit = AsyncMock()
+    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+
+    class MockContext:
+        def __init__(self, d):
+            self.deps = d
+
+    ctx = MockContext(deps)
+
+    long_content = "A" * 5000
+    res = await registered_tool(ctx, "reports/output.md", long_content)
+
+    assert res == "Wrote reports/output.md (5000)"
+    evt_start = mock_emit.call_args_list[0][0][0]
+    assert evt_start.payload.phase == ToolPhase.START
+    assert evt_start.payload.input["file_path"] == "reports/output.md"
+    assert evt_start.payload.input["content"] == {"_summary": "omitted", "length": 5000}

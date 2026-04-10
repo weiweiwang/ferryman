@@ -1,4 +1,4 @@
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -13,6 +13,12 @@ export const Markdown = ({ content }: MarkdownProps) => {
     <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-[#0d0d0d] prose-pre:border prose-pre:border-white/5 prose-code:text-blue-300">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => {
+          if (url.startsWith('file://')) {
+            return url;
+          }
+          return defaultUrlTransform(url);
+        }}
         components={{
         code({ node, inline, className, children, ...props }: any) {
           const match = /language-(\w+)/.exec(className || '');
@@ -34,10 +40,8 @@ export const Markdown = ({ content }: MarkdownProps) => {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  alert("准备打开路径: " + text);
                   invoke('open_local_file', { path: text }).catch(err => {
                     console.error("Failed native open:", err);
-                    alert("无法打开文件: " + err);
                   });
                 }}
                 title={`点击打开文件: ${text}`}

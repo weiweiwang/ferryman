@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export interface Task {
   id: string;
   title: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'canceled';
   progress?: string;
   updated_at?: string;
 }
