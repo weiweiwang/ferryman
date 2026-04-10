@@ -95,3 +95,16 @@ body {
 ::-webkit-scrollbar-thumb {
   @apply bg-white/[0.15] rounded-full hover:bg-white/30 transition-colors;
 }
+
+/* Fix: Text selection contrast in Dark Mode */
+::selection {
+  background-color: #3b82f6; /* Solid Blue instead of rgba to prevent antialiasing shadow */
+  color: #ffffff;
+  text-shadow: none;
+}
+
+::-moz-selection {
+  background-color: #3b82f6;
+  color: #ffffff;
+  text-shadow: none;
+}
