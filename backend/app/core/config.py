@@ -6,6 +6,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -13,6 +14,10 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+
+class ModelListEndpointUnavailable(RuntimeError):
+    """Raised when a provider does not expose a usable models endpoint."""
 
 
 class Settings(BaseSettings):
@@ -203,7 +208,7 @@ class Settings(BaseSettings):
             },
             "kimi": {
                 "label": "Kimi",
-                "placeholder_base_url": "https://api.moonshot.ai/v1",
+                "placeholder_base_url": "https://api.moonshot.cn/v1",
                 "list_mode": "openai_compatible",
                 "models": [
                     "kimi-k2.5",
@@ -212,6 +217,26 @@ class Settings(BaseSettings):
                     "kimi-k2-0905-preview",
                     "kimi-k2-turbo-preview",
                     "moonshot-v1-128k",
+                ],
+            },
+            "doubao": {
+                "label": "Doubao",
+                "placeholder_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                "list_mode": "openai_compatible",
+                "models": [
+                    "doubao-seed-2-0-pro-260215",
+                    "doubao-seed-2-0-lite-260215",
+                    "doubao-seed-2-0-mini-260215",
+                    "doubao-seed-2-0-code-preview-260215",
+                ],
+            },
+            "azure_openai": {
+                "label": "Azure OpenAI",
+                "placeholder_base_url": "https://your-resource.openai.azure.com/openai/v1",
+                "requires_base_url": True,
+                "list_mode": "openai_compatible",
+                "models": [
+                    "gpt-5.4-mini",
                 ],
             },
             "custom": {
@@ -248,30 +273,44 @@ class Settings(BaseSettings):
         for provider, definition in catalog.items():
             stored_config = Settings.get(f"llm.{provider}", {})
             api_key = str(stored_config.get("api_key", "")).strip()
-            base_url = str(stored_config.get("base_url", "")).strip() or definition.get("placeholder_base_url", "")
+            stored_base_url = str(stored_config.get("base_url", "")).strip()
+            default_base_url = "" if definition.get("requires_base_url") else definition.get("placeholder_base_url", "")
+            base_url = stored_base_url or default_base_url
             configured_model = str(stored_config.get("model", "")).strip()
 
             provider_models: List[str] = []
 
             if provider == "custom":
                 if api_key and base_url:
+                    try:
+                        provider_models = Settings._fetch_provider_models(
+                            provider=provider,
+                            api_key=api_key,
+                            base_url=base_url,
+                            list_mode=definition.get("list_mode", "openai_compatible"),
+                        )
+                    except ModelListEndpointUnavailable as exc:
+                        logger.exception(f"Model list endpoint unavailable for provider {provider}: {exc}")
+                        provider_models = []
+                    except Exception as exc:
+                        logger.exception(f"Failed to fetch models for provider {provider}: {exc}")
+                        provider_models = []
+                if configured_model:
+                    provider_models = [*provider_models, configured_model]
+            elif api_key and base_url:
+                try:
                     provider_models = Settings._fetch_provider_models(
                         provider=provider,
                         api_key=api_key,
                         base_url=base_url,
                         list_mode=definition.get("list_mode", "openai_compatible"),
                     )
-                if configured_model:
-                    provider_models = [*provider_models, configured_model]
-            elif api_key:
-                provider_models = Settings._fetch_provider_models(
-                    provider=provider,
-                    api_key=api_key,
-                    base_url=base_url,
-                    list_mode=definition.get("list_mode", "openai_compatible"),
-                )
-                if not provider_models:
+                except ModelListEndpointUnavailable as exc:
+                    logger.exception(f"Model list endpoint unavailable for provider {provider}: {exc}")
                     provider_models = list(definition.get("models", []))
+                except Exception as exc:
+                    logger.exception(f"Failed to fetch models for provider {provider}: {exc}")
+                    provider_models = []
 
             deduped_models = list(dict.fromkeys(model for model in provider_models if model))
             if deduped_models:
@@ -294,14 +333,21 @@ class Settings(BaseSettings):
             if list_mode == "gemini":
                 return Settings._fetch_gemini_models(api_key=api_key, base_url=base_url)
             model_ids = Settings._fetch_openai_compatible_models(api_key=api_key, base_url=base_url)
+            if provider == "openai":
+                return Settings._filter_openai_models(model_ids)
             if provider == "qwen":
                 return Settings._filter_qwen_models(model_ids)
             if provider == "kimi":
                 return Settings._filter_kimi_models(model_ids)
-            return model_ids
-        except Exception as exc:
-            logger.warning(f"Failed to fetch models for provider {provider}: {exc}")
-            return []
+            if provider == "doubao":
+                return Settings._filter_doubao_models(model_ids)
+            if provider == "azure_openai":
+                return Settings._filter_azure_openai_models(model_ids)
+            return Settings._filter_chat_model_ids(model_ids)
+        except HTTPError as exc:
+            if exc.code in {404, 405, 501}:
+                raise ModelListEndpointUnavailable(f"HTTP {exc.code}") from exc
+            raise
 
     @staticmethod
     def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None, query: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -346,7 +392,97 @@ class Settings(BaseSettings):
             for model_id in model_ids
             if model_id and not any(keyword in model_id.lower() for keyword in excluded_keywords)
         ]
-        return sorted(dict.fromkeys(filtered))
+        return Settings._dedupe_preserve_order(filtered)
+
+    @staticmethod
+    def _dedupe_preserve_order(model_ids: List[str]) -> List[str]:
+        return list(dict.fromkeys(model for model in model_ids if model))
+
+    @staticmethod
+    def _extract_numeric_version(value: str) -> tuple[int, ...]:
+        match = re.search(r"(\d+(?:[.-]\d+)*)", value)
+        if not match:
+            return ()
+        return tuple(int(part) for part in re.split(r"[.-]", match.group(1)) if part.isdigit())
+
+    @staticmethod
+    def _model_date_score(model_id: str) -> tuple[int, ...]:
+        normalized = model_id.lower()
+        full_date = re.search(r"(20\d{2})[-.]?(\d{2})[-.]?(\d{2})", normalized)
+        if full_date:
+            return tuple(int(part) for part in full_date.groups())
+
+        short_date = re.search(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)", normalized)
+        if short_date:
+            year, month, day = (int(part) for part in short_date.groups())
+            return (2000 + year, month, day)
+
+        return ()
+
+    @staticmethod
+    def _extract_gpt_version(model_id: str) -> tuple[int, ...]:
+        normalized = model_id.lower().strip()
+        match = re.match(r"gpt-(\d+)(?:\.(\d+))?", normalized)
+        if not match:
+            return ()
+
+        major = int(match.group(1))
+        minor = int(match.group(2)) if match.group(2) else None
+        if major == 35 and minor is None:
+            return (3, 5)
+        if minor is None:
+            return (major,)
+        return (major, minor)
+
+    @staticmethod
+    def _variant_priority(model_id: str, variants: tuple[str, ...]) -> int:
+        normalized = model_id.lower()
+        for index, variant in enumerate(variants):
+            if re.search(rf"(?:^|-){re.escape(variant)}(?:-|$)", normalized):
+                return index
+        return len(variants)
+
+    @staticmethod
+    def _filter_openai_models(model_ids: List[str], limit: int = 6) -> List[str]:
+        excluded_keywords = (
+            "audio",
+            "canvas",
+            "computer-use",
+            "dall-e",
+            "embedding",
+            "image",
+            "moderation",
+            "realtime",
+            "search",
+            "speech",
+            "tts",
+            "transcribe",
+            "vision",
+            "whisper",
+        )
+        candidates = []
+        for model_id in model_ids:
+            normalized = model_id.lower().strip()
+            if not normalized.startswith(("gpt-", "o")):
+                continue
+            if any(keyword in normalized for keyword in excluded_keywords):
+                continue
+            version = Settings._extract_gpt_version(normalized)
+            if not version:
+                continue
+            candidates.append((version, Settings._model_date_score(normalized), model_id))
+
+        if not candidates:
+            return []
+
+        latest_major = max(candidate[0][0] for candidate in candidates)
+        latest_family = [
+            candidate
+            for candidate in candidates
+            if candidate[0][0] == latest_major
+        ]
+        latest_family.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return Settings._dedupe_preserve_order([item[2] for item in latest_family])[:limit]
 
     @staticmethod
     def _has_trailing_build_or_date_variant(model_id: str) -> bool:
@@ -398,14 +534,6 @@ class Settings(BaseSettings):
 
     @staticmethod
     def _filter_qwen_models(model_ids: List[str]) -> List[str]:
-        allowed_prefixes = (
-            "qwen-max",
-            "qwen-plus",
-            "qwen-omni",
-        )
-        allowed_exact = {
-            "qwen3.5-plus",
-        }
         excluded_keywords = (
             "embedding",
             "embed",
@@ -416,30 +544,59 @@ class Settings(BaseSettings):
             "tts",
             "asr",
             "rerank",
+            "realtime",
+            "livetranslate",
+            "deep-research",
+            "deep-search",
+            "character",
+            "math",
+            "mt-",
+            "coder",
+        )
+        product_pattern = re.compile(
+            r"^qwen(?:(?P<version>\d+(?:\.\d+)?)?)?"
+            r"-(?P<variant>max|plus|turbo|flash|omni-plus|omni-flash)"
+            r"(?:-\d{4}-\d{2}-\d{2})?$"
         )
 
-        filtered = []
+        candidate_by_alias: Dict[str, tuple[tuple[int, ...], int, bool, tuple[int, ...], str]] = {}
         for model_id in model_ids:
-            normalized = model_id.lower()
-            if normalized in allowed_exact:
-                filtered.append(model_id)
-                continue
-            if not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
+            normalized = model_id.lower().strip()
+            match = product_pattern.match(normalized)
+            if not match:
                 continue
             if any(keyword in normalized for keyword in excluded_keywords):
                 continue
-            if Settings._has_trailing_build_or_date_variant(normalized):
-                continue
-            filtered.append(model_id)
+            family = Settings._extract_numeric_version(match.group("version") or "0")
+            variant_rank = {
+                "plus": 0,
+                "omni-plus": 1,
+                "max": 2,
+                "flash": 3,
+                "omni-flash": 4,
+                "turbo": 5,
+            }.get(match.group("variant"), 99)
+            date_score = Settings._model_date_score(normalized)
+            canonical = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", normalized)
+            has_date_suffix = bool(date_score)
+            candidate = (family, variant_rank, has_date_suffix, date_score, model_id)
+            existing = candidate_by_alias.get(canonical)
+            if (
+                existing is None
+                or (existing[2] and not has_date_suffix)
+                or (existing[2] == has_date_suffix and date_score > existing[3])
+            ):
+                candidate_by_alias[canonical] = candidate
 
-        return sorted(dict.fromkeys(filtered))
+        if not candidate_by_alias:
+            return []
+
+        candidates = list(candidate_by_alias.values())
+        candidates.sort(key=lambda item: (item[0], -item[1], item[3]), reverse=True)
+        return Settings._dedupe_preserve_order([item[4] for item in candidates])[:6]
 
     @staticmethod
     def _filter_kimi_models(model_ids: List[str]) -> List[str]:
-        allowed_prefixes = (
-            "kimi-k2",
-            "moonshot-v1",
-        )
         deprecated_models = {
             "kimi-latest",
             "kimi-thinking-preview",
@@ -456,18 +613,118 @@ class Settings(BaseSettings):
             "rerank",
         )
 
-        filtered = []
+        candidates = []
         for model_id in model_ids:
             normalized = model_id.lower().strip()
             if not normalized or normalized in deprecated_models:
                 continue
-            if not any(normalized.startswith(prefix) for prefix in allowed_prefixes):
+            if not normalized.startswith(("kimi-k", "moonshot-v")):
                 continue
             if any(keyword in normalized for keyword in excluded_keywords):
                 continue
-            filtered.append(model_id)
+            kimi_version = re.search(r"kimi-k(\d+(?:\.\d+)?)", normalized)
+            moonshot_version = re.search(r"moonshot-v(\d+(?:\.\d+)?)", normalized)
+            version_source = kimi_version or moonshot_version
+            family = tuple(int(part) for part in version_source.group(1).split(".")) if version_source else ()
+            candidates.append((family, Settings._model_date_score(normalized), model_id))
 
-        return sorted(dict.fromkeys(filtered))
+        if not candidates:
+            return []
+
+        latest_kimi = [candidate for candidate in candidates if candidate[2].lower().startswith("kimi-k")]
+        selected = latest_kimi or candidates
+        latest_version = max([candidate[0] for candidate in selected if candidate[0]] or [()])
+        if latest_version:
+            selected = [candidate for candidate in selected if candidate[0] == latest_version]
+        selected.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return Settings._dedupe_preserve_order([item[2] for item in selected])[:6]
+
+    @staticmethod
+    def _filter_doubao_models(model_ids: List[str]) -> List[str]:
+        excluded_keywords = (
+            "embedding",
+            "embed",
+            "image",
+            "seedream",
+            "seededit",
+            "speech",
+            "tts",
+            "asr",
+            "audio",
+            "video-generation",
+            "rerank",
+        )
+
+        candidates = []
+        for model_id in model_ids:
+            normalized = model_id.lower().strip()
+            if not normalized.startswith("doubao-seed-"):
+                continue
+            if any(keyword in normalized for keyword in excluded_keywords):
+                continue
+            match = re.match(r"doubao-seed-(\d+)-(\d+)", normalized)
+            if not match:
+                continue
+            family = (int(match.group(1)), int(match.group(2)))
+            candidates.append((
+                family,
+                Settings._variant_priority(normalized, ("pro", "lite", "mini", "code")),
+                Settings._model_date_score(normalized),
+                model_id,
+            ))
+
+        if not candidates:
+            return []
+
+        latest_family = max(candidate[0] for candidate in candidates)
+        selected = [candidate for candidate in candidates if candidate[0] == latest_family]
+        selected.sort(key=lambda item: (item[1], tuple(-part for part in item[2])))
+        return Settings._dedupe_preserve_order([item[3] for item in selected])[:6]
+
+    @staticmethod
+    def _filter_azure_openai_models(model_ids: List[str]) -> List[str]:
+        excluded_keywords = (
+            "audio",
+            "canvas",
+            "computer-use",
+            "dall-e",
+            "embedding",
+            "image",
+            "realtime",
+            "search",
+            "speech",
+            "tts",
+            "transcribe",
+            "vision",
+            "whisper",
+        )
+
+        candidates = []
+        for model_id in model_ids:
+            normalized = model_id.lower().strip()
+            match = re.match(r"^(gpt-\d+(?:\.\d+)*-[a-z0-9]+)(?:-\d{4}-\d{2}-\d{2})?$", normalized)
+            if not match:
+                continue
+            if any(keyword in normalized for keyword in excluded_keywords):
+                continue
+            alias = match.group(1)
+            version = Settings._extract_gpt_version(alias)
+            if not version:
+                continue
+            candidates.append((
+                version,
+                Settings._variant_priority(alias, ("pro", "mini", "nano")),
+                Settings._model_date_score(normalized),
+                alias,
+            ))
+
+        if not candidates:
+            return []
+
+        latest_version = max(candidate[0] for candidate in candidates)
+        selected = [candidate for candidate in candidates if candidate[0] == latest_version]
+        selected.sort(key=lambda item: (item[1], tuple(-part for part in item[2])))
+        return Settings._dedupe_preserve_order([item[3] for item in selected])[:6]
 
     @staticmethod
     def _fetch_openai_compatible_models(api_key: str, base_url: str) -> List[str]:
@@ -483,7 +740,7 @@ class Settings(BaseSettings):
             for item in payload.get("data", [])
             if isinstance(item, dict)
         ]
-        return Settings._filter_chat_model_ids(model_ids)
+        return model_ids
 
     @staticmethod
     def _fetch_anthropic_models(api_key: str, base_url: str) -> List[str]:

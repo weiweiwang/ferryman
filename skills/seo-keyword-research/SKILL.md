@@ -1,11 +1,14 @@
 ---
 name: seo-keyword-research
 description: >
-  EXECUTE a professional-grade SEO Keyword Audit & Strategy. Use this for deep keyword discovery, 
-  intent classification (ICE), and competitor analysis. Outputs an actionable SEO roadmap and spreadsheet. 
-  Mandatory for all SEO strategy requests.
-version: 2.0.0
+  Use this for SEO keyword research, SERP analysis, search intent classification,
+  competitor content-gap analysis, and content roadmap planning. Produces a Markdown
+  strategy report plus a keyword CSV. Prefer this for keyword/content strategy requests;
+  use backlink-specific skills for link-building discovery.
+version: 0.1.0
 author: Ferryman
+created: 2026-02-23
+updated: 2026-04-14
 ---
 
 # SEO Keyword Research
@@ -17,7 +20,7 @@ You are a Senior SEO Strategist. Your core objective is to perform rigorous, dat
 1. **Extract Seeds**: Derive seed keywords from the user's input (keyword, URL, or project directory).
 2. **Analyze SERP**: Gather live search intelligence from Google for each seed.
 3. **Evaluate & Prioritize**: Score keywords on volume, difficulty, and intent — then cluster them into a content strategy.
-4. **Report**: Save the final analysis as `reports/keyword-research-<topic>-<current_date>.md`. Refer to `assets/report-template.md` for structural guidance.
+4. **Report**: Save the final analysis as `reports/keyword-research-<topic>-<current_date>.md`. Also save the keyword spreadsheet as `reports/keyword-research-<topic>-<current_date>.csv` with columns: `keyword`, `intent`, `volume`, `kd`, `trend`, `cluster`, `priority`, `leader_to_beat`, `status`. Refer to `assets/report-template.md` for structural guidance.
 
 ## Input Processing
 

@@ -81,6 +81,10 @@ def test_websocket_llm_and_model_config_flow(client):
             return ["gpt-4o"]
         if provider == "kimi":
             return ["kimi-k2.5"]
+        if provider == "doubao":
+            return ["doubao-seed-2-0-pro-260215"]
+        if provider == "azure_openai":
+            return ["gpt-5.4-mini"]
         if provider == "custom":
             return ["custom-chat-model"]
         return []
@@ -104,10 +108,18 @@ def test_websocket_llm_and_model_config_flow(client):
             response = send_rpc(websocket, "get_llm_configs", request_id=3)
             openai_config = next((c for c in response["result"] if c["provider"] == "openai"), None)
             kimi_config = next((c for c in response["result"] if c["provider"] == "kimi"), None)
+            doubao_config = next((c for c in response["result"] if c["provider"] == "doubao"), None)
+            azure_config = next((c for c in response["result"] if c["provider"] == "azure_openai"), None)
             assert openai_config is not None
             assert kimi_config is not None
+            assert doubao_config is not None
+            assert azure_config is not None
             assert kimi_config["metadata"]["label"] == "Kimi"
-            assert kimi_config["metadata"]["placeholder_base_url"] == "https://api.moonshot.ai/v1"
+            assert kimi_config["metadata"]["placeholder_base_url"] == "https://api.moonshot.cn/v1"
+            assert doubao_config["metadata"]["label"] == "Doubao"
+            assert doubao_config["metadata"]["placeholder_base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
+            assert azure_config["metadata"]["label"] == "Azure OpenAI"
+            assert azure_config["metadata"]["placeholder_base_url"] == "https://your-resource.openai.azure.com/openai/v1"
             assert openai_config["api_key"] == "sk-test-key"
             assert openai_config["base_url"] == "https://test.api"
 
@@ -128,6 +140,8 @@ def test_websocket_llm_and_model_config_flow(client):
             assert "gemini" not in response["result"]
             assert "qwen" not in response["result"]
             assert "kimi" not in response["result"]
+            assert "doubao" not in response["result"]
+            assert "azure_openai" not in response["result"]
 
             response = send_rpc(
                 websocket,
@@ -147,21 +161,50 @@ def test_websocket_llm_and_model_config_flow(client):
                 websocket,
                 "set_llm_config",
                 {
-                    "provider": "custom",
-                    "api_key": "custom-key",
-                    "base_url": "https://custom.example.com/v1",
-                    "model": "custom-chat-model",
+                    "provider": "doubao",
+                    "api_key": "sk-doubao",
                 },
                 request_id=9,
             )
             assert response["result"] == {"status": "success"}
 
-            response = send_rpc(websocket, "get_llm_configs", request_id=10)
+            response = send_rpc(websocket, "get_available_models", request_id=10)
+            assert response["result"]["doubao"] == ["doubao-seed-2-0-pro-260215"]
+
+            response = send_rpc(
+                websocket,
+                "set_llm_config",
+                {
+                    "provider": "azure_openai",
+                    "api_key": "sk-azure",
+                    "base_url": "https://example.openai.azure.com/openai/v1",
+                },
+                request_id=101,
+            )
+            assert response["result"] == {"status": "success"}
+
+            response = send_rpc(websocket, "get_available_models", request_id=102)
+            assert response["result"]["azure_openai"] == ["gpt-5.4-mini"]
+
+            response = send_rpc(
+                websocket,
+                "set_llm_config",
+                {
+                    "provider": "custom",
+                    "api_key": "custom-key",
+                    "base_url": "https://custom.example.com/v1",
+                    "model": "custom-chat-model",
+                },
+                request_id=11,
+            )
+            assert response["result"] == {"status": "success"}
+
+            response = send_rpc(websocket, "get_llm_configs", request_id=12)
             custom_config = next((c for c in response["result"] if c["provider"] == "custom"), None)
             assert custom_config is not None
             assert custom_config["model"] == "custom-chat-model"
 
-            response = send_rpc(websocket, "get_available_models", request_id=11)
+            response = send_rpc(websocket, "get_available_models", request_id=13)
             assert response["result"]["custom"] == ["custom-chat-model"]
         finally:
             Settings._fetch_provider_models = original_fetcher
@@ -174,12 +217,21 @@ def test_websocket_list_skills(client, monkeypatch):
             description="Second skill",
             version="1.1.0",
             author="Ferryman",
+            updated="2026-04-14",
         ),
         "a-skill": SimpleNamespace(
             name="a-skill",
             description="First skill",
             version="1.0.0",
             author="Tester",
+            created="2026-04-10",
+            updated="2026-04-11",
+        ),
+        "legacy-skill": SimpleNamespace(
+            name="legacy-skill",
+            description="Older skill metadata without timestamps",
+            version="0.9.0",
+            author="Legacy",
         ),
     }
 
@@ -187,16 +239,28 @@ def test_websocket_list_skills(client, monkeypatch):
         response = send_rpc(websocket, "list_skills", request_id=7)
         assert response["result"] == [
             {
-                "name": "a-skill",
-                "description": "First skill",
-                "version": "1.0.0",
-                "author": "Tester",
-            },
-            {
                 "name": "b-skill",
                 "description": "Second skill",
                 "version": "1.1.0",
                 "author": "Ferryman",
+                "created": None,
+                "updated": "2026-04-14",
+            },
+            {
+                "name": "a-skill",
+                "description": "First skill",
+                "version": "1.0.0",
+                "author": "Tester",
+                "created": "2026-04-10",
+                "updated": "2026-04-11",
+            },
+            {
+                "name": "legacy-skill",
+                "description": "Older skill metadata without timestamps",
+                "version": "0.9.0",
+                "author": "Legacy",
+                "created": None,
+                "updated": None,
             },
         ]
 
@@ -376,6 +440,8 @@ def test_websocket_session_message_and_task_flows(client, session):
             "tasks": [
                 {
                     "id": task_1.id,
+                    "session_id": "session-1",
+                    "parent_id": None,
                     "title": "Task One",
                     "status": "running",
                     "progress": "step 1",
@@ -383,7 +449,39 @@ def test_websocket_session_message_and_task_flows(client, session):
                 }
             ],
             "next_cursor": None,
+            "summary": {
+                "pending": 0,
+                "running": 1,
+                "success": 0,
+                "failed": 0,
+                "canceled": 0,
+                "total": 1,
+            },
         }
+
+        response = send_rpc(websocket, "get_task", {"task_id": task_1.id}, request_id=151)
+        assert response["result"]["task"]["instruction"] == ""
+
+        response = send_rpc(
+            websocket,
+            "update_task",
+            {
+                "task_id": task_1.id,
+                "title": "Task One Updated",
+                "status": "success",
+                "progress_note": "done",
+                "instruction": "Run the task",
+                "payload": {"priority": "high"},
+            },
+            request_id=152,
+        )
+        assert response["result"] == {"status": "success"}
+
+        response = send_rpc(websocket, "get_task", {"task_id": task_1.id}, request_id=153)
+        assert response["result"]["task"]["title"] == "Task One Updated"
+        assert response["result"]["task"]["status"] == "success"
+        assert response["result"]["task"]["instruction"] == "Run the task"
+        assert response["result"]["task"]["payload"] == {"priority": "high"}
 
         response = send_rpc(websocket, "list_schedules", request_id=16)
         assert response["result"] == {
@@ -393,11 +491,42 @@ def test_websocket_session_message_and_task_flows(client, session):
                     "name": "Nightly",
                     "cron": "0 0 * * *",
                     "enabled": True,
+                    "last_run_at": None,
+                    "next_run_at": None,
                     "updated_at": schedule.updated_at.isoformat(),
                 }
             ],
             "next_cursor": None,
         }
+
+        response = send_rpc(websocket, "get_schedule", {"schedule_id": "schedule-1"}, request_id=161)
+        assert response["result"]["schedule"]["instruction"] == ""
+
+        response = send_rpc(
+            websocket,
+            "update_schedule",
+            {
+                "schedule_id": "schedule-1",
+                "name": "Nightly Updated",
+                "cron": "0 8 * * *",
+                "enabled": False,
+                "instruction": "Run every morning",
+            },
+            request_id=162,
+        )
+        assert response["result"] == {"status": "success"}
+
+        response = send_rpc(websocket, "get_schedule", {"schedule_id": "schedule-1"}, request_id=163)
+        assert response["result"]["schedule"]["name"] == "Nightly Updated"
+        assert response["result"]["schedule"]["cron"] == "0 8 * * *"
+        assert response["result"]["schedule"]["enabled"] is False
+        assert response["result"]["schedule"]["instruction"] == "Run every morning"
+
+        response = send_rpc(websocket, "delete_task", {"task_id": task_1.id}, request_id=164)
+        assert response["result"] == {"status": "success"}
+
+        response = send_rpc(websocket, "delete_schedule", {"schedule_id": "schedule-1"}, request_id=165)
+        assert response["result"] == {"status": "success"}
 
         response = send_rpc(
             websocket,

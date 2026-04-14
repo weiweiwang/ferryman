@@ -2,6 +2,7 @@
 
 import argparse
 import re
+from datetime import date
 from pathlib import Path
 
 
@@ -36,12 +37,15 @@ def main() -> int:
     target_dir.mkdir(parents=True, exist_ok=False)
     skill_md = target_dir / "SKILL.md"
     description = args.description.strip() or f"Describe when to use the {args.skill_name} skill."
+    today = date.today().isoformat()
     skill_md.write_text(
         f"""---
 name: {args.skill_name}
 description: {description}
 version: 0.1.0
 author: Ferryman
+created: {today}
+updated: {today}
 ---
 
 # {args.skill_name.replace('-', ' ').title()}

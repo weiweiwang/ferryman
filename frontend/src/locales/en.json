@@ -6,7 +6,13 @@
     "deterministic_kernel": "Reliable Execution"
   },
   "common": {
-    "error_prefix": "Error"
+    "error_prefix": "Error",
+    "load_more": "Load More",
+    "loading": "Loading",
+    "save": "Save Changes",
+    "saving": "Saving",
+    "delete": "Delete",
+    "cancel": "Cancel"
   },
   "browser": {
     "chrome_required": {
@@ -19,6 +25,7 @@
     "chat": "Chat",
     "sessions": "Sessions",
     "tasks": "Tasks",
+    "schedules": "Schedules",
     "settings": "Settings",
     "skills": "Skills",
     "new_chat": "New Chat",
@@ -32,13 +39,24 @@
     "empty": "No skills are available right now.",
     "version": "Version",
     "author": "Author",
-    "unknown_author": "Unknown"
+    "created": "Created",
+    "updated": "Updated",
+    "unknown_author": "Unknown",
+    "unknown_date": "Unknown"
   },
   "chat": {
     "welcome_title": "Ferryman",
     "welcome_subtitle": "\"Turn intent into results.\"",
+    "command_label": "Pinned Workflows",
     "placeholder": "Issue an instruction to Ferryman...",
     "placeholder_full": "Issue an instruction to Ferryman... (⌘/Ctrl + Enter)",
+    "send_shortcut": "⌘/Ctrl↵",
+    "send_shortcut_hint": "Send with ⌘/Ctrl + Enter",
+    "send_shortcut_mod_enter_hint": "Send with ⌘/Ctrl + Enter",
+    "send_shortcut_enter_hint": "Enter to send, Shift + Enter for newline",
+    "send_mode": "Change send behavior",
+    "send_mode_mod_enter": "⌘/Ctrl + Enter to send",
+    "send_mode_enter": "Enter to send",
     "untitled": "New Chat",
     "schedules_drawer_title": "Schedules",
     "tools": {
@@ -71,8 +89,10 @@
       "keyword_prompt": "Perform deep SEO keyword research for geosolver.app, analyze competitors, and provide an action plan.",
       "backlink_title": "Backlink Research",
       "backlink_prompt": "Discover free, replicable, and high-value backlink submission opportunities for geosolver.app.",
-      "stock_title": "Multi-dimensional Stock Audit",
-      "stock_prompt": "Perform a value assessment for Tencent (0700.HK)."
+      "stock_title": "Intrinsic Stock Valuation",
+      "stock_prompt": "Use the stock-analyzer skill to perform an intrinsic value assessment for Tencent (0700.HK). Pull the last 5 years of financial data, analyze revenue, earnings, free cash flow, ROIC, balance-sheet quality, and margin of safety, then combine the valuation with technical structure to judge whether the current price is attractive for long-term buying. Produce an actionable investment research report.",
+      "daily_dashboard_title": "Daily Focus Cockpit",
+      "daily_dashboard_prompt": "Use the frontend-design skill to build a directly usable local “Daily Focus Cockpit” tool for me. Requirements: single-file HTML or runnable in the current frontend stack; include today’s 3 priorities, a Pomodoro timer, completion states, lightweight stats, and localStorage persistence; the visual direction should feel like premium desktop productivity software, not a template and not a stack of ordinary cards. When finished, tell me the file path and how to open it."
     }
   },
   "settings": {
@@ -90,8 +110,6 @@
     "logs_refresh": "Refresh Logs",
     "logs_app_tab": "Service Logs",
     "logs_sidecar_tab": "Startup Diagnostics",
-    "logs_app_path": "Service log file",
-    "logs_sidecar_path": "Startup diagnostic file",
     "logs_empty": "No log output available yet.",
     "logs_unavailable": "Unavailable",
     "logs_load_failed": "Failed to load logs.",
@@ -106,9 +124,25 @@
     "missing": "Missing"
   },
   "tasks": {
+    "title": "Tasks",
     "monitor_title": "Task Monitor",
-    "subtitle": "Track task status and the latest execution progress.",
+    "subtitle": "Review, edit, and clean up persistent work items.",
     "refresh": "Refresh Tasks",
+    "list_title": "Task List",
+    "detail_title": "Task Details",
+    "select_empty": "Select a task to view details.",
+    "no_progress": "No progress note yet",
+    "field_title": "Task Title",
+    "field_status": "Status",
+    "field_progress": "Progress Note",
+    "field_instruction": "Instruction",
+    "field_payload": "Payload",
+    "field_created_at": "Created",
+    "field_updated_at": "Updated",
+    "field_finished_at": "Finished",
+    "delete_title": "Delete Task?",
+    "delete_description": "“{name}” and its saved execution context will be deleted. This cannot be undone.",
+    "confirm_delete": "Delete Task",
     "total_count": "Total Tasks",
     "empty": "There are no tasks right now.",
     "initializing": "Initializing...",
@@ -127,5 +161,28 @@
       "pending": "pending",
       "canceled": "canceled"
     }
+  },
+  "schedules": {
+    "title": "Schedules",
+    "subtitle": "Manage workflows that run automatically on a recurring cadence.",
+    "refresh": "Refresh Schedules",
+    "list_title": "Schedule List",
+    "detail_title": "Schedule Details",
+    "empty": "There are no schedules right now.",
+    "select_empty": "Select a schedule to view details.",
+    "no_instruction": "No instruction yet",
+    "enabled": "Enabled",
+    "disabled": "Paused",
+    "field_name": "Name",
+    "field_cron": "Cron Expression",
+    "field_instruction": "Instruction",
+    "field_last_run": "Last Run",
+    "field_next_run": "Next Run",
+    "field_created_at": "Created",
+    "field_updated_at": "Updated",
+    "cron_hint": "Example: 0 8 * * * runs every day at 08:00.",
+    "delete_title": "Delete Schedule?",
+    "delete_description": "“{name}” will no longer run automatically. This cannot be undone.",
+    "confirm_delete": "Delete Schedule"
   }
 }

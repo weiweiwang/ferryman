@@ -66,6 +66,11 @@ def test_init_llm_model_uses_moonshot_provider_for_kimi(monkeypatch):
 
     captured = {}
 
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+            captured["client_instance"] = self
+
     class FakeMoonshotProvider:
         def __init__(self, **kwargs):
             captured["provider_kwargs"] = kwargs
@@ -75,6 +80,7 @@ def test_init_llm_model_uses_moonshot_provider_for_kimi(monkeypatch):
         captured["provider"] = provider
         return "kimi-model"
 
+    monkeypatch.setattr("openai.AsyncOpenAI", FakeAsyncOpenAI)
     monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
     monkeypatch.setattr("pydantic_ai.providers.moonshotai.MoonshotAIProvider", FakeMoonshotProvider)
 
@@ -83,7 +89,11 @@ def test_init_llm_model_uses_moonshot_provider_for_kimi(monkeypatch):
     assert kernel._init_llm_model() == "kimi-model"
     assert captured["model_name"] == "kimi-k2.5"
     assert isinstance(captured["provider"], FakeMoonshotProvider)
-    assert captured["provider_kwargs"] == {"api_key": "sk-test"}
+    assert captured["client_kwargs"] == {
+        "api_key": "sk-test",
+        "base_url": "https://api.moonshot.cn/v1",
+    }
+    assert captured["provider_kwargs"] == {"openai_client": captured["client_instance"]}
 
 
 def test_init_llm_model_supports_custom_kimi_base_url(monkeypatch):
@@ -123,6 +133,73 @@ def test_init_llm_model_supports_custom_kimi_base_url(monkeypatch):
         "base_url": "https://proxy.example.com/v1",
     }
     assert captured["provider_kwargs"] == {"openai_client": captured["client_instance"]}
+
+
+def test_init_llm_model_uses_openai_provider_for_doubao(monkeypatch):
+    settings = create_test_settings()
+    monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "doubao:doubao-seed-2-0-pro-260215")
+    monkeypatch.setattr(Settings, "get_provider_llm_config", lambda self, provider: {"api_key": "sk-test"})
+
+    captured = {}
+
+    class FakeOpenAIProvider:
+        def __init__(self, **kwargs):
+            captured["provider_kwargs"] = kwargs
+
+    def fake_openai_chat_model(model_name, provider):
+        captured["model_name"] = model_name
+        captured["provider"] = provider
+        return "doubao-model"
+
+    monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
+    monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider", FakeOpenAIProvider)
+
+    kernel = FerrymanKernel(settings=settings)
+
+    assert kernel._init_llm_model() == "doubao-model"
+    assert captured["model_name"] == "doubao-seed-2-0-pro-260215"
+    assert isinstance(captured["provider"], FakeOpenAIProvider)
+    assert captured["provider_kwargs"] == {
+        "api_key": "sk-test",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    }
+
+
+def test_init_llm_model_uses_openai_provider_for_azure_openai(monkeypatch):
+    settings = create_test_settings()
+    monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "azure_openai:gpt-5.4-mini")
+    monkeypatch.setattr(
+        Settings,
+        "get_provider_llm_config",
+        lambda self, provider: {
+            "api_key": "sk-test",
+            "base_url": "https://example.openai.azure.com/openai/v1",
+        },
+    )
+
+    captured = {}
+
+    class FakeOpenAIProvider:
+        def __init__(self, **kwargs):
+            captured["provider_kwargs"] = kwargs
+
+    def fake_openai_chat_model(model_name, provider):
+        captured["model_name"] = model_name
+        captured["provider"] = provider
+        return "azure-model"
+
+    monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
+    monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider", FakeOpenAIProvider)
+
+    kernel = FerrymanKernel(settings=settings)
+
+    assert kernel._init_llm_model() == "azure-model"
+    assert captured["model_name"] == "gpt-5.4-mini"
+    assert isinstance(captured["provider"], FakeOpenAIProvider)
+    assert captured["provider_kwargs"] == {
+        "api_key": "sk-test",
+        "base_url": "https://example.openai.azure.com/openai/v1",
+    }
 
 
 # --- test_agent_closure.py ---

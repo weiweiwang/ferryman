@@ -6,7 +6,13 @@
     "deterministic_kernel": "稳定执行"
   },
   "common": {
-    "error_prefix": "错误"
+    "error_prefix": "错误",
+    "load_more": "加载更多",
+    "loading": "加载中",
+    "save": "保存修改",
+    "saving": "保存中",
+    "delete": "删除",
+    "cancel": "取消"
   },
   "browser": {
     "chrome_required": {
@@ -19,6 +25,7 @@
     "chat": "对话",
     "sessions": "会话历史",
     "tasks": "任务队列",
+    "schedules": "定时任务",
     "settings": "系统设置",
     "skills": "技能中心",
     "new_chat": "开启新对话",
@@ -32,13 +39,24 @@
     "empty": "暂时没有可用技能。",
     "version": "版本",
     "author": "作者",
-    "unknown_author": "未知"
+    "created": "创建",
+    "updated": "更新",
+    "unknown_author": "未知",
+    "unknown_date": "未知"
   },
   "chat": {
     "welcome_title": "Ferryman",
     "welcome_subtitle": "“把想法转化为可执行的结果。”",
+    "command_label": "常用工作流",
     "placeholder": "向Ferryman下达指令...",
     "placeholder_full": "向Ferryman下达指令... (⌘/Ctrl + Enter发送)",
+    "send_shortcut": "⌘/Ctrl↵",
+    "send_shortcut_hint": "使用⌘/Ctrl + Enter发送",
+    "send_shortcut_mod_enter_hint": "⌘/Ctrl + Enter发送",
+    "send_shortcut_enter_hint": "Enter发送，Shift + Enter换行",
+    "send_mode": "切换发送方式",
+    "send_mode_mod_enter": "⌘/Ctrl + Enter发送",
+    "send_mode_enter": "Enter发送",
     "untitled": "新对话",
     "schedules_drawer_title": "定时任务列表",
     "tools": {
@@ -71,8 +89,10 @@
       "keyword_prompt": "为geosolver.app进行深度的SEO关键词研究，分析竞争对手并给出行动方案。",
       "backlink_title": "外链机会挖掘",
       "backlink_prompt": "为geosolver.app寻找免费、可复刻的高价值外链提交机会。",
-      "stock_title": "股票多维审计",
-      "stock_prompt": "对腾讯(0700.HK)进行价值评估。"
+      "stock_title": "股票内在价值评估",
+      "stock_prompt": "使用stock-analyzer技能，对腾讯(0700.HK)进行内在价值评估。请获取近5年财务数据，分析收入、利润、自由现金流、ROIC、资产负债质量和估值安全边际，并结合技术结构判断当前价格是否具备长期买入吸引力。最终生成一份可落地的投资研究报告。",
+      "daily_dashboard_title": "今日效率驾驶舱",
+      "daily_dashboard_prompt": "使用frontend-design技能，为我开发一个可直接使用的“今日效率驾驶舱”本地小工具。要求：单文件HTML或当前前端栈可运行；包含今日3件事、番茄钟、完成状态、轻量统计和localStorage持久化；视觉方向要像高端桌面效率软件，不要模板感，不要普通卡片堆叠。完成后告诉我文件路径和打开方式。"
     }
   },
   "settings": {
@@ -90,8 +110,6 @@
     "logs_refresh": "刷新日志",
     "logs_app_tab": "服务运行日志",
     "logs_sidecar_tab": "启动诊断日志",
-    "logs_app_path": "服务运行日志文件",
-    "logs_sidecar_path": "启动诊断日志文件",
     "logs_empty": "暂无可显示的日志内容。",
     "logs_unavailable": "暂无",
     "logs_load_failed": "加载日志失败。",
@@ -106,9 +124,25 @@
     "missing": "待配置"
   },
   "tasks": {
+    "title": "任务队列",
     "monitor_title": "任务监控",
-    "subtitle": "查看当前任务状态与执行进展。",
+    "subtitle": "查看、编辑和清理所有持久化任务。",
     "refresh": "刷新任务",
+    "list_title": "任务列表",
+    "detail_title": "任务详情",
+    "select_empty": "选择一个任务查看详情。",
+    "no_progress": "暂无进度说明",
+    "field_title": "任务标题",
+    "field_status": "状态",
+    "field_progress": "进度说明",
+    "field_instruction": "执行指令",
+    "field_payload": "Payload",
+    "field_created_at": "创建时间",
+    "field_updated_at": "更新时间",
+    "field_finished_at": "完成时间",
+    "delete_title": "删除任务？",
+    "delete_description": "“{name}”及其保存的执行上下文将被删除。这个操作无法撤销。",
+    "confirm_delete": "确认删除",
     "total_count": "全部任务",
     "empty": "当前没有任务。",
     "initializing": "正在初始化...",
@@ -127,5 +161,28 @@
       "pending": "排队中",
       "canceled": "已取消"
     }
+  },
+  "schedules": {
+    "title": "定时任务",
+    "subtitle": "管理会自动重复执行的工作流。",
+    "refresh": "刷新定时任务",
+    "list_title": "定时任务列表",
+    "detail_title": "定时任务详情",
+    "empty": "当前没有定时任务。",
+    "select_empty": "选择一个定时任务查看详情。",
+    "no_instruction": "暂无执行指令",
+    "enabled": "启用",
+    "disabled": "停用",
+    "field_name": "任务名称",
+    "field_cron": "Cron表达式",
+    "field_instruction": "执行指令",
+    "field_last_run": "上次运行",
+    "field_next_run": "下次运行",
+    "field_created_at": "创建时间",
+    "field_updated_at": "更新时间",
+    "cron_hint": "示例：0 8 * * * 表示每天08:00执行。",
+    "delete_title": "删除定时任务？",
+    "delete_description": "“{name}”将不再自动运行。这个操作无法撤销。",
+    "confirm_delete": "确认删除"
   }
 }

@@ -83,6 +83,41 @@ body {
   .markdown-container blockquote {
     @apply border-l-2 border-white/30 pl-6 my-6 italic text-white/50 text-[15px];
   }
+
+  .field-input {
+    @apply w-full rounded-lg border border-white/8 bg-black/20 px-3 py-2.5 text-sm font-semibold text-white/82 outline-none transition-colors placeholder:text-white/18 focus:border-white/25 focus:bg-black/30;
+  }
+
+  .field-textarea {
+    @apply w-full resize-none rounded-lg border border-white/8 bg-black/20 px-3 py-3 text-sm font-medium leading-6 text-white/78 outline-none transition-colors placeholder:text-white/18 focus:border-white/25 focus:bg-black/30;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .animate-spin-slow {
+    animation: spin 2.4s linear infinite;
+  }
+
+  .animate-gradient-x {
+    animation: gradient-x 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes gradient-x {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
 }
 
 /* Ultra Minimal Scrollbar */

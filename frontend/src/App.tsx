@@ -1,7 +1,7 @@
 import React, { useState, useEffect, ReactNode, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { useBackendConnection, type Task } from './hooks/useBackendConnection';
+import { useBackendConnection } from './hooks/useBackendConnection';
 import { useSessions } from './hooks/useSessions';
 import { useI18n } from './hooks/useI18n';
 import { 
@@ -9,7 +9,8 @@ import {
   Send, 
   Cpu, 
   Activity,
-  Terminal,
+  CalendarClock,
+  ChevronDown,
   ChevronRight,
   Save,
   Globe,
@@ -24,12 +25,16 @@ import {
   Target,
   Link,
   TrendingUp,
+  Gauge,
   ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Markdown } from './components/Markdown';
+import { RefreshIconButton } from './components/RefreshIconButton';
+import { ScheduleManager } from './components/ScheduleManager';
+import { TaskManager } from './components/TaskManager';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -37,6 +42,7 @@ function cn(...inputs: ClassValue[]) {
 
 const DEFAULT_FERRYMAN_WS_URL = 'ws://127.0.0.1:8000/ws';
 const DEFAULT_FERRYMAN_BEARER_TOKEN = 'dev-token';
+const CHAT_RAIL_CLASS = 'mx-auto w-full max-w-[72rem]';
 
 function buildWebSocketUrl(baseUrl: string, token?: string) {
   if (!token) {
@@ -82,6 +88,17 @@ type BrowserRuntimeStatus = {
   download_url?: string;
 };
 
+type SendMode = 'mod_enter' | 'enter';
+
+type SkillSummary = {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  created?: string | null;
+  updated?: string | null;
+};
+
 function buildModelOptionValue(provider: string, model: string) {
   return `${provider}:${model}`;
 }
@@ -89,7 +106,7 @@ function buildModelOptionValue(provider: string, model: string) {
 export default function App() {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const connection = useBackendConnection(wsUrl);
-  const { call, execute: executeInstruction, isConnected, tasks, refreshTasks, toolActivities, clearToolActivities, lastEvent } = connection;
+  const { call, execute: executeInstruction, isConnected, toolActivities, clearToolActivities, lastEvent } = connection;
   const { t, locale, changeLanguage } = useI18n();
   const {
     messages,
@@ -109,16 +126,18 @@ export default function App() {
     lastEvent,
   });
   const [input, setInput] = useState('');
-  const [currentView, setCurrentView] = useState<'chat' | 'tasks' | 'skills' | 'settings'>('chat');
+  const [sendMode, setSendMode] = useState<SendMode>(() => (
+    localStorage.getItem('ferryman_send_mode') === 'enter' ? 'enter' : 'mod_enter'
+  ));
+  const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<'chat' | 'tasks' | 'schedules' | 'skills' | 'settings'>('chat');
   const [settingsTab, setSettingsTab] = useState<'models' | 'logs'>('models');
   const [activeModel, setActiveModel] = useState<string>('gemini:gemini-3-flash-preview');
   const [llmConfigs, setLlmConfigs] = useState<LlmProviderConfig[]>([]);
   const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({});
-  const [skills, setSkills] = useState<Array<{ name: string; description: string; version: string; author: string }>>([]);
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
-  const [isRefreshingTasks, setIsRefreshingTasks] = useState(false);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
-  const [backendLogInfo, setBackendLogInfo] = useState<{ paths: Record<string, string>; active_log: string } | null>(null);
   const [backendLogContent, setBackendLogContent] = useState('');
   const [backendLogSource, setBackendLogSource] = useState<'app' | 'sidecar'>('app');
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
@@ -126,64 +145,12 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const taskCounts: Record<Task['status'], number> = {
-    pending: 0,
-    running: 0,
-    success: 0,
-    failed: 0,
-    canceled: 0,
-  };
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const sendShortcutHint = sendMode === 'enter' ? t('chat.send_shortcut_enter_hint') : t('chat.send_shortcut_mod_enter_hint');
 
-  for (const task of tasks) {
-    taskCounts[task.status] += 1;
-  }
-
-  const taskStatusSummary = [
-    {
-      key: 'pending',
-      count: taskCounts.pending,
-      label: t('tasks.status.pending'),
-      dotClassName: 'bg-amber-400',
-      valueClassName: 'text-amber-50',
-    },
-    {
-      key: 'running',
-      count: taskCounts.running,
-      label: t('tasks.status.running'),
-      dotClassName: 'bg-white',
-      valueClassName: 'text-white',
-    },
-    {
-      key: 'success',
-      count: taskCounts.success,
-      label: t('tasks.status.success'),
-      dotClassName: 'bg-green-400',
-      valueClassName: 'text-green-300',
-    },
-    {
-      key: 'failed',
-      count: taskCounts.failed,
-      label: t('tasks.status.failed'),
-      dotClassName: 'bg-red-400',
-      valueClassName: 'text-red-300',
-    },
-    {
-      key: 'canceled',
-      count: taskCounts.canceled,
-      label: t('tasks.status.canceled'),
-      dotClassName: 'bg-white/45',
-      valueClassName: 'text-white/70',
-    },
-    {
-      key: 'total',
-      count: tasks.length,
-      label: t('tasks.total_count'),
-      dotClassName: 'bg-white/80',
-      valueClassName: 'text-white',
-    },
-  ];
-  const visibleTaskStatusSummary = taskStatusSummary.filter((item) => item.key === 'total' || item.count > 0);
-
+  useEffect(() => {
+    localStorage.setItem('ferryman_send_mode', sendMode);
+  }, [sendMode]);
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isExecuting]);
@@ -191,6 +158,16 @@ export default function App() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [backendLogContent]);
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = '0px';
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 72), 220)}px`;
+  }, [input]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,7 +214,7 @@ export default function App() {
     setIsLoadingSkills(true);
     try {
       const result = await call('list_skills');
-      setSkills(normalizeSkillsPayload(result) as Array<{ name: string; description: string; version: string; author: string }>);
+      setSkills(normalizeSkillsPayload(result) as SkillSummary[]);
     } catch (error) {
       console.error('Failed to load skills:', error);
       setSkills([]);
@@ -287,42 +264,12 @@ export default function App() {
     }
   }, [currentView, isConnected]);
 
-  useEffect(() => {
-    if (currentView === 'tasks' && isConnected) {
-      setIsRefreshingTasks(true);
-      refreshTasks()
-        .catch((error) => {
-          console.error('Failed to load tasks:', error);
-        })
-        .finally(() => {
-          setIsRefreshingTasks(false);
-        });
-    }
-  }, [currentView, isConnected, refreshTasks]);
-
-  const handleRefreshTasks = async () => {
-    if (!isConnected) return;
-
-    setIsRefreshingTasks(true);
-    try {
-      await refreshTasks();
-    } catch (error) {
-      console.error('Failed to load tasks:', error);
-    } finally {
-      setIsRefreshingTasks(false);
-    }
-  };
-
   const refreshBackendLogs = async (source: 'app' | 'sidecar' = backendLogSource) => {
     if (!isConnected) return;
 
     setIsRefreshingLogs(true);
     try {
-      const [info, logs] = await Promise.all([
-        call('get_backend_log_info'),
-        call('read_backend_logs', { source, lines: 160 }),
-      ]);
-      setBackendLogInfo(info as { paths: Record<string, string>; active_log: string });
+      const logs = await call('read_backend_logs', { source, lines: 160 });
       setBackendLogContent((logs as { content: string }).content || '');
       setBackendLogSource(source);
     } catch (error) {
@@ -456,10 +403,13 @@ export default function App() {
             icon={<Activity size={18}/>} 
             label={t('nav.tasks')} 
             active={currentView === 'tasks'}
-            onClick={() => {
-              setCurrentView('tasks');
-              handleRefreshTasks();
-            }}
+            onClick={() => setCurrentView('tasks')}
+          />
+          <NavItem
+            icon={<CalendarClock size={18}/>}
+            label={t('nav.schedules')}
+            active={currentView === 'schedules'}
+            onClick={() => setCurrentView('schedules')}
           />
           <NavItem
             icon={<Cpu size={18}/>}
@@ -502,11 +452,12 @@ export default function App() {
         <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] via-transparent to-transparent pointer-events-none" />
         
         {/* Header */}
-        <header className="h-20 border-b border-white/5 flex items-center justify-between px-10 z-10 backdrop-blur-xl bg-[#0a0a0a]/40">
+        <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 z-10 backdrop-blur-xl bg-[#0a0a0a]/55">
           <div className="flex items-center gap-4">
             <span className="text-sm font-bold tracking-tight">
               {currentView === 'chat' ? (sessions.find(s => s.id === currentSessionId)?.title || t('chat.header_title')) : 
                currentView === 'tasks' ? t('nav.tasks') : 
+               currentView === 'schedules' ? t('nav.schedules') :
                currentView === 'skills' ? t('nav.skills') :
                t('nav.settings')}
             </span>
@@ -573,135 +524,204 @@ export default function App() {
                 <BrowserRuntimeBanner t={t} onOpenChromeDownload={handleOpenChromeDownload} />
               )}
               {/* Chat Area */}
-              <div className="flex-1 overflow-y-auto p-10 space-y-8 flex flex-col scrollbar-hide">
+              <div className="flex-1 overflow-y-auto p-8 space-y-8 flex flex-col scrollbar-hide">
                 {messages.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center pb-20 space-y-12">
-                      <div className="space-y-6 flex flex-col items-center text-center">
-                        <div className="w-20 h-20 rounded-[2rem] bg-white/[0.02] border border-white/5 flex items-center justify-center shadow-2xl mb-4 relative overflow-hidden group hover:border-white/20 transition-all shadow-[0_0_40px_rgba(255,255,255,0.05)]">
-                           <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                           <Terminal className="text-white/40 group-hover:text-white/80 transition-colors" size={36} strokeWidth={1.5} />
+                    <div className="flex-1 flex items-center justify-center pb-10">
+                      <div className={CHAT_RAIL_CLASS}>
+                        <div className="mb-8 flex items-end justify-between gap-8">
+                          <div className="space-y-3">
+                            <h2 className="display-title text-5xl leading-none text-white/90">{t('chat.welcome_title')}</h2>
+                          </div>
+                          <p className="hidden max-w-xs text-right text-sm font-medium leading-6 text-white/38 md:block">{t('chat.welcome_subtitle')}</p>
                         </div>
-                        <h2 className="text-6xl display-title text-transparent bg-clip-text bg-gradient-to-b from-white to-white/40 tracking-tight">{t('chat.welcome_title')}</h2>
-                        <p className="text-white/40 max-w-lg text-lg font-medium leading-relaxed">{t('chat.welcome_subtitle')}</p>
-                      </div>
-                      <div className="flex flex-wrap justify-center gap-5 w-full max-w-3xl pt-8 relative">
-                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                         <QuickAction 
-                           icon={<Flame size={20} className="text-orange-400" />}
+
+                        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-6">
+                         <QuickAction
+                           index="01"
+                           icon={<Flame size={16} className="text-orange-300" />}
                            title={t('chat.quick_actions.hotspot_title')}
                            onClick={() => setInput(t('chat.quick_actions.hotspot_prompt'))}
                          />
-                         <QuickAction 
-                           icon={<Radar size={20} className="text-blue-400" />}
+                         <QuickAction
+                           index="02"
+                           icon={<Radar size={16} className="text-sky-300" />}
                            title={t('chat.quick_actions.scout_title')}
                            onClick={() => setInput(t('chat.quick_actions.scout_prompt'))}
                          />
-                         <QuickAction 
-                           icon={<Target size={20} className="text-emerald-400" />}
+                         <QuickAction
+                           index="03"
+                           icon={<Target size={16} className="text-emerald-300" />}
                            title={t('chat.quick_actions.keyword_title')}
                            onClick={() => setInput(t('chat.quick_actions.keyword_prompt'))}
                          />
-                         <QuickAction 
-                           icon={<Link size={20} className="text-purple-400" />}
+                         <QuickAction
+                           index="04"
+                           icon={<Link size={16} className="text-violet-300" />}
                            title={t('chat.quick_actions.backlink_title')}
                            onClick={() => setInput(t('chat.quick_actions.backlink_prompt'))}
                          />
-                         <QuickAction 
-                           icon={<TrendingUp size={20} className="text-rose-400" />}
+                         <QuickAction
+                           index="05"
+                           icon={<TrendingUp size={16} className="text-rose-300" />}
                            title={t('chat.quick_actions.stock_title')}
                            onClick={() => setInput(t('chat.quick_actions.stock_prompt'))}
                          />
+                         <QuickAction
+                           index="06"
+                           icon={<Gauge size={16} className="text-cyan-300" />}
+                           title={t('chat.quick_actions.daily_dashboard_title')}
+                           onClick={() => setInput(t('chat.quick_actions.daily_dashboard_prompt'))}
+                         />
+                        </div>
                       </div>
                     </div>
                 ) : (
-                  messages.map((msg, i) => (
-                    <motion.div
-                      key={msg.id || i}
-                      initial={{ opacity: 0, x: msg.role === 'user' ? 20 : -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className={cn(
-                        "max-w-[85%] rounded-[1.5rem] shadow-lg",
-                        msg.role === 'user' 
-                          ? "ml-auto bg-white text-[#080808] font-bold shadow-sm px-6 py-4 text-[14px]"
-                          : msg.metadata?.state === 'failed'
-                            ? "mr-auto bg-red-500/10 border border-red-500/30 text-red-100 backdrop-blur-md px-8 py-7 text-[15px] leading-loose markdown-container"
-                            : "mr-auto bg-transparent border border-white/10 text-white/90 backdrop-blur-md px-8 py-7 text-[15px] leading-loose markdown-container"
-                      )}
-                    >
-                      {msg.metadata?.state === 'pending' ? (
-                        <div className="space-y-4">
-                          <ThinkingIndicator />
-                          {toolActivities.map((activity, idx) => (
-                             <div key={`${activity.run_id}-${activity.tool_name}-${idx}`} className="flex items-center gap-2 text-[12px] font-mono text-white/50 bg-white/5 px-4 py-2 rounded-xl">
-                                {activity.phase === 'start' || activity.phase === 'running' 
-                                    ? <RefreshCw size={12} className="animate-spin text-white/40 shrink-0" />
-                                    : activity.phase === 'error' 
-                                        ? <X size={12} className="text-red-400 shrink-0" />
-                                        : <Check size={12} className="text-green-400 shrink-0" />
-                                }
-                                <span className="flex-1 truncate">
-                                  {
-                                      // @ts-ignore
-                                      (t(`tools.${activity.tool_name}`) !== `tools.${activity.tool_name}`) ? t(`tools.${activity.tool_name}`) : activity.tool_name
-                                   }
-                                   {activity.input && activity.input.url && <span className="ml-2 text-white/30 truncate font-normal">{activity.input.url}</span>}
-                                   {activity.input && activity.input.skill_name && <span className="ml-2 text-blue-400 font-bold truncate">[{activity.input.skill_name}]</span>}
-                                   {activity.input && activity.input.command && <span className="ml-2 text-orange-400 truncate font-normal">`{activity.input.command}`</span>}
-                                   {activity.input && activity.input.path && (
-                                       <span
-                                           className="ml-2 text-green-400 truncate font-normal"
-                                           title={String(activity.input.path)}
-                                       >
-                                           {String(activity.input.path)}
-                                       </span>
-                                   )}
-                                   {activity.input && activity.input.title && <span className="ml-2 text-white/40 italic truncate">"{activity.input.title}"</span>}
-                                </span>
-                                {activity.duration_ms !== undefined && <span className="text-white/20 shrink-0">{activity.duration_ms}ms</span>}
-                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <Markdown content={msg.content} />
-                      )}
-                    </motion.div>
-                  ))
+                  <div className={cn(CHAT_RAIL_CLASS, "flex flex-col gap-8")}>
+                    {messages.map((msg, i) => (
+                      <motion.div
+                        key={msg.id || i}
+                        initial={{ opacity: 0, x: msg.role === 'user' ? 20 : -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className={cn(
+                          "max-w-[85%] rounded-[1.5rem] shadow-lg",
+                        msg.role === 'user'
+                            ? "ml-auto bg-white text-[#080808] font-bold shadow-sm px-6 py-4 text-[14px]"
+                            : msg.metadata?.state === 'failed'
+                              ? "mr-auto bg-red-500/10 border border-red-500/30 text-red-100 backdrop-blur-md px-8 py-7 text-[15px] leading-loose markdown-container"
+                              : "mr-auto bg-transparent border border-white/10 text-white/90 backdrop-blur-md px-8 py-7 text-[15px] leading-loose markdown-container"
+                        )}
+                      >
+                        {msg.metadata?.state === 'pending' ? (
+                          <div className="space-y-4">
+                            <ThinkingIndicator />
+                            {toolActivities.map((activity, idx) => (
+                               <div key={`${activity.run_id}-${activity.tool_name}-${idx}`} className="flex items-center gap-2 text-[12px] font-mono text-white/50 bg-white/5 px-4 py-2 rounded-xl">
+                                  {activity.phase === 'start' || activity.phase === 'running'
+                                      ? <RefreshCw size={12} className="animate-spin text-white/40 shrink-0" />
+                                      : activity.phase === 'error'
+                                          ? <X size={12} className="text-red-400 shrink-0" />
+                                          : <Check size={12} className="text-green-400 shrink-0" />
+                                  }
+                                  <span className="flex-1 truncate">
+                                    {
+                                        // @ts-ignore
+                                        (t(`tools.${activity.tool_name}`) !== `tools.${activity.tool_name}`) ? t(`tools.${activity.tool_name}`) : activity.tool_name
+                                     }
+                                     {activity.input && activity.input.url && <span className="ml-2 text-white/30 truncate font-normal">{activity.input.url}</span>}
+                                     {activity.input && activity.input.skill_name && <span className="ml-2 text-blue-400 font-bold truncate">[{activity.input.skill_name}]</span>}
+                                     {activity.input && activity.input.command && <span className="ml-2 text-orange-400 truncate font-normal">`{activity.input.command}`</span>}
+                                     {activity.input && activity.input.path && (
+                                         <span
+                                             className="ml-2 text-green-400 truncate font-normal"
+                                             title={String(activity.input.path)}
+                                         >
+                                             {String(activity.input.path)}
+                                         </span>
+                                     )}
+                                     {activity.input && activity.input.title && <span className="ml-2 text-white/40 italic truncate">"{activity.input.title}"</span>}
+                                  </span>
+                                  {activity.duration_ms !== undefined && <span className="text-white/20 shrink-0">{activity.duration_ms}ms</span>}
+                               </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <Markdown content={msg.content} />
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
                 )}
                 <div ref={messagesEndRef} />
               </div>
 
               {/* Input Area */}
-              <div className="p-10 pt-0">
-                <div className="relative bg-white/[0.02] backdrop-blur-xl rounded-[2rem] p-1 shadow-2xl overflow-hidden group border border-white/10 focus-within:border-white/20 transition-colors">
+              <div className="px-8 pb-8 pt-0">
+                <div className={cn(CHAT_RAIL_CLASS, "relative z-20 bg-white/[0.025] backdrop-blur-xl rounded-xl p-1 shadow-2xl group border border-white/10 focus-within:border-white/25 transition-colors")}>
                   <div className="flex items-center gap-3 p-2">
                     <textarea 
+                      ref={inputRef}
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                        if (e.key !== 'Enter' || e.nativeEvent.isComposing) {
+                          return;
+                        }
+                        if (sendMode === 'enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                          return;
+                        }
+                        if (sendMode === 'mod_enter' && (e.metaKey || e.ctrlKey)) {
                           e.preventDefault();
                           handleSend();
                         }
                       }}
-                      placeholder={t('chat.placeholder_full')} 
-                      className="flex-1 bg-transparent border-none outline-none px-4 py-3 text-[15px] placeholder:text-white/20 font-medium tracking-tight text-white/90 min-h-[44px] max-h-[150px] resize-none overflow-y-auto"
+                      placeholder={t('chat.placeholder')}
+                      className="flex-1 bg-transparent border-none outline-none px-4 py-4 text-[15px] placeholder:text-white/20 font-medium tracking-tight text-white/90 min-h-[72px] max-h-[220px] resize-none overflow-y-auto"
                       rows={1}
                     />
-                    <button 
-                      onClick={handleSend}
-                      disabled={isExecuting || !input.trim()}
-                      className={cn(
-                        "w-10 h-10 rounded-[1rem] flex flex-shrink-0 items-center justify-center transition-all active:scale-95 transform relative",
-                        input.trim() 
-                          ? "bg-white text-[#080808] shadow-md hover:bg-white/90 border border-white" 
-                          : "bg-transparent text-white/30 border border-white/10 opacity-60 cursor-not-allowed"
+                    <div className="relative flex flex-shrink-0 items-center pr-1">
+                      <div
+                        className={cn(
+                          "flex rounded-lg border transition-all",
+                          input.trim()
+                            ? "border-white bg-white text-[#080808] shadow-md"
+                            : "border-white/10 bg-white/[0.03] text-white/35"
+                        )}
+                      >
+                        <button
+                          onClick={handleSend}
+                          disabled={isExecuting || !input.trim()}
+                          aria-label={sendShortcutHint}
+                          className={cn(
+                            "group relative h-10 w-10 flex items-center justify-center rounded-l-lg transition-colors active:scale-95 disabled:cursor-not-allowed",
+                            input.trim() ? "hover:bg-black/[0.04]" : "opacity-55"
+                          )}
+                        >
+                          <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#111] px-2 py-1 font-mono text-[10px] font-bold tracking-[0.04em] text-white/60 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                            {sendShortcutHint}
+                          </span>
+                          {isExecuting ? <ThinkingIndicator compact /> : <Send size={17} strokeWidth={input.trim() ? 2.5 : 1.5} className="relative z-10" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsSendMenuOpen((open) => !open)}
+                          className={cn(
+                            "flex h-10 w-7 items-center justify-center rounded-r-lg border-l transition-colors",
+                            input.trim()
+                              ? "border-black/10 hover:bg-black/[0.05]"
+                              : "border-white/10 hover:bg-white/[0.06]"
+                          )}
+                          title={t('chat.send_mode')}
+                        >
+                          <ChevronDown size={13} strokeWidth={2.4} />
+                        </button>
+                      </div>
+                      {isSendMenuOpen && (
+                        <div className="absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#101010] p-1 shadow-2xl">
+                          {(['mod_enter', 'enter'] as SendMode[]).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => {
+                                setSendMode(mode);
+                                setIsSendMenuOpen(false);
+                              }}
+                              className={cn(
+                                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-bold transition-colors",
+                                sendMode === mode ? "bg-white text-[#080808]" : "text-white/60 hover:bg-white/[0.06] hover:text-white"
+                              )}
+                            >
+                              <span>{mode === 'enter' ? t('chat.send_mode_enter') : t('chat.send_mode_mod_enter')}</span>
+                              <span className="font-mono text-[10px] opacity-60">{mode === 'enter' ? '↵' : '⌘↵'}</span>
+                            </button>
+                          ))}
+                        </div>
                       )}
-                    >
-                      {isExecuting ? <ThinkingIndicator compact /> : <Send size={16} strokeWidth={input.trim() ? 2.5 : 1.5} className="relative z-10" />}
-                    </button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center justify-center gap-4 mt-6">
+                <div className="flex items-center justify-center gap-4 mt-4">
                   <p className="text-[10px] text-white/10 font-bold uppercase tracking-[0.1em]">{t('app.byok_enabled')}</p>
                   <div className="h-1 w-1 rounded-full bg-white/10" />
                   <p className="text-[10px] text-white/10 font-bold uppercase tracking-[0.1em]">{t('app.deterministic_kernel')}</p>
@@ -709,118 +729,24 @@ export default function App() {
               </div>
             </motion.div>
           ) : currentView === 'tasks' ? (
-            <motion.div 
+            <motion.div
               key="tasks"
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
-              className="flex-1 overflow-y-auto p-12"
+              className="flex-1 overflow-hidden"
             >
-              <div className="max-w-5xl mx-auto space-y-12">
-                <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <h2 className="text-4xl font-black tracking-tight mb-2">{t('nav.tasks')}</h2>
-                    <p className="text-sm text-white/30 font-medium">{t('tasks.subtitle')}</p>
-                  </div>
-                  <div className="flex w-full flex-col items-start gap-3 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
-                     <div className="max-w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-sm backdrop-blur-xl">
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                          {visibleTaskStatusSummary.map((item, index) => (
-                            <React.Fragment key={item.key}>
-                              {index > 0 && <div className="hidden h-4 w-px bg-white/10 sm:block" />}
-                              <div className="flex items-center gap-2">
-                                <div className={cn("h-1.5 w-1.5 rounded-full", item.dotClassName)} />
-                                <span className={cn("text-sm font-black tracking-tight tabular-nums", item.valueClassName)}>
-                                  {item.count}
-                                </span>
-                                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-white/35">
-                                  {item.label}
-                                </span>
-                              </div>
-                            </React.Fragment>
-                          ))}
-                        </div>
-                     </div>
-                     <button
-                        onClick={handleRefreshTasks}
-                        disabled={!isConnected || isRefreshingTasks}
-                        aria-label={t('tasks.refresh')}
-                        title={t('tasks.refresh')}
-                        className={cn(
-                          "shrink-0 h-10 w-10 rounded-xl border flex items-center justify-center shadow-sm transition-all",
-                          isConnected
-                            ? "bg-white/5 border-white/10 text-white hover:bg-white/10"
-                            : "bg-white/[0.03] border-white/5 text-white/20 cursor-not-allowed",
-                          isRefreshingTasks && "text-white/60"
-                        )}
-                      >
-                        <RefreshCw size={14} className={cn(isRefreshingTasks && 'animate-spin')} />
-                      </button>
-                  </div>
-                </header>
-
-                <div className="space-y-4">
-                  {tasks.length === 0 ? (
-                    <div className="p-32 text-center glass rounded-[3rem] border border-white/5">
-                      <Activity size={48} className="mx-auto text-white/5 mb-6" />
-                      <p className="text-white/20 font-bold uppercase tracking-widest text-sm">{t('tasks.empty')}</p>
-                    </div>
-                  ) : (
-                    tasks.map(task => (
-                      <div key={task.id} className="glass rounded-[2rem] p-8 border border-white/10 flex items-center gap-8 group hover:border-white/20 transition-all relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-r from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className={cn(
-                          "w-14 h-14 rounded-[1.25rem] flex items-center justify-center shrink-0 shadow-xl border border-white/5 relative z-10",
-                          task.status === 'running' ? "bg-white/10 text-white" :
-                          task.status === 'pending' ? "bg-amber-500/10 text-amber-300" :
-                          task.status === 'success' ? "bg-green-500/10 text-green-500" :
-                          task.status === 'failed' ? "bg-red-500/10 text-red-500" :
-                          task.status === 'canceled' ? "bg-white/5 text-white/35" :
-                          "bg-white/5 text-white/20"
-                        )}>
-                          {task.status === 'running' ? <Activity size={24} className="animate-spin-slow" /> : <Terminal size={24} />}
-                        </div>
-                        
-                        <div className="flex-1 space-y-2 relative z-10">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-lg font-bold tracking-tight">{task.title}</h4>
-                            <span className={cn(
-                              "text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest shadow-sm",
-                              task.status === 'running' ? "bg-white text-[#080808]" :
-                              task.status === 'pending' ? "bg-amber-500/15 text-amber-300 border border-amber-400/15" :
-                              task.status === 'success' ? "bg-green-600/20 text-green-400 border border-green-500/20" :
-                              task.status === 'failed' ? "bg-red-600/15 text-red-300 border border-red-500/20" :
-                              task.status === 'canceled' ? "bg-white/10 text-white/45 border border-white/10" :
-                              "bg-white/10 text-white/40"
-                            )}>
-                              {t(`tasks.status.${task.status}`)}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-4 text-xs font-medium text-white/30 italic">
-                             <span>{t('tasks.identifier')}: {task.id}</span>
-                             <span>•</span>
-                             <span>{task.progress || t('tasks.initializing')}</span>
-                          </div>
-
-                          {task.status === 'running' && (
-                            <div className="pt-2">
-                               <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                  <motion.div 
-                                    initial={{ width: 0 }}
-                                    animate={{ width: '100%' }}
-                                    transition={{ duration: 10, repeat: Infinity }}
-                                    className="h-full bg-gradient-to-r from-white/20 via-white/80 to-white/20 bg-[length:200%_100%] animate-gradient-x"
-                                  />
-                               </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+              <TaskManager call={call} isConnected={isConnected} t={t} />
+            </motion.div>
+          ) : currentView === 'schedules' ? (
+            <motion.div
+              key="schedules"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="flex-1 overflow-hidden"
+            >
+              <ScheduleManager call={call} isConnected={isConnected} t={t} />
             </motion.div>
           ) : currentView === 'skills' ? (
             <motion.div
@@ -836,13 +762,11 @@ export default function App() {
                     <h2 className="text-4xl font-black tracking-tight mb-2">{t('skills.title')}</h2>
                     <p className="text-sm text-white/30 font-medium">{t('skills.subtitle')}</p>
                   </div>
-                  <button
+                  <RefreshIconButton
                     onClick={() => refreshSkills()}
-                    className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold uppercase tracking-widest hover:bg-white/10 transition-colors flex items-center gap-2"
-                  >
-                    <RefreshCw size={14} className={cn(isLoadingSkills && 'animate-spin')} />
-                    {t('skills.refresh')}
-                  </button>
+                    isLoading={isLoadingSkills}
+                    label={t('skills.refresh')}
+                  />
                 </header>
 
                 <div className="space-y-4">
@@ -867,6 +791,8 @@ export default function App() {
                           <div className="shrink-0 text-right text-xs text-white/35 space-y-1 font-medium">
                             <div>{t('skills.version')}: {skill.version || '0.1.0'}</div>
                             <div>{t('skills.author')}: {skill.author || t('skills.unknown_author')}</div>
+                            <div>{t('skills.created')}: {skill.created || t('skills.unknown_date')}</div>
+                            <div>{t('skills.updated')}: {skill.updated || t('skills.unknown_date')}</div>
                           </div>
                         </div>
                       </div>
@@ -949,19 +875,12 @@ export default function App() {
                           <h2 className="text-2xl font-bold tracking-tight mb-2">{t('settings.providers_title')}</h2>
                           <p className="text-sm text-white/30 font-medium">{t('settings.providers_subtitle')}</p>
                         </div>
-                        <button
+                        <RefreshIconButton
                           onClick={() => refreshModelSettings()}
                           disabled={!isConnected || isRefreshingModels}
-                          className={cn(
-                            "px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2",
-                            !isConnected || isRefreshingModels
-                              ? "bg-white/5 border-white/5 text-white/25 cursor-not-allowed"
-                              : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
-                          )}
-                        >
-                          <RefreshCw size={14} className={cn(isRefreshingModels && 'animate-spin')} />
-                          {t('settings.models_refresh')}
-                        </button>
+                          isLoading={isRefreshingModels}
+                          label={t('settings.models_refresh')}
+                        />
                       </header>
 
                       <div className="grid grid-cols-1 gap-6">
@@ -983,13 +902,11 @@ export default function App() {
                         <h2 className="text-2xl font-bold tracking-tight mb-2">{t('settings.logs_title')}</h2>
                         <p className="text-sm text-white/30 font-medium">{t('settings.logs_subtitle')}</p>
                       </div>
-                      <button
+                      <RefreshIconButton
                         onClick={() => refreshBackendLogs(backendLogSource)}
-                        className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold uppercase tracking-widest hover:bg-white/10 transition-colors flex items-center gap-2"
-                      >
-                        <RefreshCw size={14} className={cn(isRefreshingLogs && 'animate-spin')} />
-                        {t('settings.logs_refresh')}
-                      </button>
+                        isLoading={isRefreshingLogs}
+                        label={t('settings.logs_refresh')}
+                      />
                     </header>
 
                     <div className="glass rounded-3xl p-6 border border-white/10 shadow-xl space-y-4">
@@ -1012,11 +929,6 @@ export default function App() {
                         >
                           {t('settings.logs_sidecar_tab')}
                         </button>
-                      </div>
-
-                      <div className="space-y-1 text-xs font-mono text-white/40">
-                        <div>{t('settings.logs_app_path')}：{backendLogInfo?.paths?.app || t('settings.logs_unavailable')}</div>
-                        <div>{t('settings.logs_sidecar_path')}：{backendLogInfo?.paths?.sidecar || t('settings.logs_unavailable')}</div>
                       </div>
 
                       <pre className="min-h-[280px] max-h-[420px] overflow-auto rounded-2xl bg-black/30 border border-white/5 p-4 text-xs leading-6 text-white/75 whitespace-pre-wrap break-words">
@@ -1070,21 +982,34 @@ function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNo
   );
 }
 
-function QuickAction({ icon, title, onClick }: { icon: ReactNode, title: string, onClick: () => void }) {
+function QuickAction({
+  icon,
+  index,
+  title,
+  onClick,
+}: {
+  icon: ReactNode;
+  index: string;
+  title: string;
+  onClick: () => void;
+}) {
   return (
     <button 
       onClick={onClick}
-      className="relative overflow-hidden p-6 rounded-[1.75rem] bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] hover:border-white/20 transition-all hover:shadow-2xl hover:-translate-y-1 group w-[280px] text-left"
+      className="group relative min-h-[92px] overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-white/22 hover:bg-white/[0.06] hover:shadow-[0_18px_45px_rgba(0,0,0,0.25)]"
     >
-      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.05] to-transparent -translate-x-full group-hover:animate-shimmer" />
-      <div className="flex flex-col gap-5 relative z-10">
-        <div className="w-12 h-12 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-inner group-hover:scale-110 transition-transform">
-           {icon}
+      <div className="absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+      <div className="relative z-10 flex h-full flex-col justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-black/20 shadow-inner transition-transform group-hover:scale-105">
+             {icon}
+          </div>
+          <span className="font-mono text-[10px] font-bold tabular-nums text-white/18 transition-colors group-hover:text-white/35">{index}</span>
         </div>
-        <div>
-           <h4 className="text-[14px] font-bold tracking-tight text-white/80 group-hover:text-white transition-colors">{title}</h4>
+        <div className="flex items-end justify-between gap-2">
+           <h4 className="text-[13px] font-bold leading-5 tracking-tight text-white/72 transition-colors group-hover:text-white">{title}</h4>
+           <ChevronRight size={14} className="shrink-0 translate-x-0 text-white/12 transition-all group-hover:translate-x-0.5 group-hover:text-white/45" />
         </div>
-        <ChevronRight size={18} className="absolute right-0 bottom-0 text-white/10 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 group-hover:text-white/40 transition-all" />
       </div>
     </button>
   );

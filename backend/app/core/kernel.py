@@ -370,13 +370,13 @@ class FerrymanKernel:
         if api_key and isinstance(api_key, str):
             api_key = api_key.strip()
         provider_catalog = self._settings.get_llm_provider_catalog()
-        if provider in {"qwen", "kimi"} and not base_url:
+        if provider in {"qwen", "kimi", "doubao"} and not base_url:
             base_url = provider_catalog[provider]["placeholder_base_url"]
 
         p_kwargs = {k: v for k, v in {"api_key": api_key, "base_url": base_url}.items() if v is not None}
 
         try:
-            if provider in {"openai", "qwen", "custom"}:
+            if provider in {"openai", "qwen", "doubao", "azure_openai", "custom"}:
                 from pydantic_ai.models.openai import OpenAIChatModel
                 from pydantic_ai.providers.openai import OpenAIProvider
                 return OpenAIChatModel(model_name, provider=OpenAIProvider(**p_kwargs))
@@ -385,8 +385,7 @@ class FerrymanKernel:
                 from pydantic_ai.models.openai import OpenAIChatModel
                 from pydantic_ai.providers.moonshotai import MoonshotAIProvider
 
-                default_base_url = provider_catalog["kimi"]["placeholder_base_url"]
-                if base_url and base_url != default_base_url:
+                if base_url:
                     openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
                     return OpenAIChatModel(model_name, provider=MoonshotAIProvider(openai_client=openai_client))
                 return OpenAIChatModel(model_name, provider=MoonshotAIProvider(api_key=api_key))
@@ -472,11 +471,19 @@ class FerrymanKernel:
 
                             if isinstance(raw_path, str):
                                 try:
-                                    resolved_path = FileToolkit.resolve_session_path(
-                                        ctx.deps.kernel,
-                                        ctx.deps.session_id,
-                                        raw_path,
-                                    )
+                                    if tool_name in {"read_file", "list_files"}:
+                                        resolved_path = FileToolkit.resolve_read_path(
+                                            ctx.deps.kernel,
+                                            ctx.deps.session_id,
+                                            raw_path,
+                                            ctx.deps.skill_name,
+                                        )
+                                    else:
+                                        resolved_path = FileToolkit.resolve_session_path(
+                                            ctx.deps.kernel,
+                                            ctx.deps.session_id,
+                                            raw_path,
+                                        )
                                     input_summary.pop("file_path", None)
                                     input_summary.pop("directory", None)
                                     input_summary["path"] = str(resolved_path)

@@ -1,10 +1,11 @@
 import pytest
 from datetime import datetime, timezone
+from urllib.error import HTTPError
 from sqlmodel import select
 
 from app.models.database import Session, Message, Task, AppConfig
 from app.models.schemas import SessionModel, MessageModel, TaskModel
-from app.core.config import Settings as config
+from app.core.config import ModelListEndpointUnavailable, Settings as config
 
 from app.models.events import (
     FerrymanEventEnvelope,
@@ -152,6 +153,12 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
     config.set("llm.openai", {"api_key": "sk-openai"}, category="llm")
     config.set("llm.qwen", {"api_key": "sk-qwen"}, category="llm")
     config.set("llm.kimi", {"api_key": "sk-kimi"}, category="llm")
+    config.set("llm.doubao", {"api_key": "sk-doubao"}, category="llm")
+    config.set(
+        "llm.azure_openai",
+        {"api_key": "sk-azure", "base_url": "https://example.openai.azure.com/openai/v1"},
+        category="llm",
+    )
     config.set(
         "llm.custom",
         {"api_key": "sk-custom", "base_url": "https://custom.example.com/v1", "model": "my-custom-model"},
@@ -165,9 +172,13 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
         if provider == "openai":
             return ["gpt-4o", "text-embedding-3-large"]
         if provider == "qwen":
-            return []
+            raise ModelListEndpointUnavailable("HTTP 404")
         if provider == "kimi":
             return ["kimi-k2.5", "kimi-k2-thinking"]
+        if provider == "doubao":
+            return ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"]
+        if provider == "azure_openai":
+            return ["gpt-5.4-mini"]
         if provider == "custom":
             return ["server-model", "my-custom-model"]
         return []
@@ -183,9 +194,13 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
     assert models["openai"] == ["gpt-4o", "text-embedding-3-large"]
     assert "qwen" in models
     assert "kimi" in models
+    assert "doubao" in models
+    assert "azure_openai" in models
     assert "custom" in models
     assert models["qwen"] == ["qwen-max", "qwen-plus", "qwen3.5-plus", "qwen3.5-omni-plus"]
     assert models["kimi"] == ["kimi-k2.5", "kimi-k2-thinking"]
+    assert models["doubao"] == ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"]
+    assert models["azure_openai"] == ["gpt-5.4-mini"]
     assert models["custom"] == ["server-model", "my-custom-model"]
 
 
@@ -238,13 +253,60 @@ def test_get_available_models_hides_unconfigured_providers():
     assert models == {"openai": ["gpt-4o"]}
 
 
+def test_get_available_models_does_not_fallback_on_fetch_error():
+    config.set("llm.kimi", {"api_key": "bad-key"}, category="llm")
+
+    original_fetcher = config._fetch_provider_models
+
+    def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
+        raise RuntimeError("HTTP 401 Unauthorized")
+
+    config._fetch_provider_models = staticmethod(fake_fetcher)
+    try:
+        models = config.get_available_models()
+    finally:
+        config._fetch_provider_models = original_fetcher
+
+    assert "kimi" not in models
+
+
+def test_get_available_models_skips_azure_openai_without_base_url():
+    config.set("llm.azure_openai", {"api_key": "sk-azure"}, category="llm")
+
+    original_fetcher = config._fetch_provider_models
+
+    def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
+        return ["should-not-appear"]
+
+    config._fetch_provider_models = staticmethod(fake_fetcher)
+    try:
+        models = config.get_available_models()
+    finally:
+        config._fetch_provider_models = original_fetcher
+
+    assert "azure_openai" not in models
+
+
 def test_fetch_provider_models_routes_to_provider_specific_fetchers(monkeypatch):
     monkeypatch.setattr(config, "_fetch_anthropic_models", staticmethod(lambda api_key, base_url: ["claude-sonnet-4-5"]))
     monkeypatch.setattr(config, "_fetch_gemini_models", staticmethod(lambda api_key, base_url: ["gemini-3.1-pro-preview"]))
     monkeypatch.setattr(
         config,
         "_fetch_openai_compatible_models",
-        staticmethod(lambda api_key, base_url: ["gpt-4o", "kimi-k2.5", "moonshot-v1-8k-vision-preview"]),
+        staticmethod(
+            lambda api_key, base_url: [
+                "gpt-4o",
+                "kimi-k2.5",
+                "moonshot-v1-8k-vision-preview",
+                "doubao-seed-2-0-pro-260215",
+                "doubao-seed-1-6-251015",
+                "doubao-seed-2-0-code-preview-260215",
+                "doubao-seedream-4-0-250828",
+                "gpt-5.4-mini-2026-03-17",
+                "gpt-5.4-nano-2026-03-17",
+                "gpt-5.4-audio-preview-2026-03-17",
+            ]
+        ),
     )
 
     assert config._fetch_provider_models(
@@ -264,13 +326,40 @@ def test_fetch_provider_models_routes_to_provider_specific_fetchers(monkeypatch)
         "sk-o",
         "https://api.openai.com/v1",
         "openai_compatible",
-    ) == ["gpt-4o", "kimi-k2.5", "moonshot-v1-8k-vision-preview"]
+    ) == ["gpt-5.4-mini-2026-03-17", "gpt-5.4-nano-2026-03-17"]
     assert config._fetch_provider_models(
         "kimi",
         "sk-k",
-        "https://api.moonshot.ai/v1",
+        "https://api.moonshot.cn/v1",
         "openai_compatible",
     ) == ["kimi-k2.5"]
+    assert config._fetch_provider_models(
+        "doubao",
+        "sk-d",
+        "https://ark.cn-beijing.volces.com/api/v3",
+        "openai_compatible",
+    ) == ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215"]
+    assert config._fetch_provider_models(
+        "azure_openai",
+        "sk-a",
+        "https://example.openai.azure.com/openai/v1",
+        "openai_compatible",
+    ) == ["gpt-5.4-mini", "gpt-5.4-nano"]
+
+
+def test_fetch_provider_models_marks_missing_models_endpoint_as_unavailable(monkeypatch):
+    def raise_not_found(api_key: str, base_url: str):
+        raise HTTPError(base_url, 404, "Not Found", hdrs=None, fp=None)
+
+    monkeypatch.setattr(config, "_fetch_openai_compatible_models", staticmethod(raise_not_found))
+
+    with pytest.raises(ModelListEndpointUnavailable):
+        config._fetch_provider_models(
+            "qwen",
+            "sk-qwen",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "openai_compatible",
+        )
 
 
 def test_filter_chat_model_ids_excludes_non_chat_entries():
@@ -281,7 +370,7 @@ def test_filter_chat_model_ids_excludes_non_chat_entries():
         "claude-sonnet-4-5",
     ])
 
-    assert filtered == ["claude-sonnet-4-5", "gpt-4o"]
+    assert filtered == ["gpt-4o", "claude-sonnet-4-5"]
 
 
 def test_filter_gemini_models_keeps_only_llm_entries():
@@ -332,7 +421,15 @@ def test_filter_qwen_models_keeps_only_qwen_family_entries():
         "deepseek-v3.1",
         "glm-4.7",
         "kimi-k2.5",
+        "qwen3.6-plus-2026-04-02",
+        "qwen3.6-plus",
+        "qwen3.5-omni-plus-2026-03-15",
+        "qwen3.5-omni-plus",
+        "qwen3.5-omni-flash",
+        "qwen3.5-flash",
         "qwen3.5-plus",
+        "qwen3.5-397b-a17b",
+        "qwen3-max",
         "qwen-plus",
         "qwen-max",
         "qwen-max-0107",
@@ -348,15 +445,17 @@ def test_filter_qwen_models_keeps_only_qwen_family_entries():
         "qwen-coder-plus",
     ])
 
-    assert filtered == sorted([
+    assert filtered == [
+        "qwen3.6-plus",
         "qwen3.5-plus",
-        "qwen-max",
-        "qwen-plus",
-        "qwen-omni-turbo",
-    ])
+        "qwen3.5-omni-plus",
+        "qwen3.5-flash",
+        "qwen3.5-omni-flash",
+        "qwen3-max",
+    ]
 
 
-def test_filter_kimi_models_keeps_supported_chat_entries():
+def test_filter_kimi_models_keeps_latest_supported_chat_family():
     filtered = config._filter_kimi_models([
         "kimi-k2.5",
         "kimi-k2-thinking",
@@ -370,10 +469,53 @@ def test_filter_kimi_models_keeps_supported_chat_entries():
         "qwen-plus",
     ])
 
-    assert filtered == sorted([
+    assert filtered == [
         "kimi-k2.5",
-        "kimi-k2-0905-preview",
-        "kimi-k2-thinking",
-        "kimi-k2-thinking-turbo",
-        "moonshot-v1-8k",
+    ]
+
+
+def test_filter_doubao_models_keeps_latest_supported_chat_family():
+    filtered = config._filter_doubao_models([
+        "doubao-seed-2-0-code-preview-260215",
+        "doubao-seed-1-6-251015",
+        "doubao-seed-2-1-mini-260415",
+        "doubao-seed-2-0-pro-260215",
+        "doubao-seed-2-1-pro-260415",
+        "doubao-seed-2-0-lite-260215",
+        "doubao-seed-2-1-lite-260415",
+        "doubao-seedream-4-0-250828",
+        "doubao-seed-2-0-mini-260215",
+        "doubao-embedding-text-240715",
+        "doubao-seed-2-1-code-preview-260415",
+        "doubao-seed-2-0-pro-260215",
+        "kimi-k2.5",
+        "ep-20260414-example",
     ])
+
+    assert filtered == [
+        "doubao-seed-2-1-pro-260415",
+        "doubao-seed-2-1-lite-260415",
+        "doubao-seed-2-1-mini-260415",
+        "doubao-seed-2-1-code-preview-260415",
+    ]
+
+
+def test_filter_azure_openai_models_keeps_latest_gpt_family_aliases():
+    filtered = config._filter_azure_openai_models([
+        "dall-e-3-3.0",
+        "gpt-35-turbo-0125",
+        "gpt-4o-2024-11-20",
+        "gpt-5.4-mini-2026-03-17",
+        "gpt-5.4-nano-2026-03-17",
+        "gpt-5.5-nano-2026-06-01",
+        "gpt-5.5-mini-2026-06-01",
+        "gpt-5.4-audio-preview-2026-03-17",
+        "gpt-5.4-realtime-preview-2026-03-17",
+        "text-embedding-3-large",
+        "gpt-5.4-mini-2026-03-17",
+    ])
+
+    assert filtered == [
+        "gpt-5.5-mini",
+        "gpt-5.5-nano",
+    ]

@@ -9,6 +9,10 @@ interface MarkdownProps {
 }
 
 export const Markdown = ({ content }: MarkdownProps) => {
+  const isAbsoluteLocalPath = (value?: string) => {
+    return Boolean(value && (value.startsWith('/') || /^[a-zA-Z]:(?:\\|\/)/.test(value)));
+  };
+
   return (
     <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-[#0d0d0d] prose-pre:border prose-pre:border-white/5 prose-code:text-blue-300">
       <ReactMarkdown
@@ -69,8 +73,9 @@ export const Markdown = ({ content }: MarkdownProps) => {
         },
         a({ node, children, href, ...props }: any) {
           const isFileUrl = href?.startsWith('file://');
-          if (isFileUrl) {
-            const rawPath = href.replace('file://', '');
+          const isLocalPath = isAbsoluteLocalPath(href);
+          if (isFileUrl || isLocalPath) {
+            const rawPath = isFileUrl ? href.replace('file://', '') : href;
             // Handle local file path decoding and normalization
             const decodedPath = decodeURIComponent(rawPath);
             // On Windows, the path might look like /C:/User...

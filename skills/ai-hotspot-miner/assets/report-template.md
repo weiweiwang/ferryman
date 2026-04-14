@@ -26,6 +26,8 @@ Adapt the structural headings dynamically to match the user's requested language
 - **Ranking**: [high / medium / low]
 - **Value**: [Why it matters / Strategic impact]
 - **Supporting Sources**: [List domains]
+- **Source URLs**: [List direct URLs used as evidence]
+- **Observed At UTC**: [YYYY-MM-DDTHH:MM:SSZ]
 - **Evidence Snippets**: [Concise metrics, upvotes, or factual text snippets establishing this hotspot]
 
 ### 2. [Hotspot Title]
@@ -33,9 +35,9 @@ Adapt the structural headings dynamically to match the user's requested language
 
 ## Cross-Source Evidence Matrix
 
-| Hotspot | Mentioned In | Key Signal / Metric |
-| :------ | :----------- | :------------------ |
-| [Title] | [Domain(s)]  | [e.g., 500 upvotes] |
+| Hotspot | Source | Source URL | Observed At UTC | Key Signal / Metric |
+| :------ | :----- | :--------- | :-------------- | :------------------ |
+| [Title] | [Domain] | [URL] | [YYYY-MM-DDTHH:MM:SSZ] | [e.g., 500 upvotes] |
 
 ## Blocked / Weak Sources & Methodology
 

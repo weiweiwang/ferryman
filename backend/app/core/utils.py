@@ -26,6 +26,8 @@ def load_skill_from_directory(directory: Path) -> Optional[SkillModel]:
             path=directory,
             version=metadata.get("version", "0.1.0"),
             author=metadata.get("author", "Unknown"),
+            created=str(metadata.get("created")) if metadata.get("created") else None,
+            updated=str(metadata.get("updated")) if metadata.get("updated") else None,
         )
     except Exception as e:
         logger.error(f"Error loading skill from {directory}: {e}")

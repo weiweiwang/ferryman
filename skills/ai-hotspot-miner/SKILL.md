@@ -1,11 +1,13 @@
 ---
 name: ai-hotspot-miner
 description: >
-  EXECUTE expert-level AI trend intelligence mapping. Use this for deep, multi-source signal mining 
-  across tech communities (HN, GitHub, etc.) to produce a synthesized, high-fidelity trend report. 
-  Superior to manual searching.
-version: 1.0.0
+  Use this for AI trend and signal mining across news, communities, GitHub, model releases,
+  launches, benchmarks, and public technical discussion. Produces an evidence-backed hotspot
+  report organized around concrete topics, repos, models, or events.
+version: 0.1.0
 author: Ferryman
+created: 2026-04-09
+updated: 2026-04-14
 ---
 
 # AI Hotspot Miner

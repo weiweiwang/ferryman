@@ -1,12 +1,13 @@
 ---
 name: seo-backlink-research
 description: >
-  CONDUCT specialized SEO Backlink Intelligence & Outreach discovery. Use this for competitor 
-  backlink profile analysis and automated submission target validation. Provides a prioritized 
-  action plan for link building. Use this instead of manual Link Building research.
-
-version: 1.2.0
+  Use this for SEO backlink opportunity discovery, competitor backlink footprint mining,
+  and lightweight validation of free or replicable listing/submission targets. Produces
+  prioritized link-building targets, verification evidence, and follow-up task candidates.
+version: 0.1.0
 author: Ferryman
+created: 2026-03-19
+updated: 2026-04-14
 ---
 
 # Skill: SEO Backlink Research

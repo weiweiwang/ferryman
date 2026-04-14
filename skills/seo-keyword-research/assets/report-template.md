@@ -11,6 +11,7 @@ Adapt the structural headings dynamically to match the user's requested language
 **Date**: [YYYY-MM-DD]
 **Input Type**: [Keyword / URL / Project Directory]
 **Input Value**: [user's original input]
+**Spreadsheet**: [reports/keyword-research-<topic>-<date>.csv]
 
 ## Executive Summary
 
@@ -76,6 +77,10 @@ Adapt the structural headings dynamically to match the user's requested language
 | # | Keyword | Intent | Volume | KD (0-100) | Trend | Cluster |
 |:--|:--|:--|:--|:--|:--|:--|
 | 1 | | | | | | |
+
+Save the same keyword list as CSV at `reports/keyword-research-<topic>-<date>.csv` with columns:
+
+`keyword,intent,volume,kd,trend,cluster,priority,leader_to_beat,status`
 
 ## 5. Topic Clusters
 

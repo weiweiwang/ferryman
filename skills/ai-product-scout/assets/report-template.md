@@ -23,10 +23,13 @@ Adapt the structural headings dynamically to match the user's requested language
 ### 1. [Product Name]
 
 - **URL**: [Link]
+- **Source URL**: [Where this product was discovered or verified]
+- **Observed At UTC**: [YYYY-MM-DDTHH:MM:SSZ]
 - **Category**: [e.g., coding, design, research, automation]
 - **What It Does**: [One-sentence value proposition]
 - **Why It's Interesting**: [Strategic insight — novel UX, explosive growth, clever moat, etc.]
 - **Growth Signals**: [Rankings, traffic, launch buzz, or other observable traction]
+- **Evidence**: [Concise facts, rankings, snippets, or metrics from the source]
 - **Potential Rating**: [high / medium / low]
 - **Deep Dive** *(optional, for top picks only)*: [Deeper analysis — key takeaways for builders, UX patterns worth studying, monetization model, technical approach]
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -9,7 +10,9 @@ import yaml
 
 
 NAME_RE = re.compile(r"^[a-z0-9-]{1,64}$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LOCAL_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+REQUIRED_FRONTMATTER_FIELDS = ("name", "description", "version", "author", "created", "updated")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +45,23 @@ def collect_local_link_errors(skill_dir: Path, content: str) -> list[str]:
     return errors
 
 
+def normalize_metadata_value(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def is_iso_date(value) -> bool:
+    text = normalize_metadata_value(value)
+    if not DATE_RE.fullmatch(text):
+        return False
+    try:
+        dt.date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
+
+
 def main() -> int:
     args = build_parser().parse_args()
     skill_dir = Path(args.skill_dir).expanduser()
@@ -72,17 +92,25 @@ def main() -> int:
                 errors.append(str(exc))
 
     if metadata:
+        for field in REQUIRED_FRONTMATTER_FIELDS:
+            if not normalize_metadata_value(metadata.get(field)):
+                errors.append(f"Frontmatter field '{field}' is required.")
+
         name = str(metadata.get("name", "")).strip()
         description = str(metadata.get("description", "")).strip()
-        if not name:
-            errors.append("Frontmatter field 'name' is required.")
-        elif not NAME_RE.fullmatch(name):
+        if name and not NAME_RE.fullmatch(name):
             errors.append("Frontmatter field 'name' must use lowercase letters, digits, and hyphens only.")
         elif skill_dir.name != name:
             errors.append(f"Directory name '{skill_dir.name}' must match skill name '{name}'.")
 
-        if not description:
-            errors.append("Frontmatter field 'description' is required.")
+        if metadata.get("version") != "0.1.0":
+            errors.append("Frontmatter field 'version' must be '0.1.0'.")
+
+        if metadata.get("created") and not is_iso_date(metadata.get("created")):
+            errors.append("Frontmatter field 'created' must use YYYY-MM-DD format.")
+
+        if metadata.get("updated") and not is_iso_date(metadata.get("updated")):
+            errors.append("Frontmatter field 'updated' must use YYYY-MM-DD format.")
 
         if len(content.splitlines()) > 500:
             warnings.append("SKILL.md is longer than 500 lines; consider moving detail into references/.")
@@ -97,6 +125,10 @@ def main() -> int:
         "metadata": {
             "name": metadata.get("name"),
             "description": metadata.get("description"),
+            "version": metadata.get("version"),
+            "author": metadata.get("author"),
+            "created": normalize_metadata_value(metadata.get("created")) or None,
+            "updated": normalize_metadata_value(metadata.get("updated")) or None,
         },
     }
     print(json.dumps(result, ensure_ascii=False))

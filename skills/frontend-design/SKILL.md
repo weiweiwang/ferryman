@@ -1,11 +1,13 @@
 ---
 name: frontend-design
 description: >
-  BUILD production-grade, distinctive frontend interfaces. Use this for any web UI task: 
-  components, pages, dashboards, or full applications. Enforces modern design systems 
-  (Tailwind v4, shadcn/ui, OKLCH) and eliminates generic "AI slop" aesthetics.
-version: 1.0.0
+  Use this when creating, redesigning, or substantially styling visible web UI:
+  pages, components, dashboards, prototypes, or full frontend experiences. Optimizes
+  for distinctive production-grade visual design, accessibility, and implementation polish.
+version: 0.1.0
 author: Ferryman
+created: 2026-04-13
+updated: 2026-04-14
 ---
 
 # Frontend Design Architect

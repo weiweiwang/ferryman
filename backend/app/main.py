@@ -13,7 +13,7 @@ from typing import Any, Optional
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from jsonrpcserver import async_dispatch, method, Success
-from sqlalchemy import and_, or_
+from sqlalchemy import String as SAString, and_, func, or_
 from sqlmodel import select, desc
 
 from app.core.config import get_settings
@@ -84,6 +84,45 @@ def fetch_datetime_cursor_page(
     items = items[:limit]
     last_item = items[-1]
     return items, encode_datetime_cursor(getattr(last_item, sort_field), last_item.id)
+
+
+def serialize_task(task: Task, *, detail: bool = False) -> dict[str, Any]:
+    progress = task.metadata_.get("progress_note", "")
+    payload = {
+        "id": task.id,
+        "session_id": task.session_id,
+        "parent_id": task.parent_id,
+        "title": task.title,
+        "status": task.status,
+        "progress": progress,
+        "updated_at": task.updated_at.isoformat(),
+    }
+    if detail:
+        payload.update({
+            "instruction": task.args.get("instruction", ""),
+            "payload": task.args.get("payload", {}),
+            "created_at": task.created_at.isoformat(),
+            "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+        })
+    return payload
+
+
+def serialize_schedule(schedule: Schedule, *, detail: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": schedule.id,
+        "name": schedule.name,
+        "cron": schedule.cron_expression,
+        "enabled": schedule.enabled,
+        "last_run_at": schedule.last_run_at.isoformat() if schedule.last_run_at else None,
+        "next_run_at": schedule.next_run_at.isoformat() if schedule.next_run_at else None,
+        "updated_at": schedule.updated_at.isoformat(),
+    }
+    if detail:
+        payload.update({
+            "instruction": schedule.args.get("instruction", ""),
+            "created_at": schedule.created_at.isoformat(),
+        })
+    return payload
 
 
 async def emit_refresh_event(
@@ -325,12 +364,15 @@ async def get_available_models(context):
 async def list_skills(context):
     if context and hasattr(context, "kernel"):
         skills = sorted(context.kernel.skills.values(), key=lambda skill: skill.name.lower())
+        skills = sorted(skills, key=lambda skill: getattr(skill, "updated", "") or "", reverse=True)
         return Success([
             {
                 "name": skill.name,
                 "description": skill.description,
                 "version": skill.version,
                 "author": skill.author,
+                "created": getattr(skill, "created", None),
+                "updated": getattr(skill, "updated", None),
             }
             for skill in skills
         ])
@@ -544,13 +586,33 @@ async def list_messages(context, session_id: str, cursor: Optional[str] = None, 
 
 
 @method
-async def list_tasks(context, session_id: Optional[str] = None, cursor: Optional[str] = None, limit: int = 50):
-    """Lists tasks, optionally filtered by session, with cursor-based pagination."""
-    logger.debug(f"Listing tasks (filter session_id: {session_id}, cursor: {cursor}, limit: {limit})")
+async def list_tasks(
+    context,
+    session_id: Optional[str] = None,
+    status: Optional[str] = None,
+    query: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+):
+    """Lists tasks, optionally filtered by session/status/query, with cursor-based pagination."""
+    logger.debug(
+        f"Listing tasks (session_id: {session_id}, status: {status}, query: {query}, cursor: {cursor}, limit: {limit})"
+    )
     with get_session() as session:
-        statement = select(Task)
+        base_filters = []
         if session_id:
-            statement = statement.where(Task.session_id == session_id)
+            base_filters.append(Task.session_id == session_id)
+        if query:
+            base_filters.append(
+                or_(
+                    Task.title.contains(query),
+                    Task.args.cast(SAString).contains(query),
+                )
+            )
+
+        statement = select(Task).where(*base_filters)
+        if status:
+            statement = statement.where(Task.status == status)
 
         tasks, next_cursor = fetch_datetime_cursor_page(
             session,
@@ -562,16 +624,89 @@ async def list_tasks(context, session_id: Optional[str] = None, cursor: Optional
         )
 
         logger.debug(f"Found {len(tasks)} tasks")
+        status_counts = dict.fromkeys(["pending", "running", "success", "failed", "canceled"], 0)
+        summary_rows = session.exec(
+            select(Task.status, func.count()).where(*base_filters).group_by(Task.status)
+        ).all()
+        for row_status, count in summary_rows:
+            status_counts[row_status] = count
+
         return Success({
-            "tasks": [{
-                "id": t.id,
-                "title": t.title,
-                "status": t.status,
-                "progress": t.metadata_.get("progress_note", ""),
-                "updated_at": t.updated_at.isoformat()
-            } for t in tasks],
+            "tasks": [serialize_task(t) for t in tasks],
             "next_cursor": next_cursor,
+            "summary": {
+                **status_counts,
+                "total": sum(status_counts.values()),
+            },
         })
+
+
+@method
+async def get_task(context, task_id: str):
+    """Returns a single task with editable details."""
+    logger.debug(f"Fetching task detail: {task_id}")
+    with get_session() as session:
+        task = session.get(Task, task_id)
+        if not task:
+            return Success({"status": "error", "message": "Task not found"})
+        return Success({"task": serialize_task(task, detail=True)})
+
+
+@method
+async def update_task(
+    context,
+    task_id: str,
+    title: Optional[str] = None,
+    status: Optional[str] = None,
+    progress_note: Optional[str] = None,
+    instruction: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+):
+    """Updates editable task fields."""
+    logger.info(f"Updating task: {task_id}")
+    allowed_statuses = {"pending", "running", "success", "failed", "canceled"}
+    if status is not None and status not in allowed_statuses:
+        return Success({"status": "error", "message": "Invalid task status"})
+
+    with get_session() as session:
+        task = session.get(Task, task_id)
+        if not task:
+            return Success({"status": "error", "message": "Task not found"})
+
+        if title is not None:
+            task.title = title
+        if status is not None:
+            task.status = status
+            task.finished_at = datetime.now(timezone.utc) if status in {"success", "failed", "canceled"} else None
+        if progress_note is not None:
+            metadata = dict(task.metadata_ or {})
+            metadata["progress_note"] = progress_note
+            task.metadata_ = metadata
+        if instruction is not None or payload is not None:
+            args = dict(task.args or {})
+            if instruction is not None:
+                args["instruction"] = instruction
+            if payload is not None:
+                args["payload"] = payload
+            task.args = args
+
+        task.updated_at = datetime.now(timezone.utc)
+        session.add(task)
+        session.commit()
+        return Success({"status": "success"})
+
+
+@method
+async def delete_task(context, task_id: str):
+    """Deletes a task."""
+    logger.info(f"Deleting task: {task_id}")
+    with get_session() as session:
+        task = session.get(Task, task_id)
+        if not task:
+            return Success({"status": "error", "message": "Task not found"})
+        session.delete(task)
+        session.commit()
+        return Success({"status": "success"})
 
 
 @method
@@ -591,15 +726,66 @@ async def list_schedules(context, cursor: Optional[str] = None, limit: int = 50)
 
         logger.debug(f"Found {len(schedules)} schedules")
         return Success({
-            "schedules": [{
-                "id": s.id,
-                "name": s.name,
-                "cron": s.cron_expression,
-                "enabled": s.enabled,
-                "updated_at": s.updated_at.isoformat(),
-            } for s in schedules],
+            "schedules": [serialize_schedule(s) for s in schedules],
             "next_cursor": next_cursor,
         })
+
+
+@method
+async def get_schedule(context, schedule_id: str):
+    """Returns a single schedule with editable details."""
+    logger.debug(f"Fetching schedule detail: {schedule_id}")
+    with get_session() as session:
+        schedule = session.get(Schedule, schedule_id)
+        if not schedule:
+            return Success({"status": "error", "message": "Schedule not found"})
+        return Success({"schedule": serialize_schedule(schedule, detail=True)})
+
+
+@method
+async def update_schedule(
+    context,
+    schedule_id: str,
+    name: Optional[str] = None,
+    cron: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    instruction: Optional[str] = None,
+):
+    """Updates editable schedule fields."""
+    logger.info(f"Updating schedule: {schedule_id}")
+    with get_session() as session:
+        schedule = session.get(Schedule, schedule_id)
+        if not schedule:
+            return Success({"status": "error", "message": "Schedule not found"})
+
+        if name is not None:
+            schedule.name = name
+        if cron is not None:
+            schedule.cron_expression = cron
+        if enabled is not None:
+            schedule.enabled = enabled
+        if instruction is not None:
+            args = dict(schedule.args or {})
+            args["instruction"] = instruction
+            schedule.args = args
+
+        schedule.updated_at = datetime.now(timezone.utc)
+        session.add(schedule)
+        session.commit()
+        return Success({"status": "success"})
+
+
+@method
+async def delete_schedule(context, schedule_id: str):
+    """Deletes a schedule."""
+    logger.info(f"Deleting schedule: {schedule_id}")
+    with get_session() as session:
+        schedule = session.get(Schedule, schedule_id)
+        if not schedule:
+            return Success({"status": "error", "message": "Schedule not found"})
+        session.delete(schedule)
+        session.commit()
+        return Success({"status": "success"})
 
 
 @app.websocket("/ws")

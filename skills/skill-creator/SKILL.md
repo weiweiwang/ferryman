@@ -1,8 +1,13 @@
 ---
 name: skill-creator
-description: Create or update skills by drafting in the current session workspace, validating structure, and publishing to the installed skills directory when ready.
+description: >
+  Create or update Ferryman skills by drafting in the current session workspace,
+  validating structure and local links, and optionally publishing to the installed
+  skills directory after explicit approval.
 version: 0.1.0
 author: Ferryman
+created: 2026-04-08
+updated: 2026-04-14
 ---
 
 # Skill Creator
@@ -38,6 +43,6 @@ A skill's lifecycle is only complete when it is published.
 ## Safety & Quality Guardrails
 
 1. **Isolation**: Never edit files in the system's installed skills directory directly. Always work in the draft workspace and use the publishing tool.
-2. **Metadata Integrity**: Every `SKILL.md` must contain valid YAML frontmatter (`name`, `description`).
-3. **Link Precision**: Relative links in `SKILL.md` (e.g., `[template](assets/template.md)`) must be validated against actual file existence.
+2. **Metadata Integrity**: Every `SKILL.md` must contain valid YAML frontmatter with `name`, `description`, `version`, `author`, `created`, and `updated`.
+3. **Link Precision**: Relative links in `SKILL.md` must be validated against actual file existence; for example, `assets/template.md` must exist before linking to it.
 4. **No Bloat**: Avoid adding `README.md` or git-related files to the skill folder unless requested.

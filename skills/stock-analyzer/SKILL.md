@@ -5,8 +5,10 @@ description: >
   or investment research for a public company, equity, or ticker such as Alibaba,
   BABA, 9988.HK, Tencent, or 0700.HK. Produces a data-backed report with 5-year
   financial audit, margin of safety, and Wyckoff technical analysis.
-version: 1.0.0
+version: 0.1.0
 author: Ferryman
+created: 2026-04-12
+updated: 2026-04-14
 ---
 
 # Stock Analysis Research
@@ -66,7 +68,7 @@ Save the analysis to `reports/stock-audit-<ticker>-<date>.md`. Follow the struct
 1. **Tone**: Institutional, objective, and data-backed. Avoid hype or "clickbait" financial language.
 2. **Formatting**: 
     - Use double newlines for paragraph spacing.
-    - **Bold (**`)** critical financial numbers.
+    - Bold critical financial numbers, e.g. **$123.4M** or **18.2%**.
     - Strictly follow CJK typography rules: **No spaces** between Chinese characters and English letters/numbers (e.g., "300HKD").
 3. **Accuracy**: Never hallucinate historical metrics. If data is missing (e.g., 2021 was a 0 in the fetcher), acknowledge the limitation.
 4. **Actionable Triggers**: Every report must conclude with a specific **Buy Zone** and **Stop-Loss**.

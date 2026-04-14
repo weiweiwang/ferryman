@@ -20,6 +20,8 @@ class SkillModel(BaseModel):
     sop_content: Optional[str] = None
     version: str = "0.1.0"
     author: str = "Unknown"
+    created: Optional[str] = None
+    updated: Optional[str] = None
 
 class MCPToolModel(BaseModel):
     name: str

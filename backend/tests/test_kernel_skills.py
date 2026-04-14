@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import shutil
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,8 @@ import pytest
 from app.core.config import Settings
 from app.core.deps import AgentDeps
 from app.core.kernel import FerrymanKernel
+from app.core.toolkits.command import CommandToolkit
+from app.core.toolkits.file import FileToolkit
 from app.core.toolkits.skill import SkillToolkit
 
 # Setup paths for tests
@@ -59,6 +62,13 @@ version: 1.0.0
     skill_md.write_text(content, encoding="utf-8")
 
 
+def create_mock_skill_with_script(name: str, desc: str, directory: Path):
+    create_mock_skill(name, desc, directory)
+    scripts_dir = directory / name / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    (scripts_dir / "fetch.py").write_text("print('ok')\n", encoding="utf-8")
+
+
 def create_draft_skill(skill_dir: Path, name: str = "draft-skill"):
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
@@ -102,6 +112,33 @@ def test_read_skill_sop():
     assert "Error: Skill 'non_existent' not found" in error_sop
 
 
+@pytest.mark.asyncio
+async def test_skill_context_can_list_its_own_bundled_scripts():
+    create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
+    kernel = FerrymanKernel(create_test_settings())
+    kernel.scan_skills()
+    skill = kernel.skills["bundled_skill"]
+
+    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+
+    result = await FileToolkit.list_files(ctx, str(skill.path / "scripts"))
+
+    assert "fetch.py" in result
+
+
+@pytest.mark.asyncio
+async def test_skill_context_keeps_writes_inside_session_workspace():
+    create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
+    kernel = FerrymanKernel(create_test_settings())
+    kernel.scan_skills()
+    skill = kernel.skills["bundled_skill"]
+
+    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+
+    with pytest.raises(ValueError, match="Path escapes session workspace"):
+        await FileToolkit.write_file(ctx, str(skill.path / "scripts" / "generated.txt"), "nope")
+
+
 # --- Publish Skill Tests ---
 @pytest.mark.asyncio
 async def test_publish_skill_moves_draft_and_registers_it():
@@ -138,6 +175,46 @@ async def test_publish_skill_rejects_paths_outside_workspace():
         await SkillToolkit.publish_skill(ctx, str(outside_dir))
 
 
+@pytest.mark.asyncio
+async def test_skill_creator_draft_publish_lifecycle_stays_in_allowed_paths():
+    shutil.copytree(REPO_ROOT / "skills" / "skill-creator", TEST_BUNDLED_SKILLS / "skill-creator")
+    kernel = FerrymanKernel(create_test_settings())
+    kernel.scan_skills()
+
+    session_id = "creator-session"
+    workspace = kernel.get_session_workspace(session_id)
+    creator_ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id, skill_name="skill-creator"))
+
+    init_result = json.loads(
+        await CommandToolkit.run_skill_script(
+            creator_ctx,
+            "init_skill.py",
+            ["demo-skill", "--description", "Demo skill", "--with-scripts"],
+        )
+    )
+    draft_dir = workspace / "demo-skill"
+
+    assert init_result["ok"] is True
+    assert draft_dir.exists()
+    assert "SKILL.md" in await FileToolkit.list_files(creator_ctx, "demo-skill")
+
+    validate_result = json.loads(
+        await CommandToolkit.run_skill_script(creator_ctx, "quick_validate.py", ["./demo-skill"])
+    )
+    assert validate_result["ok"] is True
+
+    publish_result = json.loads(await SkillToolkit.publish_skill(creator_ctx, "demo-skill"))
+    published_dir = TEST_USER_SKILLS / "demo-skill"
+
+    assert publish_result["ok"] is True
+    assert not draft_dir.exists()
+    assert published_dir.exists()
+    assert kernel.skills["demo-skill"].path == published_dir
+
+    published_ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id, skill_name="demo-skill"))
+    assert "SKILL.md" in await FileToolkit.list_files(published_ctx, str(published_dir))
+
+
 # --- Script Level Tests (Creator Scripts) ---
 def test_init_skill_creates_draft_structure(tmp_path):
     output_dir = tmp_path / "workspace"
@@ -160,7 +237,13 @@ def test_init_skill_creates_draft_structure(tmp_path):
 
     draft_dir = output_dir / "demo-skill"
     assert result.stdout.strip() == str(draft_dir)
-    assert (draft_dir / "SKILL.md").exists()
+    skill_md = draft_dir / "SKILL.md"
+    assert skill_md.exists()
+    skill_content = skill_md.read_text(encoding="utf-8")
+    assert "version: 0.1.0" in skill_content
+    assert "author: Ferryman" in skill_content
+    assert f"created: {date.today().isoformat()}" in skill_content
+    assert f"updated: {date.today().isoformat()}" in skill_content
     assert (draft_dir / "scripts").is_dir()
     assert (draft_dir / "references").is_dir()
 
@@ -172,6 +255,10 @@ def test_quick_validate_accepts_valid_skill(tmp_path):
         """---
 name: demo-skill
 description: Demo trigger description
+version: 0.1.0
+author: Ferryman
+created: 2026-04-14
+updated: 2026-04-14
 ---
 # Demo Skill
 """,
@@ -188,6 +275,9 @@ description: Demo trigger description
     payload = json.loads(result.stdout)
     assert payload["ok"] is True
     assert payload["metadata"]["name"] == "demo-skill"
+    assert payload["metadata"]["version"] == "0.1.0"
+    assert payload["metadata"]["created"] == "2026-04-14"
+    assert payload["metadata"]["updated"] == "2026-04-14"
 
 
 def test_quick_validate_rejects_name_mismatch(tmp_path):
@@ -197,6 +287,10 @@ def test_quick_validate_rejects_name_mismatch(tmp_path):
         """---
 name: demo-skill
 description: Demo trigger description
+version: 0.1.0
+author: Ferryman
+created: 2026-04-14
+updated: 2026-04-14
 ---
 # Demo Skill
 """,
