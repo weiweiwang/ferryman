@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+TMP_INPUT="$(mktemp)"
+trap 'rm -f "$TMP_INPUT"' EXIT
+cat > "$TMP_INPUT"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$local_sha" =~ ^0+$ ]]; then
+      continue
+    fi
+    if [[ "$remote_sha" =~ ^0+$ ]]; then
+      gitleaks detect --redact --verbose --config .gitleaks.toml --log-opts="$local_sha --not --remotes"
+    else
+      gitleaks detect --redact --verbose --config .gitleaks.toml --log-opts="$remote_sha..$local_sha"
+    fi
+  done < "$TMP_INPUT"
+fi
+
+python3 scripts/security/secret_scan.py --pre-push < "$TMP_INPUT"

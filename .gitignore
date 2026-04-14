@@ -11,6 +11,9 @@ venv/
 ENV/
 env/
 .env
+.env.*
+!.env.example
+!.env.*.example
 .pytest_cache/
 .coverage
 htmlcov/
@@ -24,6 +27,10 @@ htmlcov/
 backend/app/db/ferryman.db
 
 # Frontend
+frontend/.env.release.local
+frontend/.env*.local
+!frontend/.env.example
+!frontend/.env.*.example
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
@@ -37,5 +44,16 @@ frontend/src-tauri/gen/
 .DS_Store
 *.swp
 *.swo
+
+# Signing / secrets
+*.p8
+*.pem
+*.key
+*.mobileprovision
+
+# Local agent instructions
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 
 dist

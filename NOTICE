@@ -1,0 +1,23 @@
+Ferryman
+Copyright 2026 Beijing Huishuo Mobile Technology Co., Ltd.
+
+Ferryman source code is licensed under the Apache License, Version 2.0.
+
+Trademark notice:
+The names "Ferryman" and "摆渡人", the Ferryman logo, application icons,
+product trade dress, and official distribution identities are trademarks or
+brand assets of Beijing Huishuo Mobile Technology Co., Ltd. The Apache 2.0
+license for the source code does not grant permission to use those marks to
+suggest an official or endorsed distribution.
+
+Third-party components:
+Ferryman includes or depends on open source components from their respective
+copyright holders, including but not limited to Tauri, React, Vite, Tailwind
+CSS, FastAPI, Pydantic AI, SQLModel, Playwright, Playwright Stealth,
+Trafilatura, and Rust/Python/JavaScript ecosystem packages. These components
+remain subject to their own license terms.
+
+Model and service notice:
+Ferryman can connect to third-party AI providers and locally hosted models.
+Those models, APIs, and services are not licensed by this NOTICE file and may
+be subject to separate terms from their providers.

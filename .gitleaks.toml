@@ -1,0 +1,52 @@
+title = "Ferryman secret scanning"
+
+[allowlist]
+description = "Allow examples and dependency lockfiles"
+paths = [
+  '''(^|/)frontend/\.env\.release\.example$''',
+  '''(^|/)\.env(\..*)?\.example$''',
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)Cargo\.lock$''',
+]
+
+[[rules]]
+id = "google-api-key"
+description = "Google or Gemini API key"
+regex = '''AIza[0-9A-Za-z_-]{35}'''
+keywords = ["AIza"]
+
+[[rules]]
+id = "openai-compatible-api-key"
+description = "OpenAI-compatible API key"
+regex = '''\bsk-[A-Za-z0-9_-]{20,}\b'''
+keywords = ["sk-"]
+
+[[rules]]
+id = "github-token"
+description = "GitHub token"
+regex = '''\b(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b'''
+keywords = ["ghp_", "github_pat_"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS access key"
+regex = '''\bAKIA[0-9A-Z]{16}\b'''
+keywords = ["AKIA"]
+
+[[rules]]
+id = "private-key"
+description = "Private key block"
+regex = '''-----BEGIN [A-Z ]*PRIVATE KEY-----'''
+keywords = ["BEGIN", "PRIVATE KEY"]
+
+[[rules]]
+id = "apple-notary-env"
+description = "Apple signing or notarization environment value"
+regex = '''(?i)\b(APPLE_SIGNING_IDENTITY|APPLE_NOTARY_ISSUER_ID|APPLE_NOTARY_KEY_ID|APPLE_NOTARY_KEY_PATH)\s*=\s*['"][^'"]+['"]'''
+keywords = ["APPLE_SIGNING", "APPLE_NOTARY"]
+
+[[rules]]
+id = "apple-authkey"
+description = "Apple notarization private key file"
+regex = '''AuthKey_[A-Z0-9]{10}\.p8'''
+keywords = ["AuthKey_"]
