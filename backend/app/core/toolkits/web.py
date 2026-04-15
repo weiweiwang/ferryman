@@ -4,7 +4,7 @@ from app.core.deps import AgentDeps
 from typing import Optional
 
 class WebToolkit:
-    """RISC Web Actions: 精简网页控制内核 (4 Atomic Instructions)."""
+    """Browser tools for page navigation, inspection, interaction, and capture."""
 
     @staticmethod
     def get_tools():
@@ -20,27 +20,39 @@ class WebToolkit:
 
     @staticmethod
     async def browser_navigate(ctx: RunContext[AgentDeps], url: str, headless: Optional[bool] = None) -> str:
-        """Navigate to a website url (e.g. 'https://bing.com') using the stealth browser.
-        Set headless=False if you encounter CAPTCHAs or want to show the browser to the user.
+        """Open a URL in the session browser.
+
+        Set `headless=False` when the browser should stay visible to the user.
         """
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id, headless=headless)
         return await browser.navigate(url)
 
     @staticmethod
     async def browser_get_distilled_dom(ctx: RunContext[AgentDeps]) -> str:
-        """Extract pure, hyper-clean text/markdown content from the current page. Best for reading articles."""
+        """Extract readable page text for analysis.
+
+        Best for article or content reading, not precise interaction targeting.
+        """
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.get_distilled_dom()
 
     @staticmethod
     async def browser_click(ctx: RunContext[AgentDeps], selector: str) -> str:
-        """Click on an element using an ID from the latest browser_aria_snapshot (e.g. '12' or '[12]')."""
+        """Click an element in the current page.
+
+        Accepts a selector. IDs from `browser_aria_snapshot` are recommended
+        for stability.
+        """
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.click(selector)
 
     @staticmethod
     async def browser_type(ctx: RunContext[AgentDeps], selector: str, text: str) -> str:
-        """Type text into an input field using an ID from the latest browser_aria_snapshot (e.g. '12' or '[12]')."""
+        """Type into an element in the current page.
+
+        Accepts a selector. IDs from `browser_aria_snapshot` are recommended
+        for stability.
+        """
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.type(selector, text)
 
@@ -49,19 +61,23 @@ class WebToolkit:
 
     @staticmethod
     async def browser_aria_snapshot(ctx: RunContext[AgentDeps]) -> str:
-        """Get a high-density 'Accessibility Tree' snapshot. Lists UI elements by Role and Name."""
+        """Return an accessibility snapshot with stable IDs for later interactions."""
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.get_aria_snapshot()
         
     @staticmethod
     async def browser_wait(ctx: RunContext[AgentDeps], timeout_ms: int = 2000) -> str:
-        """Wait for a certain amount of time before continuing."""
+        """Wait for the given number of milliseconds."""
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.wait(timeout_ms)
 
     @staticmethod
     async def browser_screenshot(ctx: RunContext[AgentDeps], selector: Optional[str] = None) -> BinaryImage:
-        """Take a screenshot of the page, or of a specific element identified by the latest browser_aria_snapshot."""
+        """Capture a page or element screenshot.
+
+        Saves the image under the session workspace and returns it as
+        `BinaryImage`.
+        """
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         screenshot_dir = ctx.deps.kernel.get_session_workspace(ctx.deps.session_id) / "screenshots"
         return await browser.screenshot(selector, output_dir=screenshot_dir)

@@ -5,7 +5,11 @@ from pydantic_ai.tools import RunContext
 from app.core.deps import AgentDeps
 
 class FileToolkit:
-    """Tools for managing files within the session workspace."""
+    """Read and write files for the current session.
+
+    Writes stay inside the session workspace. Reads may also access the current
+    skill's bundled resources.
+    """
 
     @staticmethod
     def get_tools():
@@ -13,7 +17,7 @@ class FileToolkit:
 
     @staticmethod
     def _normalize_workspace_path(file_path: str) -> str:
-        """Normalize agent-supplied paths so they stay rooted in the session workspace."""
+        """Normalize an agent-supplied relative path for workspace use."""
         file_path = file_path.strip()
         for prefix in ("./",):
             file_path = file_path.removeprefix(prefix)
@@ -21,7 +25,10 @@ class FileToolkit:
 
     @staticmethod
     def resolve_session_path(kernel, session_id: str, raw_path: str) -> Path:
-        """Resolve a user-supplied workspace-relative path into an absolute workspace path."""
+        """Resolve a path inside the current session workspace.
+
+        Raises ValueError if the path escapes the workspace.
+        """
         workspace_dir = kernel.get_session_workspace(session_id).resolve()
         normalized = FileToolkit._normalize_workspace_path(raw_path)
         candidate = (workspace_dir / normalized).resolve()
@@ -35,7 +42,7 @@ class FileToolkit:
 
     @staticmethod
     def _resolve_current_skill_resource_path(kernel, skill_name: str, raw_path: str) -> Path:
-        """Resolve a read-only path inside the currently executing skill directory."""
+        """Resolve a read-only path inside the current skill directory."""
         skill = kernel.skills.get(skill_name)
         if not skill:
             raise ValueError(f"Current skill '{skill_name}' is not registered.")
@@ -54,13 +61,10 @@ class FileToolkit:
 
     @staticmethod
     def resolve_read_path(kernel, session_id: str, raw_path: str, skill_name: str | None = None) -> Path:
-        """
-        Resolve a read path for agent tools.
+        """Resolve a readable path for agent tools.
 
-        Normal file access stays inside the session workspace. During skill
-        execution, read-only access may also target that skill's own bundled
-        resources, because installed apps place bundled skills under the app
-        Resources directory instead of the user workspace.
+        Prefers the session workspace. During skill execution, falls back to the
+        current skill's bundled resources for read-only access.
         """
         try:
             workspace_path = FileToolkit.resolve_session_path(kernel, session_id, raw_path)
@@ -81,7 +85,10 @@ class FileToolkit:
 
     @staticmethod
     async def read_file(ctx: RunContext[AgentDeps], file_path: str) -> str:
-        """Read a file from the session workspace."""
+        """Read a file from the session workspace or current skill resources.
+
+        Returns an error string if the file does not exist.
+        """
         p = FileToolkit.resolve_read_path(
             ctx.deps.kernel,
             ctx.deps.session_id,
@@ -94,7 +101,11 @@ class FileToolkit:
 
     @staticmethod
     async def write_file(ctx: RunContext[AgentDeps], file_path: str, content: str) -> str:
-        """Write content to a file in the session workspace."""
+        """Write a UTF-8 file inside the session workspace.
+
+        Creates parent directories as needed. Raises ValueError if the path
+        escapes the workspace.
+        """
         normalized = FileToolkit._normalize_workspace_path(file_path)
         full_path = FileToolkit.resolve_session_path(ctx.deps.kernel, ctx.deps.session_id, file_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +114,10 @@ class FileToolkit:
 
     @staticmethod
     async def list_files(ctx: RunContext[AgentDeps], directory: str = ".") -> str:
-        """List files and directories in the session workspace."""
+        """List entries in the session workspace or current skill resources.
+
+        Returns an error string if the directory does not exist.
+        """
         p = FileToolkit.resolve_read_path(
             ctx.deps.kernel,
             ctx.deps.session_id,

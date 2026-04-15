@@ -141,7 +141,7 @@ async def test_skill_context_keeps_writes_inside_session_workspace():
 
 # --- Publish Skill Tests ---
 @pytest.mark.asyncio
-async def test_publish_skill_moves_draft_and_registers_it():
+async def test_publish_skill_copies_draft_and_registers_it():
     kernel = FerrymanKernel(create_test_settings())
     session_id = "publish-session"
     workspace = kernel.get_session_workspace(session_id)
@@ -158,7 +158,7 @@ async def test_publish_skill_moves_draft_and_registers_it():
     assert payload["skill_name"] == "draft-skill"
     assert payload["registered"] is True
     assert published_dir.exists()
-    assert not draft_dir.exists()
+    assert draft_dir.exists()
     assert "draft-skill" in kernel.skills
 
 
@@ -207,7 +207,7 @@ async def test_skill_creator_draft_publish_lifecycle_stays_in_allowed_paths():
     published_dir = TEST_USER_SKILLS / "demo-skill"
 
     assert publish_result["ok"] is True
-    assert not draft_dir.exists()
+    assert draft_dir.exists()
     assert published_dir.exists()
     assert kernel.skills["demo-skill"].path == published_dir
 

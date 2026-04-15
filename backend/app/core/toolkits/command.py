@@ -11,7 +11,7 @@ from app.core.deps import AgentDeps
 
 
 def _coerce_args(v: object) -> list[str] | None:
-    """Coerce stringified JSON arrays (a common LLM tool-call quirk) into List[str]."""
+    """Coerce a JSON-encoded argument list into `list[str]`."""
     if v is None or isinstance(v, list):
         return v
     if isinstance(v, str):
@@ -31,6 +31,7 @@ class CommandToolkit:
 
     @staticmethod
     def _resolve_script_path(ctx: RunContext[AgentDeps], script_name: str) -> Path:
+        """Resolve a script path under the current skill's `scripts/` directory."""
         skill_name = ctx.deps.skill_name
         if not skill_name:
             raise RuntimeError("run_skill_script is only available inside a skill execution context.")
@@ -54,6 +55,7 @@ class CommandToolkit:
 
     @staticmethod
     def _build_command(script_path: Path, args: List[str]) -> List[str]:
+        """Build the subprocess command for a script based on its file type."""
         if script_path.suffix == ".py":
             if getattr(sys, "frozen", False):
                 return [sys.executable, "--run-python-script", str(script_path), *args]
@@ -69,9 +71,11 @@ class CommandToolkit:
         args: Annotated[List[str] | None, BeforeValidator(_coerce_args)] = None,
         timeout_ms: int = 10000,
     ) -> str:
-        """
-        Run a script from the skill's scripts/ directory.
-        args: list of strings (e.g. ["--ticker", "AAPL"])
+        """Run a script from the current skill's `scripts/` directory.
+
+        The script runs with the current session workspace as its working
+        directory. Returns a JSON string with command, exit code, timeout
+        status, stdout, and stderr.
         """
         resolved_args = args or []
         script_path = CommandToolkit._resolve_script_path(ctx, script_name)

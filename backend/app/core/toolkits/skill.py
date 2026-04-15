@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class SkillToolkit:
-    """Tools for discovering and executing specialized Skills."""
+    """Delegate work to installed skills and publish draft skills."""
 
     @staticmethod
     def get_tools():
@@ -25,10 +25,10 @@ class SkillToolkit:
         skill_name: str,
         instruction: str,
     ) -> str:
-        """
-        Delegate a task to a specialized Skill agent.
-        Use this when a skill in <Available Skills> matches the user's intent.
-        The skill agent has its own expert-level SOP and will use Browser/File tools autonomously.
+        """Run an installed skill with the given instruction.
+
+        `skill_name` must exist in the registered skill list. Returns the
+        skill's output text. Raises `RuntimeError` if the skill run fails.
         """
         kernel = ctx.deps.kernel
         session_id = ctx.deps.session_id
@@ -108,9 +108,11 @@ class SkillToolkit:
         ctx: RunContext[AgentDeps],
         draft_path: str,
     ) -> str:
-        """
-        Publish a draft skill directory from the current session workspace into the user skills directory.
-        The draft must stay inside the current session workspace and include a valid SKILL.md.
+        """Publish a draft skill from the current session workspace.
+
+        The draft directory must stay inside the workspace and contain a valid
+        `SKILL.md`. Copies the directory into the user skills folder and returns
+        a JSON result string.
         """
         kernel = ctx.deps.kernel
         workspace_dir = kernel.get_session_workspace(ctx.deps.session_id).resolve()
@@ -139,7 +141,7 @@ class SkillToolkit:
         if destination_path.exists():
             raise RuntimeError(f"Skill '{skill.name}' already exists in user skills.")
 
-        shutil.move(str(source_path), str(destination_path))
+        shutil.copytree(str(source_path), str(destination_path))
         kernel.scan_skills()
 
         return json.dumps(
