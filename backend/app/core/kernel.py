@@ -54,6 +54,10 @@ def _summarize_tool_input_value(key: str, value: Any) -> Any:
     return value
 
 
+class LLMConfigurationError(RuntimeError):
+    """Raised when the active model provider is not configured locally."""
+
+
 # ---------------------------------------------------------------------------
 # FerrymanKernel – the heart of the OS
 # ---------------------------------------------------------------------------
@@ -67,6 +71,7 @@ class FerrymanKernel:
         self._master_agent: Optional[Agent] = None
         self._browsers: Dict[str, Any] = {}
         self._session_headless: Dict[str, bool] = {}
+        self.schedule_manager: Optional[Any] = None
         # self.mcp_client: Any = None  # To be initialized later
         self._init_directories(settings)
         init_db()
@@ -357,7 +362,12 @@ class FerrymanKernel:
     def _init_llm_model(self) -> Any:
         """Initialize the LLM model based on current settings."""
         active_model_id = self._settings.get_active_model_id()
-        provider, model_name = active_model_id.split(":", 1) if ":" in active_model_id else ("gemini", active_model_id)
+        if not active_model_id:
+            raise LLMConfigurationError("No active model is selected. Configure a provider and choose a model first.")
+        if ":" not in active_model_id:
+            raise LLMConfigurationError(f"Active model `{active_model_id}` is invalid.")
+
+        provider, model_name = active_model_id.split(":", 1)
 
         # Get provider-specific keys/urls from Registry
         provider_config = self._settings.get_provider_llm_config(provider)
@@ -374,6 +384,22 @@ class FerrymanKernel:
             base_url = provider_catalog[provider]["placeholder_base_url"]
         if provider == "anthropic" and isinstance(base_url, str) and base_url.rstrip("/").endswith("/v1"):
             base_url = base_url.rstrip("/")[:-3]
+
+        if provider not in provider_catalog:
+            raise LLMConfigurationError(f"Active model provider `{provider}` is not supported.")
+
+        missing_fields: list[str] = []
+        if provider in {"gemini", "openai", "anthropic", "qwen", "kimi", "doubao", "custom"} and not api_key:
+            missing_fields.append("API Key")
+        if provider == "custom" and not base_url:
+            missing_fields.append("Base URL")
+        if missing_fields:
+            provider_label = provider_catalog.get(provider, {}).get("label", provider)
+            missing_text = " and ".join(missing_fields)
+            raise LLMConfigurationError(
+                f"Active model `{provider}:{model_name}` is selected, but {provider_label} is missing {missing_text}. "
+                "Configure the provider in Settings or choose another model."
+            )
 
         p_kwargs = {k: v for k, v in {"api_key": api_key, "base_url": base_url}.items() if v is not None}
 

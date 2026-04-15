@@ -65,9 +65,12 @@ class ScheduleModel(BaseModel):
     name: str
     cron_expression: str
     args: Dict[str, Any] = Field(default_factory=dict)
+    timezone: str = "UTC"
     enabled: bool = True
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
+    total_run_count: int = 0
+    last_run_result: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 

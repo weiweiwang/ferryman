@@ -88,6 +88,24 @@ type BrowserRuntimeStatus = {
   download_url?: string;
 };
 
+type ModelReadinessIssueCode =
+  | 'no_runnable_model'
+  | 'missing_api_key'
+  | 'missing_base_url'
+  | 'active_model_invalid';
+
+type ModelReadinessIssue = {
+  code: ModelReadinessIssueCode;
+  provider?: string;
+  missing?: string[];
+};
+
+type ModelReadiness = {
+  ready: boolean;
+  active_model: string | null;
+  issue: ModelReadinessIssue | null;
+};
+
 type SendMode = 'mod_enter' | 'enter';
 
 type SkillSummary = {
@@ -132,7 +150,8 @@ export default function App() {
   const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
   const [currentView, setCurrentView] = useState<'chat' | 'tasks' | 'schedules' | 'skills' | 'settings'>('chat');
   const [settingsTab, setSettingsTab] = useState<'models' | 'logs'>('models');
-  const [activeModel, setActiveModel] = useState<string>('gemini:gemini-3-flash-preview');
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [modelReadiness, setModelReadiness] = useState<ModelReadiness | null>(null);
   const [llmConfigs, setLlmConfigs] = useState<LlmProviderConfig[]>([]);
   const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({});
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -146,6 +165,7 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const didApplyInitialModelRouteRef = useRef(false);
   const sendShortcutHint = sendMode === 'enter' ? t('chat.send_shortcut_enter_hint') : t('chat.send_shortcut_mod_enter_hint');
 
   useEffect(() => {
@@ -228,14 +248,25 @@ export default function App() {
 
     setIsRefreshingModels(true);
     try {
-      const [model, configs, models] = await Promise.all([
+      const [model, readiness, configs, models] = await Promise.all([
         call('get_active_model'),
+        call('get_model_readiness'),
         call('get_llm_configs'),
         call('get_available_models'),
       ]);
-      setActiveModel(model as string);
+      const nextReadiness = readiness as ModelReadiness;
+      setActiveModel((model as string | null) ?? null);
+      setModelReadiness(nextReadiness);
       setLlmConfigs(configs as LlmProviderConfig[]);
       setAvailableModels(models as Record<string, string[]>);
+
+      if (!didApplyInitialModelRouteRef.current) {
+        didApplyInitialModelRouteRef.current = true;
+        if (!nextReadiness.ready) {
+          setSettingsTab('models');
+          setCurrentView('settings');
+        }
+      }
     } catch (error) {
       console.error('Failed to refresh model settings:', error);
     } finally {
@@ -292,7 +323,7 @@ export default function App() {
   }, [isConnected]);
 
   const handleSend = () => {
-    if (!input.trim()) return;
+    if (!modelReadiness?.ready || !input.trim()) return;
     execute(input);
     setInput('');
   };
@@ -326,7 +357,7 @@ export default function App() {
 
   const handleSetActiveModel = async (model: string) => {
     await call('set_active_model', { model });
-    setActiveModel(model);
+    await refreshModelSettings();
   };
 
   const providerLabels = Object.fromEntries(
@@ -335,7 +366,9 @@ export default function App() {
   const availableModelValues = Object.entries(availableModels).flatMap(([provider, models]) =>
     models.map((model) => buildModelOptionValue(provider, model))
   );
-  const selectedModelValue = availableModelValues.includes(activeModel) ? activeModel : '';
+  const selectedModelValue = activeModel && availableModelValues.includes(activeModel) ? activeModel : '';
+  const isModelReady = modelReadiness?.ready ?? true;
+  const shouldWarnModelSelector = modelReadiness?.issue?.code === 'no_runnable_model';
 
   return (
     <div className="flex w-full h-full bg-transparent text-white selection:bg-white/20 selection:text-white font-sans">
@@ -533,51 +566,64 @@ export default function App() {
                 {messages.length === 0 ? (
                     <div className="flex-1 flex items-center justify-center pb-10">
                       <div className={CHAT_RAIL_CLASS}>
-                        <div className="mb-8 flex items-end justify-between gap-8">
-                          <div className="space-y-3">
-                            <h2 className="display-title text-5xl leading-none text-white/90">{t('chat.welcome_title')}</h2>
-                          </div>
-                          <p className="hidden max-w-xs text-right text-sm font-medium leading-6 text-white/38 md:block">{t('chat.welcome_subtitle')}</p>
-                        </div>
+                        {isModelReady ? (
+                          <>
+                            <div className="mb-8 flex items-end justify-between gap-8">
+                              <div className="space-y-3">
+                                <h2 className="display-title text-5xl leading-none text-white/90">{t('chat.welcome_title')}</h2>
+                              </div>
+                              <p className="hidden max-w-xs text-right text-sm font-medium leading-6 text-white/38 md:block">{t('chat.welcome_subtitle')}</p>
+                            </div>
 
-                        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-6">
-                         <QuickAction
-                           index="01"
-                           icon={<Flame size={16} className="text-orange-300" />}
-                           title={t('chat.quick_actions.hotspot_title')}
-                           onClick={() => setInput(t('chat.quick_actions.hotspot_prompt'))}
-                         />
-                         <QuickAction
-                           index="02"
-                           icon={<Radar size={16} className="text-sky-300" />}
-                           title={t('chat.quick_actions.scout_title')}
-                           onClick={() => setInput(t('chat.quick_actions.scout_prompt'))}
-                         />
-                         <QuickAction
-                           index="03"
-                           icon={<Target size={16} className="text-emerald-300" />}
-                           title={t('chat.quick_actions.keyword_title')}
-                           onClick={() => setInput(t('chat.quick_actions.keyword_prompt'))}
-                         />
-                         <QuickAction
-                           index="04"
-                           icon={<Link size={16} className="text-violet-300" />}
-                           title={t('chat.quick_actions.backlink_title')}
-                           onClick={() => setInput(t('chat.quick_actions.backlink_prompt'))}
-                         />
-                         <QuickAction
-                           index="05"
-                           icon={<TrendingUp size={16} className="text-rose-300" />}
-                           title={t('chat.quick_actions.stock_title')}
-                           onClick={() => setInput(t('chat.quick_actions.stock_prompt'))}
-                         />
-                         <QuickAction
-                           index="06"
-                           icon={<Gauge size={16} className="text-cyan-300" />}
-                           title={t('chat.quick_actions.daily_dashboard_title')}
-                           onClick={() => setInput(t('chat.quick_actions.daily_dashboard_prompt'))}
-                         />
-                        </div>
+                            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-6">
+                             <QuickAction
+                               index="01"
+                               icon={<Flame size={16} className="text-orange-300" />}
+                               title={t('chat.quick_actions.hotspot_title')}
+                               onClick={() => setInput(t('chat.quick_actions.hotspot_prompt'))}
+                             />
+                             <QuickAction
+                               index="02"
+                               icon={<Radar size={16} className="text-sky-300" />}
+                               title={t('chat.quick_actions.scout_title')}
+                               onClick={() => setInput(t('chat.quick_actions.scout_prompt'))}
+                             />
+                             <QuickAction
+                               index="03"
+                               icon={<Target size={16} className="text-emerald-300" />}
+                               title={t('chat.quick_actions.keyword_title')}
+                               onClick={() => setInput(t('chat.quick_actions.keyword_prompt'))}
+                             />
+                             <QuickAction
+                               index="04"
+                               icon={<Link size={16} className="text-violet-300" />}
+                               title={t('chat.quick_actions.backlink_title')}
+                               onClick={() => setInput(t('chat.quick_actions.backlink_prompt'))}
+                             />
+                             <QuickAction
+                               index="05"
+                               icon={<TrendingUp size={16} className="text-rose-300" />}
+                               title={t('chat.quick_actions.stock_title')}
+                               onClick={() => setInput(t('chat.quick_actions.stock_prompt'))}
+                             />
+                             <QuickAction
+                               index="06"
+                               icon={<Gauge size={16} className="text-cyan-300" />}
+                               title={t('chat.quick_actions.daily_dashboard_title')}
+                               onClick={() => setInput(t('chat.quick_actions.daily_dashboard_prompt'))}
+                             />
+                            </div>
+                          </>
+                        ) : (
+                          <ModelSetupGuide
+                            t={t}
+                            issue={modelReadiness?.issue}
+                            onOpenSettings={() => {
+                              setSettingsTab('models');
+                              setCurrentView('settings');
+                            }}
+                          />
+                        )}
                       </div>
                     </div>
                 ) : (
@@ -641,91 +687,93 @@ export default function App() {
 
               {/* Input Area */}
               <div className="px-8 pb-8 pt-0">
-                <div className={cn(CHAT_RAIL_CLASS, "relative z-20 bg-white/[0.025] backdrop-blur-xl rounded-xl p-1 shadow-2xl group border border-white/10 focus-within:border-white/25 transition-colors")}>
-                  <div className="flex items-center gap-3 p-2">
-                    <textarea 
-                      ref={inputRef}
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' || e.nativeEvent.isComposing) {
-                          return;
-                        }
-                        if (sendMode === 'enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSend();
-                          return;
-                        }
-                        if (sendMode === 'mod_enter' && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          handleSend();
-                        }
-                      }}
-                      placeholder={t('chat.placeholder')}
-                      className="flex-1 bg-transparent border-none outline-none px-4 py-4 text-[15px] placeholder:text-white/20 font-medium tracking-tight text-white/90 min-h-[72px] max-h-[220px] resize-none overflow-y-auto"
-                      rows={1}
-                    />
-                    <div className="relative flex flex-shrink-0 items-center pr-1">
-                      <div
-                        className={cn(
-                          "flex rounded-lg border transition-all",
-                          input.trim()
-                            ? "border-white bg-white text-[#080808] shadow-md"
-                            : "border-white/10 bg-white/[0.03] text-white/35"
-                        )}
-                      >
-                        <button
-                          onClick={handleSend}
-                          disabled={isExecuting || !input.trim()}
-                          aria-label={sendShortcutHint}
+                {isModelReady ? (
+                  <div className={cn(CHAT_RAIL_CLASS, "relative z-20 bg-white/[0.025] backdrop-blur-xl rounded-xl p-1 shadow-2xl group border border-white/10 focus-within:border-white/25 transition-colors")}>
+                    <div className="flex items-center gap-3 p-2">
+                      <textarea
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' || e.nativeEvent.isComposing) {
+                            return;
+                          }
+                          if (sendMode === 'enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSend();
+                            return;
+                          }
+                          if (sendMode === 'mod_enter' && (e.metaKey || e.ctrlKey)) {
+                            e.preventDefault();
+                            handleSend();
+                          }
+                        }}
+                        placeholder={t('chat.placeholder')}
+                        className="flex-1 bg-transparent border-none outline-none px-4 py-4 text-[15px] placeholder:text-white/20 font-medium tracking-tight text-white/90 min-h-[72px] max-h-[220px] resize-none overflow-y-auto"
+                        rows={1}
+                      />
+                      <div className="relative flex flex-shrink-0 items-center pr-1">
+                        <div
                           className={cn(
-                            "group relative h-10 w-10 flex items-center justify-center rounded-l-lg transition-colors active:scale-95 disabled:cursor-not-allowed",
-                            input.trim() ? "hover:bg-black/[0.04]" : "opacity-55"
-                          )}
-                        >
-                          <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#111] px-2 py-1 font-mono text-[10px] font-bold tracking-[0.04em] text-white/60 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-                            {sendShortcutHint}
-                          </span>
-                          {isExecuting ? <ThinkingIndicator compact /> : <Send size={17} strokeWidth={input.trim() ? 2.5 : 1.5} className="relative z-10" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsSendMenuOpen((open) => !open)}
-                          className={cn(
-                            "flex h-10 w-7 items-center justify-center rounded-r-lg border-l transition-colors",
+                            "flex rounded-lg border transition-all",
                             input.trim()
-                              ? "border-black/10 hover:bg-black/[0.05]"
-                              : "border-white/10 hover:bg-white/[0.06]"
+                              ? "border-white bg-white text-[#080808] shadow-md"
+                              : "border-white/10 bg-white/[0.03] text-white/35"
                           )}
-                          title={t('chat.send_mode')}
                         >
-                          <ChevronDown size={13} strokeWidth={2.4} />
-                        </button>
-                      </div>
-                      {isSendMenuOpen && (
-                        <div className="absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#101010] p-1 shadow-2xl">
-                          {(['mod_enter', 'enter'] as SendMode[]).map((mode) => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() => {
-                                setSendMode(mode);
-                                setIsSendMenuOpen(false);
-                              }}
-                              className={cn(
-                                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-bold transition-colors",
-                                sendMode === mode ? "bg-white text-[#080808]" : "text-white/60 hover:bg-white/[0.06] hover:text-white"
-                              )}
-                            >
-                              <span>{mode === 'enter' ? t('chat.send_mode_enter') : t('chat.send_mode_mod_enter')}</span>
-                              <span className="font-mono text-[10px] opacity-60">{mode === 'enter' ? '↵' : '⌘↵'}</span>
-                            </button>
-                          ))}
+                          <button
+                            onClick={handleSend}
+                            disabled={isExecuting || !input.trim()}
+                            aria-label={sendShortcutHint}
+                            className={cn(
+                              "group relative h-10 w-10 flex items-center justify-center rounded-l-lg transition-colors active:scale-95 disabled:cursor-not-allowed",
+                              input.trim() ? "hover:bg-black/[0.04]" : "opacity-55"
+                            )}
+                          >
+                            <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#111] px-2 py-1 font-mono text-[10px] font-bold tracking-[0.04em] text-white/60 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+                              {sendShortcutHint}
+                            </span>
+                            {isExecuting ? <ThinkingIndicator compact /> : <Send size={17} strokeWidth={input.trim() ? 2.5 : 1.5} className="relative z-10" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsSendMenuOpen((open) => !open)}
+                            className={cn(
+                              "flex h-10 w-7 items-center justify-center rounded-r-lg border-l transition-colors",
+                              input.trim()
+                                ? "border-black/10 hover:bg-black/[0.05]"
+                                : "border-white/10 hover:bg-white/[0.06]"
+                            )}
+                            title={t('chat.send_mode')}
+                          >
+                            <ChevronDown size={13} strokeWidth={2.4} />
+                          </button>
                         </div>
-                      )}
+                        {isSendMenuOpen && (
+                          <div className="absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#101010] p-1 shadow-2xl">
+                            {(['mod_enter', 'enter'] as SendMode[]).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => {
+                                  setSendMode(mode);
+                                  setIsSendMenuOpen(false);
+                                }}
+                                className={cn(
+                                  "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-bold transition-colors",
+                                  sendMode === mode ? "bg-white text-[#080808]" : "text-white/60 hover:bg-white/[0.06] hover:text-white"
+                                )}
+                              >
+                                <span>{mode === 'enter' ? t('chat.send_mode_enter') : t('chat.send_mode_mod_enter')}</span>
+                                <span className="font-mono text-[10px] opacity-60">{mode === 'enter' ? '↵' : '⌘↵'}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : null}
                 <div className="flex items-center justify-center gap-4 mt-4">
                   <p className="text-[10px] text-white/10 font-bold uppercase tracking-[0.1em]">{t('app.byok_enabled')}</p>
                   <div className="h-1 w-1 rounded-full bg-white/10" />
@@ -848,30 +896,47 @@ export default function App() {
                 {settingsTab === 'models' ? (
                   <div className="space-y-12">
                     <section className="flex items-center justify-between glass rounded-3xl p-6 border border-white/10 shadow-xl">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
+                      <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
                           <Cpu className="text-white/60" size={20} />
                         </div>
-                        <span className="text-sm font-bold tracking-tight text-white/70">{t('settings.active_model_label')}</span>
+                        <div className="space-y-1.5">
+                          <span className="text-sm font-bold tracking-tight text-white/70">{t('settings.active_model_label')}</span>
+                          {!isModelReady && (
+                            <p className="max-w-2xl text-xs font-medium leading-5 text-white/48">{t('settings.inline_model_hint')}</p>
+                          )}
+                        </div>
                       </div>
-                      <select
-                        value={selectedModelValue}
-                        onChange={(e) => handleSetActiveModel(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs outline-none font-bold hover:bg-white/10 transition-colors cursor-pointer ring-1 ring-white/5"
-                      >
-                        <option value="" disabled>
-                          {t('settings.no_models')}
-                        </option>
-                        {Object.entries(availableModels).map(([provider, models]) => (
-                          <optgroup key={provider} label={providerLabels[provider] || provider.charAt(0).toUpperCase() + provider.slice(1)}>
-                            {models.map(m => (
-                              <option key={buildModelOptionValue(provider, m)} value={buildModelOptionValue(provider, m)}>
-                                {m}
-                              </option>
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          {shouldWarnModelSelector && (
+                            <span className="pointer-events-none absolute left-3.5 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-amber-300 shadow-[0_0_0_4px_rgba(252,211,77,0.08)]" />
+                          )}
+                          <select
+                            value={selectedModelValue}
+                            onChange={(e) => handleSetActiveModel(e.target.value)}
+                            className={cn(
+                              "min-w-[18rem] rounded-xl py-2.5 pr-4 text-xs font-bold outline-none transition-all cursor-pointer ring-1 appearance-none",
+                              shouldWarnModelSelector
+                                ? "pl-8 border border-amber-300/55 bg-black/40 text-amber-50 ring-amber-300/20 shadow-[0_0_0_1px_rgba(252,211,77,0.12),0_10px_30px_rgba(245,158,11,0.08)] hover:border-amber-200/70 hover:text-white"
+                                : "pl-4 border border-white/10 bg-white/5 ring-white/5 hover:bg-white/10"
+                            )}
+                          >
+                            <option value="" disabled>
+                              {t('settings.no_models')}
+                            </option>
+                            {Object.entries(availableModels).map(([provider, models]) => (
+                              <optgroup key={provider} label={providerLabels[provider] || provider.charAt(0).toUpperCase() + provider.slice(1)}>
+                                {models.map(m => (
+                                  <option key={buildModelOptionValue(provider, m)} value={buildModelOptionValue(provider, m)}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </optgroup>
                             ))}
-                          </optgroup>
-                        ))}
-                      </select>
+                          </select>
+                        </div>
+                      </div>
                     </section>
 
                     <section className="space-y-6">
@@ -1017,6 +1082,54 @@ function QuickAction({
         </div>
       </div>
     </button>
+  );
+}
+
+function getModelReadinessDescription(t: (key: string) => string, issue?: ModelReadinessIssue | null) {
+  switch (issue?.code) {
+    case 'missing_api_key':
+      return t('settings.setup_missing_api_key');
+    case 'missing_base_url':
+      return t('settings.setup_missing_base_url');
+    case 'active_model_invalid':
+      return t('settings.setup_active_model_invalid');
+    case 'no_runnable_model':
+    default:
+      return t('settings.setup_no_runnable_model');
+  }
+}
+
+function ModelSetupGuide({
+  t,
+  issue,
+  onOpenSettings,
+}: {
+  t: (key: string) => string;
+  issue?: ModelReadinessIssue | null;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <section className="relative overflow-hidden rounded-[2rem] border border-amber-200/12 bg-[linear-gradient(135deg,rgba(255,243,211,0.11),rgba(255,255,255,0.02))] px-8 py-9 shadow-[0_28px_90px_rgba(0,0,0,0.26)] backdrop-blur-xl">
+      <div className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-amber-100/35 to-transparent" />
+      <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-amber-100/24 to-transparent" />
+      <div className="relative z-10 flex flex-col gap-6">
+        <div className="space-y-2">
+          <h3 className="text-4xl font-black tracking-tight text-amber-50">{t('settings.setup_welcome_title')}</h3>
+          <p className="max-w-3xl text-base font-medium leading-7 text-white/76">
+            {getModelReadinessDescription(t, issue)}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onOpenSettings}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-3 text-[11px] font-black uppercase tracking-[0.16em] text-[#080808] transition-colors hover:bg-white/92"
+          >
+            {t('settings.open_model_settings')}
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 

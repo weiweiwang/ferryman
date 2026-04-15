@@ -19,6 +19,7 @@ from sqlmodel import select, desc
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.kernel import FerrymanKernel
+from app.core.scheduler import FerrymanScheduler, compute_next_run_at, normalize_timezone_name
 from app.models.database import Session, Message, Schedule, Task
 from app.models.schemas import JsonRpcError, JsonRpcErrorCode, JsonRpcErrorResponse
 
@@ -112,14 +113,17 @@ def serialize_schedule(schedule: Schedule, *, detail: bool = False) -> dict[str,
         "id": schedule.id,
         "name": schedule.name,
         "cron": schedule.cron_expression,
+        "timezone": schedule.timezone or "UTC",
         "enabled": schedule.enabled,
         "last_run_at": schedule.last_run_at.isoformat() if schedule.last_run_at else None,
         "next_run_at": schedule.next_run_at.isoformat() if schedule.next_run_at else None,
+        "total_run_count": schedule.total_run_count,
         "updated_at": schedule.updated_at.isoformat(),
     }
     if detail:
         payload.update({
             "instruction": schedule.args.get("instruction", ""),
+            "last_run_result": schedule.last_run_result,
             "created_at": schedule.created_at.isoformat(),
         })
     return payload
@@ -265,8 +269,11 @@ async def lifespan(fastapi_app: FastAPI):
 
     # Pre-scan skills
     fastapi_app.state.kernel.scan_skills()
+    fastapi_app.state.schedule_manager = FerrymanScheduler(fastapi_app.state.kernel, get_settings())
+    await fastapi_app.state.schedule_manager.start()
 
     yield
+    await fastapi_app.state.schedule_manager.shutdown()
     await fastapi_app.state.kernel.shutdown()
     logger.info("🛑 Ferryman Sidecar shutting down...")
 
@@ -341,6 +348,14 @@ async def get_active_model(context):
     Returns the currently active model identifier.
     """
     return Success(get_settings().get_active_model_id())
+
+
+@method
+async def get_model_readiness(context):
+    """
+    Returns whether Ferryman has a usable active model for chat.
+    """
+    return Success(get_settings().get_model_readiness())
 
 
 @method
@@ -748,31 +763,57 @@ async def update_schedule(
     schedule_id: str,
     name: Optional[str] = None,
     cron: Optional[str] = None,
+    timezone: Optional[str] = None,
     enabled: Optional[bool] = None,
     instruction: Optional[str] = None,
 ):
     """Updates editable schedule fields."""
     logger.info(f"Updating schedule: {schedule_id}")
+    from datetime import timezone as dt_timezone
+
     with get_session() as session:
         schedule = session.get(Schedule, schedule_id)
         if not schedule:
             return Success({"status": "error", "message": "Schedule not found"})
 
+        candidate_name = name if name is not None else schedule.name
+        candidate_cron = cron if cron is not None else schedule.cron_expression
+        candidate_timezone = timezone if timezone is not None else schedule.timezone
+        candidate_instruction = instruction if instruction is not None else schedule.args.get("instruction", "")
+
+        try:
+            candidate_name = candidate_name.strip()
+            candidate_instruction = candidate_instruction.strip()
+            if not candidate_name:
+                raise ValueError("name must not be empty.")
+            if not candidate_instruction:
+                raise ValueError("instruction must not be empty.")
+            normalized_timezone = normalize_timezone_name(candidate_timezone)
+            next_run_at = compute_next_run_at(candidate_cron, normalized_timezone)
+        except ValueError as exc:
+            return Success({"status": "error", "message": str(exc)})
+
         if name is not None:
-            schedule.name = name
+            schedule.name = candidate_name
         if cron is not None:
-            schedule.cron_expression = cron
+            schedule.cron_expression = candidate_cron.strip()
+        if timezone is not None:
+            schedule.timezone = normalized_timezone
         if enabled is not None:
             schedule.enabled = enabled
         if instruction is not None:
             args = dict(schedule.args or {})
-            args["instruction"] = instruction
+            args["instruction"] = candidate_instruction
             schedule.args = args
+        schedule.next_run_at = next_run_at if (enabled if enabled is not None else schedule.enabled) else None
 
-        schedule.updated_at = datetime.now(timezone.utc)
+        schedule.updated_at = datetime.now(dt_timezone.utc)
         session.add(schedule)
         session.commit()
-        return Success({"status": "success"})
+    schedule_manager = getattr(context, "schedule_manager", None)
+    if schedule_manager:
+        await schedule_manager.sync_schedule(schedule_id)
+    return Success({"status": "success"})
 
 
 @method
@@ -785,7 +826,10 @@ async def delete_schedule(context, schedule_id: str):
             return Success({"status": "error", "message": "Schedule not found"})
         session.delete(schedule)
         session.commit()
-        return Success({"status": "success"})
+    schedule_manager = getattr(context, "schedule_manager", None)
+    if schedule_manager:
+        await schedule_manager.remove_schedule(schedule_id)
+    return Success({"status": "success"})
 
 
 @app.websocket("/ws")

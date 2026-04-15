@@ -263,6 +263,61 @@ def test_get_available_models_does_not_fallback_on_fetch_error():
     assert "kimi" not in models
 
 
+def test_get_active_model_id_returns_none_when_unset():
+    assert config().get_active_model_id() is None
+
+
+def test_get_model_readiness_reports_no_runnable_model_when_unconfigured():
+    readiness = config().get_model_readiness()
+
+    assert readiness == {
+        "ready": False,
+        "active_model": None,
+        "issue": {"code": "no_runnable_model"},
+    }
+
+
+def test_get_model_readiness_reports_invalid_active_model_when_selection_missing():
+    config.set("llm.openai", {"api_key": "sk-openai"}, category="llm")
+
+    readiness = config().get_model_readiness()
+
+    assert readiness == {
+        "ready": False,
+        "active_model": None,
+        "issue": {"code": "active_model_invalid"},
+    }
+
+
+def test_get_model_readiness_reports_missing_api_key_for_selected_provider():
+    config.set("system.llm.active_model", "gemini:gemini-3-flash-preview", category="system")
+
+    readiness = config().get_model_readiness()
+
+    assert readiness == {
+        "ready": False,
+        "active_model": "gemini:gemini-3-flash-preview",
+        "issue": {
+            "code": "missing_api_key",
+            "provider": "gemini",
+            "missing": ["api_key"],
+        },
+    }
+
+
+def test_get_model_readiness_reports_ready_for_configured_active_model():
+    config.set("llm.openai", {"api_key": "sk-openai"}, category="llm")
+    config.set("system.llm.active_model", "openai:gpt-4o", category="system")
+
+    readiness = config().get_model_readiness()
+
+    assert readiness == {
+        "ready": True,
+        "active_model": "openai:gpt-4o",
+        "issue": None,
+    }
+
+
 def test_fetch_provider_models_routes_to_provider_specific_fetchers(monkeypatch):
     monkeypatch.setattr(config, "_fetch_anthropic_models", staticmethod(lambda api_key, base_url: ["claude-sonnet-4-5"]))
     monkeypatch.setattr(config, "_fetch_gemini_models", staticmethod(lambda api_key, base_url: ["gemini-3.1-pro-preview"]))

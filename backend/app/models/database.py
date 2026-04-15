@@ -47,9 +47,12 @@ class Schedule(SQLModel, table=True):
     name: str
     args: Dict[str, Any] = Field(default_factory=dict, sa_column=SAColumn(JSON))
     cron_expression: str
+    timezone: str = Field(default="UTC")
     enabled: bool = Field(default=True)
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
+    total_run_count: int = Field(default=0)
+    last_run_result: Optional[Dict[str, Any]] = Field(default=None, sa_column=SAColumn(JSON, nullable=True))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

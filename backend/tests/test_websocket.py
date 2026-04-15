@@ -1,8 +1,11 @@
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.main import app
@@ -128,7 +131,14 @@ def test_websocket_llm_and_model_config_flow(client):
             response = send_rpc(websocket, "get_active_model", request_id=5)
             assert response["result"] == "openai:gpt-4o"
 
-            response = send_rpc(websocket, "get_available_models", request_id=6)
+            response = send_rpc(websocket, "get_model_readiness", request_id=6)
+            assert response["result"] == {
+                "ready": True,
+                "active_model": "openai:gpt-4o",
+                "issue": None,
+            }
+
+            response = send_rpc(websocket, "get_available_models", request_id=7)
             assert "openai" in response["result"]
             assert "anthropic" not in response["result"]
             assert "gemini" not in response["result"]
@@ -144,7 +154,7 @@ def test_websocket_llm_and_model_config_flow(client):
                     "provider": "kimi",
                     "api_key": "sk-kimi",
                 },
-                request_id=7,
+                request_id=8,
             )
             assert response["result"] == {"status": "success"}
 
@@ -469,9 +479,11 @@ def test_websocket_session_message_and_task_flows(client, session):
                     "id": "schedule-1",
                     "name": "Nightly",
                     "cron": "0 0 * * *",
+                    "timezone": "UTC",
                     "enabled": True,
                     "last_run_at": None,
                     "next_run_at": None,
+                    "total_run_count": 0,
                     "updated_at": schedule.updated_at.isoformat(),
                 }
             ],
@@ -480,6 +492,9 @@ def test_websocket_session_message_and_task_flows(client, session):
 
         response = send_rpc(websocket, "get_schedule", {"schedule_id": "schedule-1"}, request_id=161)
         assert response["result"]["schedule"]["instruction"] == ""
+        assert response["result"]["schedule"]["timezone"] == "UTC"
+        assert response["result"]["schedule"]["total_run_count"] == 0
+        assert response["result"]["schedule"]["last_run_result"] is None
 
         response = send_rpc(
             websocket,
@@ -488,6 +503,7 @@ def test_websocket_session_message_and_task_flows(client, session):
                 "schedule_id": "schedule-1",
                 "name": "Nightly Updated",
                 "cron": "0 8 * * *",
+                "timezone": "Asia/Shanghai",
                 "enabled": False,
                 "instruction": "Run every morning",
             },
@@ -498,6 +514,7 @@ def test_websocket_session_message_and_task_flows(client, session):
         response = send_rpc(websocket, "get_schedule", {"schedule_id": "schedule-1"}, request_id=163)
         assert response["result"]["schedule"]["name"] == "Nightly Updated"
         assert response["result"]["schedule"]["cron"] == "0 8 * * *"
+        assert response["result"]["schedule"]["timezone"] == "Asia/Shanghai"
         assert response["result"]["schedule"]["enabled"] is False
         assert response["result"]["schedule"]["instruction"] == "Run every morning"
 
@@ -667,3 +684,105 @@ def test_websocket_list_endpoints_use_cursor_pagination(client, session):
             request_id=19,
         )
         assert response["result"] == {"status": "error", "message": "Session not found"}
+
+
+def test_websocket_update_schedule_syncs_schedule_manager(client, session):
+    schedule = Schedule(
+        id="schedule-sync-update",
+        name="Sync me",
+        cron_expression="0 0 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Initial instruction"},
+    )
+    session.add(schedule)
+    session.commit()
+
+    sync_schedule = AsyncMock()
+    app.state.schedule_manager.sync_schedule = sync_schedule
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "update_schedule",
+            {
+                "schedule_id": "schedule-sync-update",
+                "name": "Sync me updated",
+                "cron": "0 8 * * *",
+                "timezone": "Asia/Shanghai",
+                "instruction": "Updated instruction",
+            },
+            request_id=200,
+        )
+
+    assert response["result"] == {"status": "success"}
+    sync_schedule.assert_awaited_once_with("schedule-sync-update")
+
+
+def test_websocket_delete_schedule_removes_scheduler_job(client, session):
+    schedule = Schedule(
+        id="schedule-sync-delete",
+        name="Delete me",
+        cron_expression="0 0 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Delete instruction"},
+    )
+    session.add(schedule)
+    session.commit()
+
+    remove_schedule = AsyncMock()
+    app.state.schedule_manager.remove_schedule = remove_schedule
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "delete_schedule",
+            {"schedule_id": "schedule-sync-delete"},
+            request_id=201,
+        )
+
+    assert response["result"] == {"status": "success"}
+    remove_schedule.assert_awaited_once_with("schedule-sync-delete")
+
+
+def test_scheduler_runs_due_schedule_during_app_lifespan(session, monkeypatch):
+    from apscheduler.triggers.date import DateTrigger
+
+    calls: list[dict[str, str]] = []
+
+    async def fake_run_master_agent(self, instruction: str, session_id: str, emit_event_cb=None):
+        calls.append({"instruction": instruction, "session_id": session_id})
+        return {"status": "success"}
+
+    def fake_build_cron_trigger(cron_expression: str, timezone_name: str | None = None):
+        return DateTrigger(run_date=datetime.now(timezone.utc) + timedelta(milliseconds=50))
+
+    schedule = Schedule(
+        id="schedule-lifespan-run",
+        name="Lifespan schedule",
+        cron_expression="* * * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Run during lifespan"},
+    )
+    session.add(schedule)
+    session.commit()
+
+    monkeypatch.setattr("app.core.scheduler.build_cron_trigger", fake_build_cron_trigger)
+    monkeypatch.setattr("app.core.kernel.FerrymanKernel.run_master_agent", fake_run_master_agent)
+
+    with TestClient(app):
+        time.sleep(0.2)
+
+    session.expire_all()
+    refreshed = session.get(Schedule, "schedule-lifespan-run")
+    persisted_session = session.get(Session, "schedule-lifespan-run")
+
+    assert calls == [{"instruction": "Run during lifespan", "session_id": "schedule-lifespan-run"}]
+    assert refreshed is not None
+    assert refreshed.last_run_at is not None
+    assert refreshed.total_run_count == 1
+    assert refreshed.last_run_result is not None
+    assert refreshed.last_run_result["status"] == "success"
+    assert persisted_session is not None

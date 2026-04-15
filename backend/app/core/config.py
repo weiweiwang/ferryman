@@ -241,9 +241,95 @@ class Settings(BaseSettings):
             },
         }
 
-    def get_active_model_id(self) -> str:
-        """Returns the globally active model identifier."""
-        return self.get("system.llm.active_model", "gemini:gemini-3-flash-preview")
+    def get_active_model_id(self) -> Optional[str]:
+        """Returns the globally active model identifier if one has been selected."""
+        active_model = self.get("system.llm.active_model")
+        if active_model is None:
+            return None
+
+        normalized = str(active_model).strip()
+        return normalized or None
+
+    def get_model_readiness(self) -> Dict[str, Any]:
+        """Returns whether the chat experience has a usable active model."""
+        provider_catalog = self.get_llm_provider_catalog()
+        active_model_id = self.get_active_model_id()
+
+        def load_provider_config(provider: str) -> Dict[str, Any]:
+            raw = self.get(f"llm.{provider}", {})
+            return raw if isinstance(raw, dict) else {}
+
+        configured_provider_count = 0
+        for provider in provider_catalog:
+            provider_config = load_provider_config(provider)
+            api_key = str(provider_config.get("api_key", "")).strip()
+            base_url = str(provider_config.get("base_url", "")).strip()
+            if provider == "custom":
+                if api_key and base_url:
+                    configured_provider_count += 1
+            elif api_key:
+                configured_provider_count += 1
+
+        if not active_model_id:
+            issue_code = "active_model_invalid" if configured_provider_count else "no_runnable_model"
+            return {
+                "ready": False,
+                "active_model": None,
+                "issue": {"code": issue_code},
+            }
+
+        if ":" not in active_model_id:
+            return {
+                "ready": False,
+                "active_model": active_model_id,
+                "issue": {"code": "active_model_invalid"},
+            }
+
+        provider, model_name = (part.strip() for part in active_model_id.split(":", 1))
+        if not provider or not model_name or provider not in provider_catalog:
+            return {
+                "ready": False,
+                "active_model": active_model_id,
+                "issue": {"code": "active_model_invalid"},
+            }
+
+        provider_config = load_provider_config(provider)
+        api_key = str(provider_config.get("api_key", "")).strip()
+        if not api_key:
+            return {
+                "ready": False,
+                "active_model": active_model_id,
+                "issue": {
+                    "code": "missing_api_key",
+                    "provider": provider,
+                    "missing": ["api_key"],
+                },
+            }
+
+        if provider == "custom":
+            base_url = str(provider_config.get("base_url", "")).strip()
+            if not base_url:
+                return {
+                    "ready": False,
+                    "active_model": active_model_id,
+                    "issue": {
+                        "code": "missing_base_url",
+                        "provider": provider,
+                        "missing": ["base_url"],
+                    },
+                }
+            if not model_name:
+                return {
+                    "ready": False,
+                    "active_model": active_model_id,
+                    "issue": {"code": "active_model_invalid"},
+                }
+
+        return {
+            "ready": True,
+            "active_model": active_model_id,
+            "issue": None,
+        }
 
     @staticmethod
     def list_by_category(category: str) -> List[Any]:
@@ -308,8 +394,8 @@ class Settings(BaseSettings):
             if deduped_models:
                 available_models[provider] = deduped_models
 
-        active_model_id = Settings.get("system.llm.active_model", "gemini:gemini-3-flash-preview")
-        if ":" in active_model_id:
+        active_model_id = Settings().get_active_model_id()
+        if active_model_id and ":" in active_model_id:
             provider, model_name = active_model_id.split(":", 1)
             model_name = model_name.strip()
             if provider in available_models and model_name and model_name not in available_models[provider]:

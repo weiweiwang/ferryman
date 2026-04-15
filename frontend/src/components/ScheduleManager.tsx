@@ -22,6 +22,12 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
+function getLastRunHeadline(schedule: Schedule, t: (key: string) => string) {
+  const lastRun = schedule.last_run_result;
+  if (!lastRun) return null;
+  return lastRun.status === 'failed' ? t('schedules.last_run_failed') : t('schedules.last_run_succeeded');
+}
+
 export function ScheduleManager({ call, isConnected, t }: ScheduleManagerProps) {
   const {
     schedules,
@@ -188,16 +194,63 @@ export function ScheduleManager({ call, isConnected, t }: ScheduleManagerProps) 
               <input value={draft.cron} onChange={(event) => setDraft({ ...draft, cron: event.target.value })} className="field-input font-mono" />
               <p className="mt-2 text-[11px] font-medium text-white/28">{t('schedules.cron_hint')}</p>
             </Field>
+            <Field label={t('schedules.field_timezone')}>
+              <input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} className="field-input font-mono" />
+              <p className="mt-2 text-[11px] font-medium text-white/28">{t('schedules.timezone_hint')}</p>
+            </Field>
             <Field label={t('schedules.field_instruction')}>
               <textarea value={draft.instruction || ''} onChange={(event) => setDraft({ ...draft, instruction: event.target.value })} className="field-textarea min-h-[180px]" />
             </Field>
             <div className="grid grid-cols-2 gap-3 text-xs text-white/35">
               <Meta label={t('schedules.field_last_run')} value={formatDate(draft.last_run_at)} />
               <Meta label={t('schedules.field_next_run')} value={formatDate(draft.next_run_at)} />
+              <Meta label={t('schedules.field_timezone')} value={draft.timezone} />
+              <Meta label={t('schedules.field_total_runs')} value={String(draft.total_run_count)} />
               <Meta label={t('schedules.field_created_at')} value={formatDate(draft.created_at)} />
               <Meta label={t('schedules.field_updated_at')} value={formatDate(draft.updated_at)} />
               <Meta label={t('tasks.identifier')} value={draft.id} wide />
             </div>
+            {draft.last_run_result && (
+              <div className={cn(
+                'space-y-3 rounded-lg border p-4',
+                draft.last_run_result.status === 'failed'
+                  ? 'border-red-400/20 bg-red-500/10'
+                  : 'border-emerald-400/20 bg-emerald-500/10'
+              )}>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.2em] text-white/35">
+                    {t('schedules.field_last_run_result')}
+                  </div>
+                  <div className="mt-2 text-sm font-bold text-white">
+                    {getLastRunHeadline(draft, t)}
+                  </div>
+                  {draft.last_run_result.finished_at && (
+                    <div className="mt-1 text-xs font-medium text-white/45">
+                      {formatDate(draft.last_run_result.finished_at)}
+                    </div>
+                  )}
+                </div>
+                {draft.last_run_result.summary && (
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/30">
+                      {t('schedules.field_last_run_summary')}
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-white/70">{draft.last_run_result.summary}</p>
+                  </div>
+                )}
+                {draft.last_run_result.error && (
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/30">
+                      {t('schedules.field_last_run_error')}
+                    </div>
+                    <p className="mt-1 break-words text-sm leading-6 text-red-100">{draft.last_run_result.error}</p>
+                  </div>
+                )}
+                {draft.last_run_result.run_id && (
+                  <Meta label={t('schedules.field_last_run_id')} value={draft.last_run_result.run_id} wide />
+                )}
+              </div>
+            )}
             {formError && <p className="rounded-lg border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-100">{formError}</p>}
             <div className="flex items-center justify-between gap-3 border-t border-white/8 pt-5">
               <button onClick={() => setDeleteTarget(draft)} className="inline-flex items-center gap-2 rounded-lg border border-red-400/20 px-4 py-2 text-xs font-black text-red-200 transition-colors hover:bg-red-500/15">

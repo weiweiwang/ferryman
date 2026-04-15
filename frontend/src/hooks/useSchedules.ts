@@ -4,10 +4,19 @@ export interface Schedule {
   id: string;
   name: string;
   cron: string;
+  timezone: string;
   enabled: boolean;
   instruction?: string;
   last_run_at?: string | null;
   next_run_at?: string | null;
+  total_run_count: number;
+  last_run_result?: {
+    status: 'success' | 'failed';
+    summary?: string | null;
+    error?: string | null;
+    run_id?: string | null;
+    finished_at?: string | null;
+  } | null;
   created_at?: string;
   updated_at: string;
 }
@@ -56,6 +65,7 @@ export function useSchedules(call: (method: string, params?: any) => Promise<any
       schedule_id: schedule.id,
       name: schedule.name,
       cron: schedule.cron,
+      timezone: schedule.timezone,
       enabled: schedule.enabled,
       instruction: schedule.instruction || '',
     });

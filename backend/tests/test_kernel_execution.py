@@ -12,7 +12,7 @@ from pydantic_ai import Agent
 from pydantic_ai.usage import RunUsage
 
 from app.core.config import Settings
-from app.core.kernel import FerrymanKernel
+from app.core.kernel import FerrymanKernel, LLMConfigurationError
 from app.core.deps import AgentDeps
 from app.core.toolkits.skill import SkillToolkit
 from app.models.events import FerrymanEventEnvelope, EventNamespace, ToolPhase, ToolActivityPayload
@@ -200,6 +200,17 @@ def test_init_llm_model_strips_trailing_v1_for_anthropic(monkeypatch):
         "api_key": "sk-test",
         "base_url": "https://cc.honoursoft.cn",
     }
+
+
+def test_init_llm_model_raises_clear_error_when_gemini_api_key_missing(monkeypatch):
+    settings = create_test_settings()
+    monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "gemini:gemini-3-flash-preview")
+    monkeypatch.setattr(Settings, "get_provider_llm_config", lambda self, provider: {})
+
+    kernel = FerrymanKernel(settings=settings)
+
+    with pytest.raises(LLMConfigurationError, match="missing API Key"):
+        kernel._init_llm_model()
 
 
 # --- test_agent_closure.py ---
