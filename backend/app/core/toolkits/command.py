@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated, List
 
 from pydantic import BeforeValidator
+from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
 from app.core.deps import AgentDeps
@@ -34,23 +35,23 @@ class CommandToolkit:
         """Resolve a script path under the current skill's `scripts/` directory."""
         skill_name = ctx.deps.skill_name
         if not skill_name:
-            raise RuntimeError("run_skill_script is only available inside a skill execution context.")
+            raise ModelRetry("run_skill_script is only available inside a skill execution context.")
 
         skill = ctx.deps.kernel.skills.get(skill_name)
         if not skill:
-            raise RuntimeError(f"Current skill '{skill_name}' is not registered.")
+            raise ModelRetry(f"Current skill '{skill_name}' is not registered.")
 
         scripts_dir = skill.path / "scripts"
         candidate = (scripts_dir / script_name).resolve()
         try:
             candidate.relative_to(scripts_dir.resolve())
         except ValueError as exc:
-            raise RuntimeError(f"Script path escapes skill scripts directory: {script_name}") from exc
+            raise ModelRetry(f"Script path escapes skill scripts directory: {script_name}") from exc
 
         if not candidate.exists():
-            raise RuntimeError(f"Script not found: {script_name}")
+            raise ModelRetry(f"Script not found: {script_name}")
         if not candidate.is_file():
-            raise RuntimeError(f"Script is not a file: {script_name}")
+            raise ModelRetry(f"Script is not a file: {script_name}")
         return candidate
 
     @staticmethod

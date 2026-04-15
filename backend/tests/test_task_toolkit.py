@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from pydantic_ai.exceptions import ModelRetry
 from sqlmodel import select
 
 from app.core.toolkits.task import TaskToolkit
@@ -87,7 +89,7 @@ async def test_create_task_rejects_blank_required_fields(title, instruction, exp
     kernel = StubKernel()
     ctx = make_ctx(kernel=kernel)
 
-    with pytest.raises(ValueError, match=expected_message):
+    with pytest.raises(ModelRetry, match=expected_message):
         await TaskToolkit.create_task(ctx, title=title, instruction=instruction)
 
 
@@ -111,7 +113,7 @@ async def test_update_task_rejects_invalid_status():
     kernel = StubKernel()
     ctx = make_ctx(kernel=kernel)
 
-    with pytest.raises(ValueError, match="status must be one of:"):
+    with pytest.raises(ModelRetry, match="status must be one of:"):
         await TaskToolkit.update_task(ctx, task_id="task-77", status="queued")
 
 
@@ -174,7 +176,7 @@ async def test_list_tasks_filters_orders_and_formats_results(session):
 
 @pytest.mark.asyncio
 async def test_list_tasks_rejects_invalid_status():
-    with pytest.raises(ValueError, match="status must be one of:"):
+    with pytest.raises(ModelRetry, match="status must be one of:"):
         await TaskToolkit.list_tasks(make_ctx(), status="later")
 
 
@@ -192,10 +194,30 @@ async def test_create_schedule_persists_instruction_and_leaves_runtime_fields_em
     assert result == f"Schedule 'Morning sync' created with ID: {schedule.id}"
     assert schedule.name == "Morning sync"
     assert schedule.cron_expression == "0 8 * * *"
+    assert schedule.timezone == "UTC"
     assert schedule.args == {"instruction": "Run the daily sync workflow and summarize failures."}
     assert schedule.last_run_at is None
-    assert schedule.next_run_at is None
+    assert schedule.next_run_at is not None
     assert schedule.enabled is True
+    assert schedule.total_run_count == 0
+    assert schedule.last_run_result is None
+
+
+@pytest.mark.asyncio
+async def test_create_schedule_syncs_schedule_manager_when_available(session):
+    sync_schedule = AsyncMock()
+    kernel = SimpleNamespace(schedule_manager=SimpleNamespace(sync_schedule=sync_schedule))
+
+    result = await TaskToolkit.create_schedule(
+        make_ctx(kernel=kernel),
+        name="Hourly check",
+        cron_expression="0 * * * *",
+        instruction="Run the hourly check.",
+    )
+
+    schedule = session.exec(select(Schedule)).one()
+    assert result == f"Schedule 'Hourly check' created with ID: {schedule.id}"
+    sync_schedule.assert_awaited_once_with(schedule.id)
 
 
 @pytest.mark.asyncio
@@ -213,7 +235,7 @@ async def test_create_schedule_rejects_blank_required_fields(
     instruction,
     expected_message,
 ):
-    with pytest.raises(ValueError, match=expected_message):
+    with pytest.raises(ModelRetry, match=expected_message):
         await TaskToolkit.create_schedule(
             make_ctx(),
             name=name,

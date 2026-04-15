@@ -3,6 +3,7 @@ import logging
 import shutil
 from pathlib import Path
 
+from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import UsageLimits
 
@@ -28,22 +29,23 @@ class SkillToolkit:
         """Run an installed skill with the given instruction.
 
         `skill_name` must exist in the registered skill list. Returns the
-        skill's output text. Raises `RuntimeError` if the skill run fails.
+        skill's output text. If the delegated skill run fails, returns a JSON
+        failure payload instead of aborting the master run.
         """
         kernel = ctx.deps.kernel
         session_id = ctx.deps.session_id
-        
+
         if skill_name not in kernel.skills:
-            raise ValueError(f"Skill '{skill_name}' not found.")
+            raise ModelRetry(f"Skill '{skill_name}' not found.")
 
         workspace = kernel.get_session_workspace(session_id)
 
         logger.info(f"Executing skill '{skill_name}' in {workspace}")
-        skill_agent = kernel.build_skill_agent(skill_name)
 
         try:
             # IMPORTANT: Pass ctx.usage to sub-agent so request/token accounting
             # and request budgeting are shared across the master agent and delegated skills.
+            skill_agent = kernel.build_skill_agent(skill_name)
             request_limit = kernel.get_setting("system.llm.request_limit", 100)
             augmented_instruction = kernel.build_runtime_augmented_instruction(instruction, session_id)
             skill_deps = AgentDeps(
@@ -101,7 +103,14 @@ class SkillToolkit:
                     "error": str(e),
                 }
             })
-            raise RuntimeError(f"Skill '{skill_name}' failed: {e}") from e
+            return json.dumps(
+                {
+                    "ok": False,
+                    "skill_name": skill_name,
+                    "error": str(e),
+                },
+                ensure_ascii=False,
+            )
 
     @staticmethod
     async def publish_skill(

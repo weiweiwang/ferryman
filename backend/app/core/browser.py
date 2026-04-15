@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import trafilatura
+from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.messages import BinaryImage
 from playwright.async_api import (
     Error as PlaywrightError,
@@ -284,7 +285,7 @@ class BrowserController:
             return f"Successfully navigated to {self._page.url}"
         except PlaywrightError as e:
             logger.exception(f"Failed to navigate to {url}")
-            return f"Failed to navigate: {str(e)}"
+            raise ModelRetry(f"Failed to navigate: {str(e)}") from e
 
     async def get_distilled_dom(self) -> str:
         """Distills the DOM to return pure text/markdown content, avoiding token waste."""
@@ -305,7 +306,7 @@ class BrowserController:
             return body_text[:15000]
         except (PlaywrightError, TypeError, ValueError) as e:
             logger.exception("Failed to distill DOM")
-            return f"Failed to distill DOM: {str(e)}"
+            raise ModelRetry(f"Failed to distill DOM: {str(e)}") from e
 
     async def get_aria_snapshot(self) -> str:
         """
@@ -392,7 +393,7 @@ class BrowserController:
             return result['snapshot'] if result['snapshot'] else "(No semantic elements found)"
         except PlaywrightError as e:
             logger.exception("Failed to generate ARIA snapshot")
-            return f"Failed to generate ARIA snapshot: {str(e)}"
+            raise ModelRetry(f"Failed to generate ARIA snapshot: {str(e)}") from e
 
     async def click_id(self, element_id: str) -> str:
         """Clicks an element by its semantic ID from the last snapshot."""
@@ -431,7 +432,7 @@ class BrowserController:
                 return f"Successfully clicked '{selector}' (forced)"
         except PlaywrightError as e:
             logger.exception(f"Failed to click '{selector}'")
-            return f"Failed to click '{selector}': {str(e)}"
+            raise ModelRetry(f"Failed to click '{selector}': {str(e)}") from e
 
     async def hover(self, selector: str) -> str:
         """Hovers over an element defined by the selector."""
@@ -475,7 +476,7 @@ class BrowserController:
                 return f"Waited for {timeout_ms}ms."
         except PlaywrightError as e:
             logger.exception(f"Wait failed for {selector if selector else 'timeout'}")
-            return f"Wait failed: {str(e)}"
+            raise ModelRetry(f"Wait failed: {str(e)}") from e
 
     async def screenshot(self, selector: str = None, output_dir: str | Path | None = None) -> BinaryImage:
         """Takes a screenshot of the page or a specific element and returns it as a model-consumable image."""
@@ -496,7 +497,7 @@ class BrowserController:
             return BinaryImage.from_path(str(p))
         except (OSError, PlaywrightError) as e:
             logger.exception(f"Failed to take screenshot of {selector if selector else 'page'}")
-            raise RuntimeError(f"Failed to take screenshot: {str(e)}") from e
+            raise ModelRetry(f"Failed to take screenshot: {str(e)}") from e
 
     async def type(self, selector: str, text: str) -> str:
         """Types text into an input field defined by the selector."""
@@ -511,4 +512,4 @@ class BrowserController:
             return f"Successfully typed '{text}' into '{selector}'"
         except PlaywrightError as e:
             logger.exception(f"Failed to type in '{selector}'")
-            return f"Failed to type in '{selector}': {str(e)}"
+            raise ModelRetry(f"Failed to type in '{selector}': {str(e)}") from e

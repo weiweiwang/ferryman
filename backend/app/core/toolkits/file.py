@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
 from app.core.deps import AgentDeps
@@ -87,7 +88,7 @@ class FileToolkit:
     async def read_file(ctx: RunContext[AgentDeps], file_path: str) -> str:
         """Read a file from the session workspace or current skill resources.
 
-        Returns an error string if the file does not exist.
+        Raises `ModelRetry` if the file does not exist.
         """
         p = FileToolkit.resolve_read_path(
             ctx.deps.kernel,
@@ -96,7 +97,7 @@ class FileToolkit:
             ctx.deps.skill_name,
         )
         if not p.exists():
-            return f"Error: File not found: {file_path}"
+            raise ModelRetry(f"File not found: {file_path}")
         return p.read_text(encoding="utf-8")
 
     @staticmethod
@@ -116,7 +117,7 @@ class FileToolkit:
     async def list_files(ctx: RunContext[AgentDeps], directory: str = ".") -> str:
         """List entries in the session workspace or current skill resources.
 
-        Returns an error string if the directory does not exist.
+        Raises `ModelRetry` if the directory does not exist.
         """
         p = FileToolkit.resolve_read_path(
             ctx.deps.kernel,
@@ -125,7 +126,7 @@ class FileToolkit:
             ctx.deps.skill_name,
         )
         if not p.exists():
-            return f"Error: Directory not found: {directory}"
+            raise ModelRetry(f"Directory not found: {directory}")
         entries = sorted(p.iterdir())
         return "\n".join(
             f"{'[DIR] ' if e.is_dir() else ''}{e.name}" for e in entries

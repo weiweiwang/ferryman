@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic_ai.exceptions import ModelRetry
 
 from app.core.config import Settings
 from app.core.deps import AgentDeps
@@ -137,6 +138,27 @@ async def test_skill_context_keeps_writes_inside_session_workspace():
 
     with pytest.raises(ValueError, match="Path escapes session workspace"):
         await FileToolkit.write_file(ctx, str(skill.path / "scripts" / "generated.txt"), "nope")
+
+
+@pytest.mark.asyncio
+async def test_read_file_requests_retry_when_file_is_missing():
+    kernel = FerrymanKernel(create_test_settings())
+    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session"))
+
+    with pytest.raises(ModelRetry, match="File not found: missing.txt"):
+        await FileToolkit.read_file(ctx, "missing.txt")
+
+
+@pytest.mark.asyncio
+async def test_run_skill_script_requests_retry_when_script_is_missing():
+    create_mock_skill("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
+    kernel = FerrymanKernel(create_test_settings())
+    kernel.scan_skills()
+
+    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+
+    with pytest.raises(ModelRetry, match="Script not found: missing.py"):
+        await CommandToolkit.run_skill_script(ctx, "missing.py")
 
 
 # --- Publish Skill Tests ---

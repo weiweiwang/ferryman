@@ -1,3 +1,4 @@
+import json
 import pytest
 import asyncio
 import logging
@@ -7,8 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.messages import ModelResponse, ToolCallPart, TextPart
+from pydantic_ai.messages import ModelResponse, ToolCallPart, TextPart, ToolReturnPart
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.usage import RunUsage
 
 from app.core.config import Settings
@@ -256,6 +258,59 @@ async def test_agent_execution_closure(monkeypatch):
     assert "OK" in response_content
 
 
+@pytest.mark.asyncio
+async def test_master_agent_can_recover_from_soft_failed_run_skill(monkeypatch):
+    create_mock_skill("target_skill", "Test skill", TEST_USER_SKILLS)
+    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel.scan_skills()
+
+    from pydantic_ai.models.gemini import GeminiModel
+    from pydantic_ai.models.openai import OpenAIModel
+    from pydantic_ai.models.anthropic import AnthropicModel
+    monkeypatch.setattr("pydantic_ai.models.gemini.GeminiModel.__init__", lambda *args, **kwargs: None)
+    monkeypatch.setattr("pydantic_ai.models.openai.OpenAIModel.__init__", lambda *args, **kwargs: None)
+    monkeypatch.setattr("pydantic_ai.models.anthropic.AnthropicModel.__init__", lambda *args, **kwargs: None)
+
+    class FailingSkillAgent:
+        async def run(self, instruction, **kwargs):
+            raise RuntimeError("delegate exploded")
+
+    monkeypatch.setattr(kernel, "build_skill_agent", lambda skill_name: FailingSkillAgent())
+
+    async def mock_agent_logic(messages, info):
+        tool_returns = [
+            part
+            for msg in messages
+            for part in getattr(msg, "parts", [])
+            if isinstance(part, ToolReturnPart) and part.tool_name == "run_skill"
+        ]
+        if not tool_returns:
+            return ModelResponse(parts=[
+                ToolCallPart(
+                    tool_name="run_skill",
+                    args={"skill_name": "target_skill", "instruction": "Do the skill work"},
+                    tool_call_id="call_001",
+                )
+            ])
+
+        payload = json.loads(tool_returns[-1].content)
+        assert payload["ok"] is False
+        assert payload["skill_name"] == "target_skill"
+        assert payload["error"] == "delegate exploded"
+        return ModelResponse(parts=[
+            TextPart(content="Delegated skill failed cleanly, switching strategy.")
+        ])
+
+    mock_model = FunctionModel(mock_agent_logic)
+    monkeypatch.setattr(kernel, "_init_llm_model", lambda: mock_model)
+
+    result = await kernel.run_master_agent("Use the skill first", session_id="test_session")
+
+    payload_messages = result.get("payload", {}).get("messages", [])
+    assert len(payload_messages) > 0, "Agent failed to return messages"
+    assert payload_messages[-1]["content"] == "Delegated skill failed cleanly, switching strategy."
+
+
 # --- test_kernel.py (Execution Flow Mocked) ---
 @pytest.mark.asyncio
 async def test_run_master_agent_mocked(monkeypatch):
@@ -358,6 +413,40 @@ async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
     assert "Session Workspace:" in captured["instruction"]
     assert "Do the skill work" in captured["instruction"]
     assert captured["kwargs"]["deps"].emit_event_cb is ctx.deps.emit_event_cb
+
+
+@pytest.mark.asyncio
+async def test_skill_run_missing_skill_requests_retry():
+    kernel = FerrymanKernel(create_test_settings())
+    ctx = SimpleNamespace(
+        deps=AgentDeps(kernel=kernel, session_id="test-session", emit_event_cb=AsyncMock()),
+        usage=RunUsage(),
+    )
+
+    with pytest.raises(ModelRetry, match="Skill 'missing-skill' not found."):
+        await SkillToolkit.run_skill(ctx, "missing-skill", "Do the skill work")
+
+
+@pytest.mark.asyncio
+async def test_skill_run_returns_soft_failure_payload_when_delegate_fails(monkeypatch):
+    create_mock_skill("target_skill", "Test skill", TEST_USER_SKILLS)
+    kernel = FerrymanKernel(create_test_settings())
+    kernel.scan_skills()
+
+    class MockSkillAgent:
+        async def run(self, instruction, **kwargs):
+            raise RuntimeError("delegate exploded")
+
+    monkeypatch.setattr(kernel, "build_skill_agent", lambda skill_name: MockSkillAgent())
+
+    ctx = SimpleNamespace(
+        deps=AgentDeps(kernel=kernel, session_id="test-session", emit_event_cb=AsyncMock()),
+        usage=RunUsage(),
+    )
+
+    result = await SkillToolkit.run_skill(ctx, "target_skill", "Do the skill work")
+
+    assert result == '{"ok": false, "skill_name": "target_skill", "error": "delegate exploded"}'
 
 
 # --- test_agent_events.py ---

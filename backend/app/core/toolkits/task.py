@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Optional, Any, Dict
 
+from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 from sqlalchemy import String as SAString, desc, or_
 from sqlmodel import select
 
 from app.core.db import get_session
 from app.core.deps import AgentDeps
+from app.core.scheduler import compute_next_run_at, normalize_timezone_name
 from app.models.database import Schedule, Task
 
 VALID_TASK_STATUSES = frozenset({"pending", "running", "success", "failed", "canceled"})
@@ -17,7 +19,7 @@ PREVIEW_LIMIT = 120
 def _require_non_empty(field_name: str, value: str) -> str:
     normalized = value.strip()
     if not normalized:
-        raise ValueError(f"{field_name} must not be empty.")
+        raise ModelRetry(f"{field_name} must not be empty.")
     return normalized
 
 
@@ -85,7 +87,7 @@ class TaskToolkit:
         normalized_status = status.strip().lower()
         if normalized_status not in VALID_TASK_STATUSES:
             allowed = ", ".join(sorted(VALID_TASK_STATUSES))
-            raise ValueError(f"status must be one of: {allowed}.")
+            raise ModelRetry(f"status must be one of: {allowed}.")
 
         meta = {"progress_note": progress_note} if progress_note is not None else None
         kernel.persist_task_update(normalized_task_id, status=normalized_status, metadata=meta)
@@ -103,7 +105,7 @@ class TaskToolkit:
             normalized_status = status.strip().lower()
             if normalized_status not in VALID_TASK_STATUSES:
                 allowed = ", ".join(sorted(VALID_TASK_STATUSES))
-                raise ValueError(f"status must be one of: {allowed}.")
+                raise ModelRetry(f"status must be one of: {allowed}.")
 
         normalized_query = query.strip() if query else None
 
@@ -139,26 +141,38 @@ class TaskToolkit:
 
     @staticmethod
     async def create_schedule(
-            ctx: RunContext[AgentDeps], name: str, cron_expression: str, instruction: str
+            ctx: RunContext[AgentDeps],
+            name: str,
+            cron_expression: str,
+            instruction: str,
+            timezone: Optional[str] = None,
     ) -> str:
         """Create a persisted schedule definition.
 
         Stores the name, cron expression, and instruction in the database. This
         tool does not execute the schedule.
         """
+        kernel = ctx.deps.kernel
         normalized_name = _require_non_empty("name", name)
         normalized_cron = _require_non_empty("cron_expression", cron_expression)
         normalized_instruction = _require_non_empty("instruction", instruction)
+        normalized_timezone = normalize_timezone_name(timezone)
+        next_run_at = compute_next_run_at(normalized_cron, normalized_timezone)
 
         new_schedule = Schedule(
             name=normalized_name,
             cron_expression=normalized_cron,
+            timezone=normalized_timezone,
             args={"instruction": normalized_instruction},
+            next_run_at=next_run_at,
         )
         with get_session() as session:
             session.add(new_schedule)
             session.commit()
             session.refresh(new_schedule)
+        schedule_manager = getattr(kernel, "schedule_manager", None)
+        if schedule_manager:
+            await schedule_manager.sync_schedule(new_schedule.id)
         return f"Schedule '{normalized_name}' created with ID: {new_schedule.id}"
 
     @staticmethod
