@@ -746,6 +746,80 @@ def test_websocket_delete_schedule_removes_scheduler_job(client, session):
     remove_schedule.assert_awaited_once_with("schedule-sync-delete")
 
 
+def test_websocket_update_schedule_can_disable_invalid_persisted_schedule(client, session):
+    schedule = Schedule(
+        id="schedule-invalid-disable",
+        name="Broken schedule",
+        cron_expression="not-a-cron",
+        timezone="Mars/Base",
+        enabled=True,
+        args={"instruction": "Still disable me"},
+        next_run_at=datetime.now(timezone.utc),
+    )
+    session.add(schedule)
+    session.commit()
+
+    sync_schedule = AsyncMock()
+    app.state.schedule_manager.sync_schedule = sync_schedule
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "update_schedule",
+            {
+                "schedule_id": "schedule-invalid-disable",
+                "enabled": False,
+            },
+            request_id=202,
+        )
+
+    session.expire_all()
+    refreshed = session.get(Schedule, "schedule-invalid-disable")
+
+    assert response["result"] == {"status": "success"}
+    assert refreshed is not None
+    assert refreshed.enabled is False
+    assert refreshed.next_run_at is None
+    sync_schedule.assert_awaited_once_with("schedule-invalid-disable")
+
+
+def test_websocket_update_schedule_reenables_schedule_and_restores_next_run(client, session):
+    schedule = Schedule(
+        id="schedule-reenable",
+        name="Re-enable me",
+        cron_expression="0 8 * * *",
+        timezone="UTC",
+        enabled=False,
+        args={"instruction": "Run again"},
+        next_run_at=None,
+    )
+    session.add(schedule)
+    session.commit()
+
+    sync_schedule = AsyncMock()
+    app.state.schedule_manager.sync_schedule = sync_schedule
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "update_schedule",
+            {
+                "schedule_id": "schedule-reenable",
+                "enabled": True,
+            },
+            request_id=203,
+        )
+
+    session.expire_all()
+    refreshed = session.get(Schedule, "schedule-reenable")
+
+    assert response["result"] == {"status": "success"}
+    assert refreshed is not None
+    assert refreshed.enabled is True
+    assert refreshed.next_run_at is not None
+    sync_schedule.assert_awaited_once_with("schedule-reenable")
+
+
 def test_scheduler_runs_due_schedule_during_app_lifespan(session, monkeypatch):
     from apscheduler.triggers.date import DateTrigger
 

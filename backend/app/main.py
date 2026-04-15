@@ -785,27 +785,45 @@ async def update_schedule(
         if not schedule:
             return Success({"status": "error", "message": "Schedule not found"})
 
+        target_enabled = enabled if enabled is not None else schedule.enabled
         candidate_name = name if name is not None else schedule.name
         candidate_cron = cron if cron is not None else schedule.cron_expression
         candidate_timezone = timezone if timezone is not None else schedule.timezone
         candidate_instruction = instruction if instruction is not None else schedule.args.get("instruction", "")
 
         try:
-            candidate_name = candidate_name.strip()
-            candidate_instruction = candidate_instruction.strip()
-            if not candidate_name:
-                raise ValueError("name must not be empty.")
-            if not candidate_instruction:
-                raise ValueError("instruction must not be empty.")
-            normalized_timezone = normalize_timezone_name(candidate_timezone)
-            next_run_at = compute_next_run_at(candidate_cron, normalized_timezone)
+            if name is not None or target_enabled:
+                candidate_name = candidate_name.strip()
+                if not candidate_name:
+                    raise ValueError("name must not be empty.")
+
+            if instruction is not None or target_enabled:
+                candidate_instruction = candidate_instruction.strip()
+                if not candidate_instruction:
+                    raise ValueError("instruction must not be empty.")
+
+            normalized_cron = candidate_cron.strip()
+            if cron is not None and not normalized_cron:
+                raise ValueError("cron must not be empty.")
+
+            if timezone is not None or target_enabled:
+                normalized_timezone = normalize_timezone_name(candidate_timezone)
+            else:
+                normalized_timezone = schedule.timezone
+
+            if target_enabled:
+                if not normalized_cron:
+                    raise ValueError("cron must not be empty.")
+                next_run_at = compute_next_run_at(normalized_cron, normalized_timezone)
+            else:
+                next_run_at = None
         except ValueError as exc:
             return Success({"status": "error", "message": str(exc)})
 
         if name is not None:
             schedule.name = candidate_name
         if cron is not None:
-            schedule.cron_expression = candidate_cron.strip()
+            schedule.cron_expression = normalized_cron
         if timezone is not None:
             schedule.timezone = normalized_timezone
         if enabled is not None:
@@ -814,7 +832,7 @@ async def update_schedule(
             args = dict(schedule.args or {})
             args["instruction"] = candidate_instruction
             schedule.args = args
-        schedule.next_run_at = next_run_at if (enabled if enabled is not None else schedule.enabled) else None
+        schedule.next_run_at = next_run_at
 
         schedule.updated_at = datetime.now(dt_timezone.utc)
         session.add(schedule)

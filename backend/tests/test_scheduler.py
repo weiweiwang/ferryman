@@ -167,6 +167,39 @@ async def test_scheduler_run_updates_metrics_even_when_agent_execution_fails(ses
 
 
 @pytest.mark.asyncio
+async def test_scheduler_run_disables_schedule_when_instruction_is_missing(session):
+    schedule = Schedule(
+        id="schedule-missing-instruction",
+        name="Missing instruction",
+        cron_expression="0 1 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={},
+    )
+    session.add(schedule)
+    session.commit()
+
+    kernel = StubKernel()
+    scheduler = FerrymanScheduler(kernel, get_settings())
+    scheduler._scheduler = FakeScheduler()
+    await scheduler.sync_schedule(schedule.id)
+
+    await scheduler._run_schedule(schedule.id)
+
+    session.expire_all()
+    refreshed = session.exec(select(Schedule).where(Schedule.id == schedule.id)).one()
+
+    assert kernel.calls == []
+    assert refreshed.enabled is False
+    assert refreshed.next_run_at is None
+    assert refreshed.last_run_result is not None
+    assert refreshed.last_run_result["status"] == "failed"
+    assert refreshed.last_run_result["summary"] == "Schedule disabled because its configuration is invalid."
+    assert refreshed.last_run_result["error"] == "instruction must not be empty."
+    assert scheduler._scheduler.get_job(schedule.id) is None
+
+
+@pytest.mark.asyncio
 async def test_scheduler_sync_all_disables_invalid_persisted_schedule(session):
     valid_schedule = Schedule(
         id="schedule-valid",

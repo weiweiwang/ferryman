@@ -23,6 +23,7 @@ logfire==4.25.0
 python-json-logger==4.0.0
 asgi-correlation-id==4.3.4
 shortuuid==1.0.13
+APScheduler==3.11.2
 
 # --- Scrapers ---
 playwright==1.58.0

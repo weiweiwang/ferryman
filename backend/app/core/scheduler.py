@@ -172,6 +172,7 @@ class FerrymanScheduler:
 
         if not instruction:
             logger.warning("Skipping schedule %s because instruction is empty", schedule_id)
+            self._mark_schedule_invalid(schedule_id, ValueError("instruction must not be empty."))
             return
 
         self._ensure_schedule_session(schedule_id, schedule_name)
