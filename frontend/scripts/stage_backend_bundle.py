@@ -16,7 +16,6 @@ BACKEND_WORK_ROOT = BACKEND_BUILD_ROOT / "work"
 BACKEND_CACHE_ROOT = BACKEND_BUILD_ROOT / "cache"
 BACKEND_DST = GEN_ROOT / "backend-sidecar"
 SKILLS_DST = GEN_ROOT / "skills"
-BUNDLE_SMOKE_SKILL_NAME = "bundle-smoke-skill"
 FORBIDDEN_PROMPT_FILES = {"GEMINI.md", "AGENT.md", "CLAUDE.md"}
 PYINSTALLER_SPEC = ROOT / "backend" / "ferryman_backend.spec"
 
@@ -116,51 +115,6 @@ def copy_skills() -> None:
         copy_tree(SKILLS_SRC, SKILLS_DST)
 
 
-def write_bundle_smoke_skill() -> None:
-    skill_dir = SKILLS_DST / BUNDLE_SMOKE_SKILL_NAME
-    assets_dir = skill_dir / "assets"
-    references_dir = skill_dir / "references"
-    scripts_dir = skill_dir / "scripts"
-    assets_dir.mkdir(parents=True, exist_ok=True)
-    references_dir.mkdir(parents=True, exist_ok=True)
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-
-    (skill_dir / "SKILL.md").write_text(
-        (
-            "---\n"
-            f"name: {BUNDLE_SMOKE_SKILL_NAME}\n"
-            "description: Internal release bundle verification skill.\n"
-            "version: 1.0.0\n"
-            "author: Ferryman\n"
-            "created: 2026-04-15\n"
-            "updated: 2026-04-15\n"
-            "---\n\n"
-            "# Internal Bundle Smoke Skill\n"
-        ),
-        encoding="utf-8",
-    )
-    (assets_dir / "sample.txt").write_text(
-        "Ferryman bundled skill asset check.\n",
-        encoding="utf-8",
-    )
-    (references_dir / "sample.md").write_text(
-        "# Bundle Smoke Reference\nFerryman bundled skill reference check.\n",
-        encoding="utf-8",
-    )
-    (scripts_dir / "verify_bundle_resources.py").write_text(
-        (
-            "from __future__ import annotations\n\n"
-            "import json\n"
-            "from pathlib import Path\n\n"
-            "skill_dir = Path(__file__).resolve().parents[1]\n"
-            "asset = (skill_dir / 'assets' / 'sample.txt').read_text(encoding='utf-8').strip()\n"
-            "reference = (skill_dir / 'references' / 'sample.md').read_text(encoding='utf-8').strip()\n"
-            "print(json.dumps({'asset': asset, 'reference': reference}, ensure_ascii=False))\n"
-        ),
-        encoding="utf-8",
-    )
-
-
 def ensure_no_forbidden_files(root: Path) -> None:
     forbidden = [path for path in root.rglob("*") if path.name in FORBIDDEN_PROMPT_FILES]
     if forbidden:
@@ -172,7 +126,6 @@ def main() -> None:
     reset_destination()
     build_backend_sidecar()
     copy_skills()
-    write_bundle_smoke_skill()
     ensure_no_forbidden_files(GEN_ROOT)
 
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parent
+BUNDLE_SMOKE_SKILL_NAME = "bundle-smoke-skill"
 
 
 def required_paths(app_path: Path) -> list[Path]:
@@ -41,6 +42,68 @@ def app_executable(app_path: Path) -> Path:
     if not executables:
         raise RuntimeError(f"No executable found in {macos_dir}")
     return executables[0]
+
+
+def ensure_packaged_skills_clean(skills_dir: Path) -> None:
+    leaked_skill_dir = skills_dir / BUNDLE_SMOKE_SKILL_NAME
+    if leaked_skill_dir.exists():
+        raise RuntimeError(
+            f"Packaged skills unexpectedly contain internal smoke skill: {leaked_skill_dir}"
+        )
+
+
+def write_bundle_smoke_skill(skills_dir: Path) -> None:
+    skill_dir = skills_dir / BUNDLE_SMOKE_SKILL_NAME
+    assets_dir = skill_dir / "assets"
+    references_dir = skill_dir / "references"
+    scripts_dir = skill_dir / "scripts"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    references_dir.mkdir(parents=True, exist_ok=True)
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    (skill_dir / "SKILL.md").write_text(
+        (
+            "---\n"
+            f"name: {BUNDLE_SMOKE_SKILL_NAME}\n"
+            "description: Internal release bundle verification skill.\n"
+            "version: 1.0.0\n"
+            "author: Ferryman\n"
+            "created: 2026-04-15\n"
+            "updated: 2026-04-15\n"
+            "---\n\n"
+            "# Internal Bundle Smoke Skill\n"
+        ),
+        encoding="utf-8",
+    )
+    (assets_dir / "sample.txt").write_text(
+        "Ferryman bundled skill asset check.\n",
+        encoding="utf-8",
+    )
+    (references_dir / "sample.md").write_text(
+        "# Bundle Smoke Reference\nFerryman bundled skill reference check.\n",
+        encoding="utf-8",
+    )
+    (scripts_dir / "verify_bundle_resources.py").write_text(
+        (
+            "from __future__ import annotations\n\n"
+            "import json\n"
+            "from pathlib import Path\n\n"
+            "skill_dir = Path(__file__).resolve().parents[1]\n"
+            "asset = (skill_dir / 'assets' / 'sample.txt').read_text(encoding='utf-8').strip()\n"
+            "reference = (skill_dir / 'references' / 'sample.md').read_text(encoding='utf-8').strip()\n"
+            "print(json.dumps({'asset': asset, 'reference': reference}, ensure_ascii=False))\n"
+        ),
+        encoding="utf-8",
+    )
+
+
+def build_smoke_skills_dir(packaged_skills_dir: Path, temp_root: Path) -> Path:
+    ensure_packaged_skills_clean(packaged_skills_dir)
+
+    staged_skills_dir = temp_root / "skills"
+    shutil.copytree(packaged_skills_dir, staged_skills_dir, dirs_exist_ok=True)
+    write_bundle_smoke_skill(staged_skills_dir)
+    return staged_skills_dir
 
 
 def run_frontend_ui_smoke(app_path: Path) -> None:
@@ -105,12 +168,13 @@ def main() -> int:
         raise RuntimeError(f"Packaged jusText stoplists directory is empty: {stoplists_dir}")
 
     sidecar = app_path / "Contents" / "Resources" / "gen" / "backend-sidecar" / "ferryman"
-    skills_dir = app_path / "Contents" / "Resources" / "gen" / "skills"
+    packaged_skills_dir = app_path / "Contents" / "Resources" / "gen" / "skills"
 
     with tempfile.TemporaryDirectory(prefix="ferryman-release-smoke-") as temp_root:
+        staged_skills_dir = build_smoke_skills_dir(packaged_skills_dir, Path(temp_root))
         env = os.environ.copy()
         env["FERRYMAN_ROOT_DIR"] = temp_root
-        env["FERRYMAN_BUNDLED_SKILLS_DIR"] = str(skills_dir)
+        env["FERRYMAN_BUNDLED_SKILLS_DIR"] = str(staged_skills_dir)
         env["PYDANTIC_DISABLE_PLUGINS"] = "1"
         result = subprocess.run(
             [str(sidecar), "--smoke-test-bundle"],
