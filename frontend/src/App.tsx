@@ -246,6 +246,11 @@ export default function App() {
   // Fetch initial config
   useEffect(() => {
     if (isConnected) {
+      if (isTauriRuntime()) {
+        invoke('report_frontend_smoke_status', { status: 'backend_connected' }).catch((error) => {
+          console.error('Failed to report frontend smoke status:', error);
+        });
+      }
       refreshModelSettings();
       refreshSkills();
       refreshSessions();

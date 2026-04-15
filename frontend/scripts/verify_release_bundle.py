@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -32,6 +33,61 @@ def parse_args() -> argparse.Namespace:
         help="Path to the built Ferryman.app bundle.",
     )
     return parser.parse_args()
+
+
+def app_executable(app_path: Path) -> Path:
+    macos_dir = app_path / "Contents" / "MacOS"
+    executables = [path for path in macos_dir.iterdir() if path.is_file() and os.access(path, os.X_OK)]
+    if not executables:
+        raise RuntimeError(f"No executable found in {macos_dir}")
+    return executables[0]
+
+
+def run_frontend_ui_smoke(app_path: Path) -> None:
+    executable = app_executable(app_path)
+    with tempfile.TemporaryDirectory(prefix="ferryman-frontend-smoke-") as temp_root:
+        marker_path = Path(temp_root) / "frontend-smoke.json"
+        env = os.environ.copy()
+        env["FERRYMAN_FRONTEND_SMOKE_MARKER"] = str(marker_path)
+        env["FERRYMAN_FRONTEND_SMOKE_AUTO_EXIT"] = "1"
+        env.setdefault("PYDANTIC_DISABLE_PLUGINS", "1")
+
+        process = subprocess.Popen(
+            [str(executable)],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.time() + 45
+            while time.time() < deadline:
+                if marker_path.exists():
+                    payload = json.loads(marker_path.read_text(encoding="utf-8"))
+                    if payload.get("status") == "backend_connected":
+                        try:
+                            process.wait(timeout=15)
+                        except subprocess.TimeoutExpired:
+                            process.terminate()
+                            process.wait(timeout=10)
+                        if process.returncode not in (0, None):
+                            raise RuntimeError(f"Frontend UI smoke app exited with code {process.returncode}")
+                        return
+
+                if process.poll() is not None and not marker_path.exists():
+                    raise RuntimeError(f"Frontend UI smoke app exited before reporting backend connection. Exit code: {process.returncode}")
+
+                time.sleep(0.25)
+
+            raise RuntimeError("Frontend UI smoke timed out waiting for backend_connected marker.")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
 
 
 def main() -> int:
@@ -76,6 +132,9 @@ def main() -> int:
         report = json.loads(result.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError) as exc:
         raise RuntimeError(f"Could not parse bundled smoke test output: {result.stdout}") from exc
+
+    run_frontend_ui_smoke(app_path)
+    report["checks"].append({"name": "frontend_ui_backend"})
 
     dist_dir = PROJECT_ROOT / "dist"
     dist_dir.mkdir(exist_ok=True)

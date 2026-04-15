@@ -281,12 +281,38 @@ fn cleanup_backend(app: &AppHandle) {
     }
 }
 
+fn frontend_smoke_marker_path() -> Option<PathBuf> {
+    env::var_os("FERRYMAN_FRONTEND_SMOKE_MARKER").map(PathBuf::from)
+}
+
 #[tauri::command]
 fn get_backend_connection(
     app: AppHandle,
     state: State<'_, BackendState>,
 ) -> Result<BackendConnection, String> {
     ensure_backend_runtime(&app, &state)
+}
+
+#[tauri::command]
+fn report_frontend_smoke_status(app: AppHandle, status: String) -> Result<(), String> {
+    if let Some(marker_path) = frontend_smoke_marker_path() {
+        if let Some(parent) = marker_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create frontend smoke marker directory: {e}"))?;
+        }
+
+        let payload = format!("{{\"status\":\"{}\"}}", status.replace('"', "\\\""));
+        std::fs::write(&marker_path, payload)
+            .map_err(|e| format!("Failed to write frontend smoke marker: {e}"))?;
+
+        if env::var("FERRYMAN_FRONTEND_SMOKE_AUTO_EXIT").as_deref() == Ok("1")
+            && status == "backend_connected"
+        {
+            app.exit(0);
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -322,7 +348,11 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(BackendState::default())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_backend_connection, open_local_file])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_connection,
+            report_frontend_smoke_status,
+            open_local_file
+        ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
 

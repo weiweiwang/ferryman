@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import socket
+import sqlite3
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
 import uvicorn
 import websockets
 from justext.utils import get_stoplist, get_stoplists
+from pydantic_ai import Agent
 from pydantic_ai.usage import RequestUsage, Usage
 
 from app.core.browser import BrowserController
@@ -88,6 +91,37 @@ def _pick_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _release_online_mode() -> str:
+    return (os.environ.get("FERRYMAN_RELEASE_SMOKE_ONLINE", "auto") or "auto").strip().lower()
+
+
+def _load_local_gemini_config() -> dict[str, str] | None:
+    db_path = Path.home() / ".ferryman" / "user" / "ferryman.db"
+    if not db_path.exists():
+        return None
+
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "select value from app_configs where key = ?",
+            ("llm.gemini",),
+        ).fetchone()
+
+    if not row or not row[0]:
+        return None
+
+    raw = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    api_key = str(raw.get("api_key", "")).strip()
+    base_url = str(raw.get("base_url", "")).strip()
+    if not api_key:
+        return None
+
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": "gemini-3-flash-preview",
+    }
+
+
 async def _rpc_call(websocket, method: str, params: dict[str, object] | None = None, request_id: int = 1) -> dict[str, object]:
     await websocket.send(
         json.dumps(
@@ -138,6 +172,39 @@ async def _run_websocket_smoke(report: dict[str, object]) -> None:
     finally:
         server.should_exit = True
         await asyncio.wait_for(server_task, timeout=10)
+
+
+async def _run_live_web_smoke(base_ctx, report: dict[str, object]) -> None:
+    navigate_result = await WebToolkit.browser_navigate(base_ctx, "https://example.com/")
+    _require("Successfully navigated" in navigate_result, f"Live browser_navigate failed: {navigate_result}")
+    live_snapshot = await WebToolkit.browser_aria_snapshot(base_ctx)
+    _require("Example Domain" in live_snapshot, f"Live aria snapshot missing expected content: {live_snapshot[:200]}")
+    live_distilled = await WebToolkit.browser_get_distilled_dom(base_ctx)
+    _require("documentation examples" in live_distilled.lower(), f"Live distilled DOM missing expected content: {live_distilled[:200]}")
+    live_screenshot = await WebToolkit.browser_screenshot(base_ctx)
+    _require(bool(getattr(live_screenshot, "data", b"")), "Live browser_screenshot returned empty image data.")
+    report["checks"].append({"name": "web_live"})
+
+
+async def _run_live_gemini_smoke(report: dict[str, object]) -> None:
+    config = _load_local_gemini_config()
+    _require(config is not None, "Local Gemini config was not found in ~/.ferryman/user/ferryman.db.")
+
+    from pydantic_ai.models.google import GoogleModel
+    from pydantic_ai.providers.google import GoogleProvider
+
+    provider_kwargs = {"api_key": config["api_key"]}
+    if config["base_url"]:
+        provider_kwargs["base_url"] = config["base_url"]
+
+    agent = Agent(
+        model=GoogleModel(config["model"], provider=GoogleProvider(**provider_kwargs)),
+        system_prompt="Reply with exactly OK.",
+    )
+    result = await agent.run("Reply with exactly OK.")
+    output = str(result.output).strip()
+    _require(output.upper().startswith("OK"), f"Unexpected Gemini live smoke output: {output!r}")
+    report["checks"].append({"name": "gemini_live", "model": config["model"]})
 
 
 async def run_bundle_smoke_test() -> dict[str, object]:
@@ -284,6 +351,18 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         report["checks"].append({"name": "web_tools"})
 
         await _run_websocket_smoke(report)
+
+        online_mode = _release_online_mode()
+        if online_mode not in {"auto", "always", "never"}:
+            raise RuntimeError(f"Unsupported FERRYMAN_RELEASE_SMOKE_ONLINE mode: {online_mode}")
+
+        should_run_online = online_mode == "always"
+        if online_mode == "auto":
+            should_run_online = _load_local_gemini_config() is not None
+
+        if should_run_online:
+            await _run_live_web_smoke(base_ctx, report)
+            await _run_live_gemini_smoke(report)
 
         return report
     finally:
