@@ -14,13 +14,15 @@ class WebToolkit:
             WebToolkit.browser_aria_snapshot,
             WebToolkit.browser_click,
             WebToolkit.browser_type,
+            WebToolkit.browser_scroll,
             WebToolkit.browser_wait,
+            WebToolkit.browser_console,
             WebToolkit.browser_screenshot,
         ]
 
     @staticmethod
     async def browser_navigate(ctx: RunContext[AgentDeps], url: str, headless: Optional[bool] = None) -> str:
-        """Open a URL in the session browser.
+        """Open a URL and return a compact interactive snapshot.
 
         Set `headless=False` when the browser should stay visible to the user.
         """
@@ -56,20 +58,37 @@ class WebToolkit:
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.type(selector, text)
 
-    # Note: Other tools like aria_snapshot, hover, scroll etc are internal/advanced
-    # and can be added if needed, but the RISC goal is 4 core actions.
-
     @staticmethod
     async def browser_aria_snapshot(ctx: RunContext[AgentDeps]) -> str:
         """Return an accessibility snapshot with stable IDs for later interactions."""
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
         return await browser.get_aria_snapshot()
-        
+
     @staticmethod
-    async def browser_wait(ctx: RunContext[AgentDeps], timeout_ms: int = 2000) -> str:
-        """Wait for the given number of milliseconds."""
+    async def browser_scroll(
+        ctx: RunContext[AgentDeps],
+        direction: str = "down",
+        selector: Optional[str] = None,
+    ) -> str:
+        """Scroll the page up or down, or scroll an element into view."""
         browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
-        return await browser.wait(timeout_ms)
+        return await browser.scroll(direction=direction, selector=selector)
+
+    @staticmethod
+    async def browser_wait(
+        ctx: RunContext[AgentDeps],
+        timeout_ms: int = 2000,
+        selector: Optional[str] = None,
+    ) -> str:
+        """Wait for time to pass or for a selector to appear."""
+        browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
+        return await browser.wait(timeout_ms, selector=selector)
+
+    @staticmethod
+    async def browser_console(ctx: RunContext[AgentDeps], clear: bool = False) -> str:
+        """Return recent browser console messages and page errors."""
+        browser = await ctx.deps.kernel.get_browser(ctx.deps.session_id)
+        return await browser.get_console_messages(clear=clear)
 
     @staticmethod
     async def browser_screenshot(ctx: RunContext[AgentDeps], selector: Optional[str] = None) -> BinaryImage:
