@@ -95,6 +95,7 @@ def test_websocket_llm_and_model_config_flow(client):
     from app.core.config import Settings
 
     original_fetcher = Settings._fetch_provider_models
+    original_probe = Settings._probe_openai_compatible_chat_model
     original_validator = Settings.validate_provider_config
 
     def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
@@ -104,9 +105,12 @@ def test_websocket_llm_and_model_config_flow(client):
             return ["kimi-k2.5"]
         if provider == "doubao":
             return ["doubao-seed-2-0-pro-260215"]
-        if provider == "custom":
-            return ["custom-chat-model"]
         return []
+
+    def fake_probe(api_key: str, base_url: str, model: str):
+        assert api_key == "custom-key"
+        assert base_url == "https://custom.example.com/v1"
+        assert model == "custom-chat-model"
 
     def fake_validator(provider: str, api_key: str, base_url: str = "", model: str = ""):
         if api_key == "bad-key":
@@ -114,6 +118,7 @@ def test_websocket_llm_and_model_config_flow(client):
         return None
 
     Settings._fetch_provider_models = staticmethod(fake_fetcher)
+    Settings._probe_openai_compatible_chat_model = staticmethod(fake_probe)
     Settings.validate_provider_config = staticmethod(fake_validator)
 
     with client.websocket_connect(websocket_path()) as websocket:
@@ -232,6 +237,7 @@ def test_websocket_llm_and_model_config_flow(client):
             assert response["result"]["custom"] == ["custom-chat-model"]
         finally:
             Settings._fetch_provider_models = original_fetcher
+            Settings._probe_openai_compatible_chat_model = original_probe
             Settings.validate_provider_config = original_validator
 
 

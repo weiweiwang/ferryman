@@ -164,6 +164,7 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
     config.set("system.llm.active_model", "qwen:qwen-plus", category="system")
 
     original_fetcher = config._fetch_provider_models
+    original_probe = config._probe_openai_compatible_chat_model
 
     def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
         if provider == "openai":
@@ -174,27 +175,31 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
             return ["kimi-k2.5", "kimi-k2-thinking"]
         if provider == "doubao":
             return ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"]
-        if provider == "custom":
-            return ["server-model", "my-custom-model"]
         return []
 
+    def fake_probe(api_key: str, base_url: str, model: str):
+        assert api_key == "sk-custom"
+        assert base_url == "https://custom.example.com/v1"
+        assert model == "my-custom-model"
+
     config._fetch_provider_models = staticmethod(fake_fetcher)
+    config._probe_openai_compatible_chat_model = staticmethod(fake_probe)
     try:
         models = config.get_available_models()
     finally:
         config._fetch_provider_models = original_fetcher
+        config._probe_openai_compatible_chat_model = original_probe
 
     assert "openai" in models
     assert "gemini" not in models
     assert models["openai"] == ["gpt-4o", "text-embedding-3-large"]
-    assert "qwen" in models
+    assert "qwen" not in models
     assert "kimi" in models
     assert "doubao" in models
     assert "custom" in models
-    assert models["qwen"] == ["qwen-max", "qwen-plus", "qwen3.5-plus", "qwen3.5-omni-plus"]
     assert models["kimi"] == ["kimi-k2.5", "kimi-k2-thinking"]
     assert models["doubao"] == ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"]
-    assert models["custom"] == ["server-model", "my-custom-model"]
+    assert models["custom"] == ["my-custom-model"]
 
 
 def test_available_models_include_openai_anthropic_and_gemini_when_configured():
@@ -263,6 +268,44 @@ def test_get_available_models_does_not_fallback_on_fetch_error():
     assert "kimi" not in models
 
 
+def test_get_available_models_hides_provider_on_transient_fetch_error():
+    config.set("llm.gemini", {"api_key": "sk-gemini"}, category="llm")
+
+    original_fetcher = config._fetch_provider_models
+
+    def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
+        raise TimeoutError("The handshake operation timed out")
+
+    config._fetch_provider_models = staticmethod(fake_fetcher)
+    try:
+        models = config.get_available_models()
+    finally:
+        config._fetch_provider_models = original_fetcher
+
+    assert "gemini" not in models
+
+
+def test_get_available_models_hides_custom_provider_when_fetch_fails():
+    config.set(
+        "llm.custom",
+        {"api_key": "sk-custom", "base_url": "https://custom.example.com/v1", "model": "my-custom-model"},
+        category="llm",
+    )
+
+    original_probe = config._probe_openai_compatible_chat_model
+
+    def fake_probe(api_key: str, base_url: str, model: str):
+        raise RuntimeError("HTTP 500 Internal Server Error")
+
+    config._probe_openai_compatible_chat_model = staticmethod(fake_probe)
+    try:
+        models = config.get_available_models()
+    finally:
+        config._probe_openai_compatible_chat_model = original_probe
+
+    assert "custom" not in models
+
+
 def test_validate_provider_config_returns_error_when_fetch_fails(monkeypatch):
     def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
         raise RuntimeError("HTTP 401 Unauthorized")
@@ -276,6 +319,28 @@ def test_validate_provider_config_returns_error_when_fetch_fails(monkeypatch):
 
 def test_validate_provider_config_allows_empty_api_key():
     assert config.validate_provider_config("openai", "") is None
+
+
+def test_validate_provider_config_requires_model_for_custom():
+    assert config.validate_provider_config("custom", "sk-custom", "https://custom.example.com/v1", "") == "Model is required."
+
+
+def test_validate_provider_config_probes_custom_chat_model(monkeypatch):
+    captured = {}
+
+    def fake_probe(api_key: str, base_url: str, model: str):
+        captured["api_key"] = api_key
+        captured["base_url"] = base_url
+        captured["model"] = model
+
+    monkeypatch.setattr(config, "_probe_openai_compatible_chat_model", staticmethod(fake_probe))
+
+    assert config.validate_provider_config("custom", "sk-custom", "https://custom.example.com/v1", "my-custom-model") is None
+    assert captured == {
+        "api_key": "sk-custom",
+        "base_url": "https://custom.example.com/v1",
+        "model": "my-custom-model",
+    }
 
 
 def test_get_active_model_id_returns_none_when_unset():
@@ -433,6 +498,40 @@ def test_fetch_anthropic_models_marks_non_json_response_as_unavailable(monkeypat
 
     with pytest.raises(ModelListEndpointUnavailable):
         config._fetch_anthropic_models("sk-anthropic", "https://proxy.example.com/v1")
+
+
+def test_probe_openai_compatible_chat_model_uses_chat_completions_endpoint(monkeypatch):
+    captured = {}
+
+    def fake_http_post_json(url: str, payload=None, headers=None, query=None):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        captured["query"] = query
+        return {"id": "chatcmpl-test"}
+
+    monkeypatch.setattr(config, "_http_post_json", staticmethod(fake_http_post_json))
+
+    config._probe_openai_compatible_chat_model(
+        "sk-custom",
+        "https://custom.example.com/v1",
+        "my-custom-model",
+    )
+
+    assert captured == {
+        "url": "https://custom.example.com/v1/chat/completions",
+        "payload": {
+            "model": "my-custom-model",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "temperature": 0,
+        },
+        "headers": {
+            "Authorization": "Bearer sk-custom",
+            "Content-Type": "application/json",
+        },
+        "query": None,
+    }
 
 
 def test_filter_chat_model_ids_excludes_non_chat_entries():

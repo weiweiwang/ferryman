@@ -359,22 +359,20 @@ class Settings(BaseSettings):
             provider_models: List[str] = []
 
             if provider == "custom":
-                if api_key and base_url:
+                if api_key and base_url and configured_model:
                     try:
-                        provider_models = Settings._fetch_provider_models(
-                            provider=provider,
+                        Settings._probe_openai_compatible_chat_model(
                             api_key=api_key,
                             base_url=base_url,
-                            list_mode=definition.get("list_mode", "openai_compatible"),
+                            model=configured_model,
                         )
+                        provider_models = [configured_model]
                     except ModelListEndpointUnavailable as exc:
                         logger.exception(f"Model list endpoint unavailable for provider {provider}: {exc}")
                         provider_models = []
                     except Exception as exc:
                         logger.exception(f"Failed to fetch models for provider {provider}: {exc}")
                         provider_models = []
-                if configured_model:
-                    provider_models = [*provider_models, configured_model]
             elif api_key and base_url:
                 try:
                     provider_models = Settings._fetch_provider_models(
@@ -385,7 +383,7 @@ class Settings(BaseSettings):
                     )
                 except ModelListEndpointUnavailable as exc:
                     logger.exception(f"Model list endpoint unavailable for provider {provider}: {exc}")
-                    provider_models = list(definition.get("models", []))
+                    provider_models = []
                 except Exception as exc:
                     logger.exception(f"Failed to fetch models for provider {provider}: {exc}")
                     provider_models = []
@@ -444,19 +442,26 @@ class Settings(BaseSettings):
         )
         if provider == "custom" and not effective_base_url:
             return "Base URL is required."
+        if provider == "custom" and not normalized_model:
+            return "Model is required."
         if definition.get("requires_base_url") and not effective_base_url:
             return "Base URL is required."
 
         try:
-            Settings._fetch_provider_models(
-                provider=provider,
-                api_key=normalized_api_key,
-                base_url=effective_base_url,
-                list_mode=definition.get("list_mode", "openai_compatible"),
-            )
+            if provider == "custom":
+                Settings._probe_openai_compatible_chat_model(
+                    api_key=normalized_api_key,
+                    base_url=effective_base_url,
+                    model=normalized_model,
+                )
+            else:
+                Settings._fetch_provider_models(
+                    provider=provider,
+                    api_key=normalized_api_key,
+                    base_url=effective_base_url,
+                    list_mode=definition.get("list_mode", "openai_compatible"),
+                )
         except ModelListEndpointUnavailable:
-            if provider == "custom" and normalized_model:
-                return None
             return "Provider does not expose a usable models endpoint for validation."
         except HTTPError as exc:
             details = ""
@@ -483,9 +488,34 @@ class Settings(BaseSettings):
             return json.loads(response.read().decode("utf-8"))
 
     @staticmethod
+    def _http_post_json(
+        url: str,
+        payload: Dict[str, Any],
+        headers: Optional[Dict[str, str]] = None,
+        query: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        if query:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{urlencode(query)}"
+
+        request = Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers or {},
+            method="POST",
+        )
+        with urlopen(request, timeout=5) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    @staticmethod
     def _build_openai_compatible_models_url(base_url: str) -> str:
         normalized = base_url.rstrip("/")
         return normalized if normalized.endswith("/models") else f"{normalized}/models"
+
+    @staticmethod
+    def _build_openai_compatible_chat_completions_url(base_url: str) -> str:
+        normalized = base_url.rstrip("/")
+        return normalized if normalized.endswith("/chat/completions") else f"{normalized}/chat/completions"
 
     @staticmethod
     def _build_gemini_models_url(base_url: str) -> str:
@@ -867,6 +897,22 @@ class Settings(BaseSettings):
             query={"key": api_key},
         )
         return Settings._filter_gemini_models(payload.get("models", []))
+
+    @staticmethod
+    def _probe_openai_compatible_chat_model(api_key: str, base_url: str, model: str) -> None:
+        Settings._http_post_json(
+            Settings._build_openai_compatible_chat_completions_url(base_url),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            payload={
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+                "temperature": 0,
+            },
+        )
 
 
 @lru_cache()
