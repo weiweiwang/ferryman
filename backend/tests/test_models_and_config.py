@@ -3,8 +3,9 @@ from json import JSONDecodeError
 from urllib.error import HTTPError
 
 import pytest
-from sqlmodel import select
+from sqlmodel import select, Session as DBSession
 
+import app.core.db as db_module
 from app.models.database import Session, Message, Task, AppConfig
 from app.models.schemas import SessionModel, MessageModel, TaskModel
 from app.core.config import ModelListEndpointUnavailable, Settings as config
@@ -54,6 +55,27 @@ def test_session_message_relationship(session):
     results = session.exec(statement).all()
     assert len(results) == 1
     assert results[0].content == "Hello"
+
+
+def test_migrate_session_memory_json_payloads_clears_legacy_text(session):
+    legacy_session = Session(title="Legacy Session", memory=None)
+    session.add(legacy_session)
+    session.commit()
+    session.refresh(legacy_session)
+
+    with db_module.engine.connect() as conn:
+        conn.exec_driver_sql(
+            "UPDATE sessions SET memory = ? WHERE id = ?",
+            ("legacy note text", legacy_session.id),
+        )
+        conn.commit()
+
+    db_module.migrate_session_memory_json_payloads()
+
+    with DBSession(db_module.engine) as verify_session:
+        refreshed = verify_session.get(Session, legacy_session.id)
+        assert refreshed is not None
+        assert refreshed.memory is None
 
 
 def test_pydantic_schema_validation():

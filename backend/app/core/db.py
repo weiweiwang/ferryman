@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import contextmanager
 from typing import Generator
@@ -18,6 +19,59 @@ engine = create_engine(
     echo=False,
     connect_args={"check_same_thread": False}
 )
+
+
+def migrate_session_memory_json_payloads() -> None:
+    """Normalize legacy sessions.memory values for the JSON-based schema."""
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+        if "sessions" not in table_names:
+            return
+
+        column_names = {column["name"] for column in inspector.get_columns("sessions")}
+        if "memory" not in column_names:
+            return
+    except Exception as e:
+        logger.exception(f"⚠️ Could not inspect sessions.memory for migration with exception: {e}")
+        return
+
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT id, memory FROM sessions WHERE memory IS NOT NULL")).fetchall()
+        for row in rows:
+            session_id = row[0]
+            raw_memory = row[1]
+
+            if raw_memory is None:
+                continue
+
+            if isinstance(raw_memory, dict):
+                continue
+            elif isinstance(raw_memory, str):
+                try:
+                    parsed = json.loads(raw_memory)
+                except Exception:
+                    parsed = None
+
+                if isinstance(parsed, dict):
+                    conn.execute(
+                        text("UPDATE sessions SET memory = :memory WHERE id = :id"),
+                        {
+                            "id": session_id,
+                            "memory": json.dumps(parsed, ensure_ascii=False),
+                        },
+                    )
+                else:
+                    conn.execute(
+                        text("UPDATE sessions SET memory = NULL WHERE id = :id"),
+                        {"id": session_id},
+                    )
+            else:
+                conn.execute(
+                    text("UPDATE sessions SET memory = NULL WHERE id = :id"),
+                    {"id": session_id},
+                )
+        conn.commit()
 
 def auto_migrate_schema():
     """
@@ -73,6 +127,7 @@ def init_db():
     SQLModel.metadata.create_all(engine)
     try:
         auto_migrate_schema()
+        migrate_session_memory_json_payloads()
     except Exception as e:
         logger.exception("🚨 DB Initialization Error")
         # Re-raise to prevent the app from starting in a broken state

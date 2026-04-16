@@ -63,6 +63,24 @@ version: 1.0.0
     skill_md.write_text(content, encoding="utf-8")
 
 
+def create_mock_skill_with_multiline_description(name: str, directory: Path):
+    skill_dir = directory / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        f"""---
+name: {name}
+description: >
+  First line
+  second line
+version: 1.0.0
+---
+# Mock SOP
+""",
+        encoding="utf-8",
+    )
+
+
 def create_mock_skill_with_script(name: str, desc: str, directory: Path):
     create_mock_skill(name, desc, directory)
     scripts_dir = directory / name / "scripts"
@@ -85,7 +103,7 @@ version: 1.0.0
 
 
 # --- Skill scanning & fetching tests (migrated from test_kernel.py) ---
-def test_scan_skills_and_xml_index():
+def test_scan_skills_and_text_index():
     create_mock_skill("user_skill", "User skill desc", TEST_USER_SKILLS)
     create_mock_skill("internal_skill", "Internal skill desc", TEST_BUNDLED_SKILLS)
 
@@ -94,11 +112,20 @@ def test_scan_skills_and_xml_index():
     assert "user_skill" in kernel.skills
     assert "internal_skill" in kernel.skills
     
-    # Test XML generation (OS Prompt formatting)
-    xml = kernel.get_skill_index_xml()
-    assert "<available_skills>" in xml
-    assert "<name>user_skill</name>" in xml
-    assert "<description>Internal skill desc</description>" in xml
+    # Test plain-text generation (OS Prompt formatting)
+    skill_index = kernel.get_skill_index_text()
+    assert "- user_skill: User skill desc" in skill_index
+    assert "- internal_skill: Internal skill desc" in skill_index
+
+
+def test_skill_index_flattens_multiline_descriptions():
+    create_mock_skill_with_multiline_description("multiline_skill", TEST_USER_SKILLS)
+
+    kernel = FerrymanKernel(create_test_settings())
+    kernel.scan_skills()
+
+    skill_index = kernel.get_skill_index_text()
+    assert "- multiline_skill: First line second line" in skill_index
 
 
 def test_read_skill_sop():

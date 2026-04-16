@@ -32,7 +32,7 @@ class MCPToolModel(BaseModel):
 class SessionModel(BaseModel):
     id: str
     title: str
-    memory: Optional[str] = None
+    memory: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -43,6 +43,7 @@ class MessageModel(BaseModel):
     role: str
     content: str
     type: str
+    token_estimate: int = 0
     parts: List[Dict[str, Any]] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime

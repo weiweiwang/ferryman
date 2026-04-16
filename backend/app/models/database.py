@@ -10,7 +10,7 @@ class Session(SQLModel, table=True):
     __tablename__ = "sessions"
     id: str = Field(default_factory=shortuuid.uuid, primary_key=True)
     title: str = Field(default="")
-    memory: Optional[str] = None
+    memory: Optional[Dict[str, Any]] = Field(default=None, sa_column=SAColumn(JSON, nullable=True))
     input_tokens: int = Field(default=0)
     output_tokens: int = Field(default=0)
     metadata_: Dict[str, Any] = Field(default_factory=dict, sa_column=SAColumn("metadata", JSON))
@@ -25,6 +25,7 @@ class Message(SQLModel, table=True):
     content: str
     parts: List[Dict[str, Any]] = Field(default_factory=list, sa_column=SAColumn(JSON))
     type: str  # text, tool_call, tool_result, thinking
+    token_estimate: int = Field(default=0)
     metadata_: Dict[str, Any] = Field(default_factory=dict, sa_column=SAColumn("metadata", JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

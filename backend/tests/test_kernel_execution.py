@@ -3,22 +3,35 @@ import pytest
 import asyncio
 import logging
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.messages import BinaryImage, ModelResponse, ToolCallPart, TextPart, ToolReturn, ToolReturnPart
+from pydantic_ai.messages import (
+    BinaryImage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    ToolCallPart,
+    TextPart,
+    ToolReturn,
+    ToolReturnPart,
+)
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.usage import RunUsage
+from sqlmodel import select
 
 from app.core.browser import BrowserActionError
 from app.core.config import Settings
+from app.core.db import get_session
 from app.core.kernel import FerrymanKernel, LLMConfigurationError
 from app.core.deps import AgentDeps
 from app.core.toolkits.skill import SkillToolkit
 from app.core.toolkits.web import WebToolkit
+from app.models.database import Message, Session
 from app.models.events import FerrymanEventEnvelope, EventNamespace, ToolPhase, ToolActivityPayload
 from app.models.schemas import Usage
 
@@ -388,6 +401,472 @@ async def test_run_master_agent_mocked(monkeypatch):
     response = await kernel.run_master_agent("Please list files", "test-session")
     
     assert "Please list files" in response["payload"]["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_master_agent_history_keeps_system_prompt_and_token_estimates(monkeypatch):
+    captured = {}
+
+    class MockUsage:
+        input_tokens = 10
+        output_tokens = 20
+        total_tokens = 30
+
+    class MockResult:
+        output = "done"
+
+        @staticmethod
+        def usage():
+            return MockUsage()
+
+        @staticmethod
+        def new_messages():
+            return [ModelResponse(parts=[TextPart(content="done")])]
+
+    class MockAgent:
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+            captured["instruction"] = instruction
+            captured["message_history"] = message_history
+            return MockResult()
+
+    kernel = FerrymanKernel(create_test_settings())
+    monkeypatch.setattr(kernel, "_get_master_agent", lambda session_id: MockAgent())
+
+    await kernel.run_master_agent("Please list files", "test-session")
+
+    history = captured["message_history"]
+    assert isinstance(history[0], ModelRequest)
+    assert isinstance(history[0].parts[0], SystemPromptPart)
+    assert "You are a personal assistant running inside **Ferryman**." in history[0].parts[0].content
+
+    with get_session() as db_session:
+        messages = list(
+            db_session.exec(
+                select(Message)
+                .where(Message.session_id == "test-session")
+                .order_by(Message.created_at)  # type: ignore[arg-type]
+            ).all()
+        )
+
+    assert [message.role for message in messages] == ["user", "assistant"]
+    assert messages[0].token_estimate > 0
+    assert messages[1].token_estimate > 0
+
+
+def test_get_session_messages_includes_summary_and_only_tail_messages():
+    kernel = FerrymanKernel(create_test_settings())
+    session_id = "session-with-summary"
+    cutoff = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+
+    with get_session() as db_session:
+        db_session.add(
+            Session(
+                id=session_id,
+                title="",
+                memory={
+                    "schema_version": 1,
+                    "compaction": {
+                        "summary": "compressed history",
+                        "cutoff_created_at": "2026-04-16T12:00:00Z",
+                        "updated_at": "2026-04-16T12:05:00Z",
+                    },
+                },
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="user",
+                content="old user",
+                type="text",
+                token_estimate=5,
+                created_at=cutoff - timedelta(minutes=2),
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="assistant",
+                content="old assistant",
+                type="text",
+                token_estimate=5,
+                created_at=cutoff - timedelta(minutes=1),
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="user",
+                content="new user",
+                type="text",
+                token_estimate=5,
+                created_at=cutoff + timedelta(minutes=1),
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="assistant",
+                content="new assistant",
+                type="text",
+                token_estimate=5,
+                created_at=cutoff + timedelta(minutes=2),
+            )
+        )
+        db_session.commit()
+
+    history = kernel._get_session_messages(session_id)
+
+    assert isinstance(history[0], ModelRequest)
+    assert isinstance(history[0].parts[0], SystemPromptPart)
+    assert isinstance(history[1], ModelResponse)
+    assert isinstance(history[1].parts[0], TextPart)
+    assert "[CONTEXT COMPACTION" in history[1].parts[0].content
+    assert "compressed history" in history[1].parts[0].content
+
+    rendered_tail = [
+        message.parts[0].content
+        for message in history[2:]
+    ]
+    assert rendered_tail == ["new user", "new assistant"]
+
+
+def test_get_session_messages_respects_microsecond_cutoff():
+    kernel = FerrymanKernel(create_test_settings())
+    session_id = "session-with-microsecond-cutoff"
+    cutoff = datetime(2026, 4, 16, 12, 0, 0, 123456, tzinfo=timezone.utc)
+
+    with get_session() as db_session:
+        db_session.add(
+            Session(
+                id=session_id,
+                title="",
+                memory={
+                    "schema_version": 1,
+                    "compaction": {
+                        "summary": "compressed history",
+                        "cutoff_created_at": kernel._format_utc_timestamp(cutoff),
+                        "updated_at": "2026-04-16T12:05:00Z",
+                    },
+                },
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="assistant",
+                content="already compacted",
+                type="text",
+                token_estimate=5,
+                created_at=cutoff,
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="user",
+                content="same-second new user",
+                type="text",
+                token_estimate=5,
+                created_at=cutoff + timedelta(microseconds=1),
+            )
+        )
+        db_session.commit()
+
+    history = kernel._get_session_messages(session_id)
+
+    rendered_tail = [message.parts[0].content for message in history[2:]]
+    assert rendered_tail == ["same-second new user"]
+
+
+@pytest.mark.asyncio
+async def test_run_master_agent_compacts_after_current_turn(monkeypatch):
+    captured = {}
+    session_id = "compaction-session"
+    first_turn_time = datetime(2026, 4, 16, 12, 2, tzinfo=timezone.utc)
+
+    class MasterUsage:
+        input_tokens = 11
+        output_tokens = 12
+        total_tokens = 23
+
+    class MasterResult:
+        output = "post-compaction reply"
+
+        @staticmethod
+        def usage():
+            return MasterUsage()
+
+        @staticmethod
+        def new_messages():
+            return [ModelResponse(parts=[TextPart(content="post-compaction reply")])]
+
+    class MasterAgent:
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+            captured["message_history"] = message_history
+            return MasterResult()
+
+    class CompactionUsage:
+        input_tokens = 3
+        output_tokens = 4
+        total_tokens = 7
+
+    class CompactionResult:
+        output = "## Current Goal\nkeep going\n## Completed\nold work\n## Current State\nstate\n## Unresolved Issues\nnone\n## Pending Work\nnext\n## Exact Identifiers\nid\n## User Preferences and Constraints\npref"
+
+        @staticmethod
+        def usage():
+            return CompactionUsage()
+
+    class CompactionAgent:
+        async def run(self, instruction):
+            captured["compaction_input"] = instruction
+            return CompactionResult()
+
+    kernel = FerrymanKernel(create_test_settings())
+    monkeypatch.setattr(kernel, "_get_master_agent", lambda current_session_id: MasterAgent())
+    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
+    monkeypatch.setattr(
+        kernel,
+        "get_setting",
+        lambda key, default=None: 10 if key == "system.llm.compaction_threshold_tokens" else default,
+    )
+
+    with get_session() as db_session:
+        db_session.add(Session(id=session_id, title=""))
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="user",
+                content="first user",
+                type="text",
+                token_estimate=6,
+                created_at=first_turn_time - timedelta(minutes=2),
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="assistant",
+                content="first assistant",
+                type="text",
+                token_estimate=6,
+                created_at=first_turn_time,
+            )
+        )
+        db_session.commit()
+
+    await kernel.run_master_agent("follow-up", session_id)
+
+    history = captured["message_history"]
+    rendered_history = [message.parts[0].content for message in history[1:]]
+    assert rendered_history == ["first user", "first assistant"]
+    assert "follow-up" in captured["compaction_input"]
+    assert "post-compaction reply" in captured["compaction_input"]
+
+    with get_session() as db_session:
+        session_obj = db_session.get(Session, session_id)
+        assert session_obj is not None
+        assert session_obj.memory["compaction"]["summary"].startswith("## Current Goal")
+        assert session_obj.memory["compaction"]["cutoff_created_at"] is not None
+        assert "guard_until" not in session_obj.memory["compaction"]
+
+
+@pytest.mark.asyncio
+async def test_run_master_agent_skips_failed_compaction_and_sets_guard(monkeypatch):
+    captured = {"compaction_calls": 0}
+    session_id = "compaction-failure-session"
+
+    class MasterUsage:
+        input_tokens = 5
+        output_tokens = 7
+        total_tokens = 12
+
+    class MasterResult:
+        output = "normal reply"
+
+        @staticmethod
+        def usage():
+            return MasterUsage()
+
+        @staticmethod
+        def new_messages():
+            return [ModelResponse(parts=[TextPart(content="normal reply")])]
+
+    class MasterAgent:
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+            captured["message_history"] = message_history
+            return MasterResult()
+
+    class FailingCompactionAgent:
+        async def run(self, instruction):
+            captured["compaction_calls"] += 1
+            raise RuntimeError("compaction backend unavailable")
+
+    kernel = FerrymanKernel(create_test_settings())
+    monkeypatch.setattr(kernel, "_get_master_agent", lambda current_session_id: MasterAgent())
+    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: FailingCompactionAgent())
+    monkeypatch.setattr(
+        kernel,
+        "get_setting",
+        lambda key, default=None: (
+            10 if key == "system.llm.compaction_threshold_tokens"
+            else 60 if key == "system.llm.compaction_guard_seconds"
+            else default
+        ),
+    )
+
+    with get_session() as db_session:
+        db_session.add(Session(id=session_id, title=""))
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="user",
+                content="older user",
+                type="text",
+                token_estimate=6,
+                created_at=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="assistant",
+                content="older assistant",
+                type="text",
+                token_estimate=6,
+                created_at=datetime(2026, 4, 16, 12, 1, tzinfo=timezone.utc),
+            )
+        )
+        db_session.commit()
+
+    response = await kernel.run_master_agent("fresh request", session_id)
+
+    assert response["payload"]["messages"][0]["content"] == "normal reply"
+    assert captured["compaction_calls"] == 1
+
+    await kernel._maybe_compact_session(session_id)
+    assert captured["compaction_calls"] == 1
+
+    with get_session() as db_session:
+        session_obj = db_session.get(Session, session_id)
+        assert session_obj is not None
+        assert session_obj.memory["compaction"]["guard_until"] is not None
+        assert "summary" not in session_obj.memory["compaction"]
+
+        messages = list(
+            db_session.exec(
+                select(Message)
+                .where(Message.session_id == session_id)
+                .order_by(Message.created_at)  # type: ignore[arg-type]
+            ).all()
+        )
+
+    assert set(message.content for message in messages) == {
+        "older user",
+        "older assistant",
+        "fresh request",
+        "normal reply",
+    }
+    assert not any(message.content.startswith("Run failed:") for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_run_master_agent_backfills_legacy_zero_token_estimates_for_compaction(monkeypatch):
+    captured = {"compaction_calls": 0}
+    session_id = "compaction-legacy-zero-estimates"
+
+    class MasterUsage:
+        input_tokens = 5
+        output_tokens = 5
+        total_tokens = 10
+
+    class MasterResult:
+        output = "ok"
+
+        @staticmethod
+        def usage():
+            return MasterUsage()
+
+        @staticmethod
+        def new_messages():
+            return [ModelResponse(parts=[TextPart(content="ok")])]
+
+    class MasterAgent:
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+            return MasterResult()
+
+    class CompactionUsage:
+        input_tokens = 2
+        output_tokens = 3
+        total_tokens = 5
+
+    class CompactionResult:
+        output = "## Current Goal\ncontinue\n## Completed\nlegacy\n## Current State\nstate\n## Unresolved Issues\nnone\n## Pending Work\nnext\n## Exact Identifiers\nid\n## User Preferences and Constraints\npref"
+
+        @staticmethod
+        def usage():
+            return CompactionUsage()
+
+    class CompactionAgent:
+        async def run(self, instruction):
+            captured["compaction_calls"] += 1
+            return CompactionResult()
+
+    kernel = FerrymanKernel(create_test_settings())
+    monkeypatch.setattr(kernel, "_get_master_agent", lambda current_session_id: MasterAgent())
+    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
+    monkeypatch.setattr(
+        kernel,
+        "get_setting",
+        lambda key, default=None: 20 if key == "system.llm.compaction_threshold_tokens" else default,
+    )
+
+    with get_session() as db_session:
+        db_session.add(Session(id=session_id, title=""))
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="user",
+                content="legacy user message " * 8,
+                type="text",
+                token_estimate=0,
+                created_at=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+            )
+        )
+        db_session.add(
+            Message(
+                session_id=session_id,
+                role="assistant",
+                content="legacy assistant message " * 8,
+                type="text",
+                token_estimate=0,
+                created_at=datetime(2026, 4, 16, 12, 1, tzinfo=timezone.utc),
+            )
+        )
+        db_session.commit()
+
+    await kernel.run_master_agent("hi", session_id)
+
+    assert captured["compaction_calls"] == 1
+
+    with get_session() as db_session:
+        legacy_messages = list(
+            db_session.exec(
+                select(Message)
+                .where(Message.session_id == session_id)
+                .where(Message.content.like("legacy%"))
+                .order_by(Message.created_at)  # type: ignore[arg-type]
+            ).all()
+        )
+        session_obj = db_session.get(Session, session_id)
+
+    assert [message.token_estimate for message in legacy_messages] == sorted(
+        [message.token_estimate for message in legacy_messages]
+    )
+    assert all(message.token_estimate > 0 for message in legacy_messages)
+    assert session_obj is not None
+    assert session_obj.memory["compaction"]["summary"].startswith("## Current Goal")
 
 
 # --- test_prompt_and_usage_limits.py ---
