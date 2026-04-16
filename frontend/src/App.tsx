@@ -7,7 +7,6 @@ import { useI18n } from './hooks/useI18n';
 import { 
   Settings, 
   Send, 
-  Square,
   Cpu, 
   Activity,
   CalendarClock,
@@ -928,9 +927,11 @@ export default function App() {
                         <div
                           className={cn(
                             "flex rounded-lg border transition-all",
-                            input.trim()
-                              ? "border-white bg-white text-[#080808] shadow-md"
-                              : "border-white/10 bg-white/[0.03] text-white/35"
+                            isExecuting
+                              ? "border-white/18 bg-white/[0.08] text-white shadow-[0_14px_34px_rgba(255,255,255,0.08)]"
+                              : input.trim()
+                                ? "border-white bg-white text-[#080808] shadow-md"
+                                : "border-white/10 bg-white/[0.03] text-white/35"
                           )}
                         >
                           <button
@@ -939,7 +940,11 @@ export default function App() {
                             aria-label={isExecuting ? t('chat.stop') : sendShortcutHint}
                             className={cn(
                               "group relative h-10 w-10 flex items-center justify-center rounded-l-lg transition-colors active:scale-95 disabled:cursor-not-allowed",
-                              input.trim() ? "hover:bg-black/[0.04]" : "opacity-55"
+                              isExecuting
+                                ? "hover:bg-white/[0.08]"
+                                : input.trim()
+                                  ? "hover:bg-black/[0.04]"
+                                  : "opacity-55"
                             )}
                           >
                             <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#111] px-2 py-1 font-mono text-[10px] font-bold tracking-[0.04em] text-white/60 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
@@ -1268,17 +1273,21 @@ function StopIndicator() {
     <div className="relative flex h-4 w-4 items-center justify-center" data-testid="stop-indicator">
       <motion.span
         aria-hidden="true"
-        className="absolute inset-0 rounded-[4px] border border-current/35"
-        animate={{ scale: [1, 1.45], opacity: [0.6, 0] }}
-        transition={{ duration: 1.05, repeat: Infinity, ease: 'easeOut' }}
+        className="absolute inset-[-4px] rounded-[8px] bg-current/18 blur-[6px]"
+        animate={{ scale: [0.82, 1.22, 0.82], opacity: [0.16, 0.52, 0.16] }}
+        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.span
         aria-hidden="true"
-        className="absolute inset-[1px] rounded-[3px] bg-current/15"
-        animate={{ opacity: [0.12, 0.34, 0.12] }}
-        transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut' }}
+        className="absolute inset-[-1px] rounded-[5px] border border-current/30"
+        animate={{ scale: [0.88, 1.16, 0.88], opacity: [0.28, 0.82, 0.28] }}
+        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <Square size={12} strokeWidth={2.6} className="relative z-10 fill-current" />
+      <motion.span
+        className="relative z-10 block h-[10px] w-[10px] rounded-[3px] bg-current"
+        animate={{ scale: [0.86, 1.1, 0.86], opacity: [0.7, 1, 0.7] }}
+        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+      />
     </div>
   );
 }
