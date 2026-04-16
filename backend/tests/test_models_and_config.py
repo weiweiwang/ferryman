@@ -263,6 +263,21 @@ def test_get_available_models_does_not_fallback_on_fetch_error():
     assert "kimi" not in models
 
 
+def test_validate_provider_config_returns_error_when_fetch_fails(monkeypatch):
+    def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
+        raise RuntimeError("HTTP 401 Unauthorized")
+
+    monkeypatch.setattr(config, "_fetch_provider_models", staticmethod(fake_fetcher))
+
+    message = config.validate_provider_config("openai", "bad-key")
+
+    assert message == "API key validation failed: HTTP 401 Unauthorized"
+
+
+def test_validate_provider_config_allows_empty_api_key():
+    assert config.validate_provider_config("openai", "") is None
+
+
 def test_get_active_model_id_returns_none_when_unset():
     assert config().get_active_model_id() is None
 

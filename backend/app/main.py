@@ -8,8 +8,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from logging.config import dictConfig
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
+from uuid import uuid4
 
+from asgi_correlation_id import correlation_id
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from jsonrpcserver import async_dispatch, method, Success
@@ -157,6 +160,335 @@ async def emit_refresh_event(
     await emit_event_cb(event)
 
 
+async def send_text_locked(websocket: WebSocket, send_lock: asyncio.Lock, payload: str) -> None:
+    async with send_lock:
+        await websocket.send_text(payload)
+
+
+async def send_event_notification(
+    websocket: WebSocket,
+    send_lock: asyncio.Lock,
+    event_model: Any,
+) -> None:
+    await send_text_locked(
+        websocket,
+        send_lock,
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "ferryman_event",
+                "params": event_model.model_dump(mode="json", exclude_none=True),
+            }
+        ),
+    )
+    payload = getattr(event_model, "payload", None)
+    logger.debug({
+        "message": {
+            "event": "ws_event_sent",
+            "ws_event": getattr(event_model, "event", None),
+            "namespace": getattr(event_model, "namespace", None),
+            "session_id": getattr(event_model, "session_id", None),
+            "run_id": getattr(payload, "run_id", None),
+            "tool_name": getattr(payload, "tool_name", None),
+            "phase": getattr(payload, "phase", None),
+            "event_id": getattr(payload, "event_id", None),
+            "seq": getattr(payload, "seq", None),
+        }
+    })
+
+
+def build_rpc_context(websocket: WebSocket, send_lock: asyncio.Lock) -> SimpleNamespace:
+    app_state = websocket.app.state
+    return SimpleNamespace(
+        kernel=app_state.kernel,
+        bearer_token=app_state.bearer_token,
+        schedule_manager=app_state.schedule_manager,
+        app_state=app_state,
+        request_ws=websocket,
+        send_lock=send_lock,
+    )
+
+
+def build_emit_ws_event(websocket: WebSocket, send_lock: asyncio.Lock):
+    async def emit_ws_event(event_model: Any) -> None:
+        try:
+            if websocket.client_state.name == "CONNECTED":
+                await send_event_notification(websocket, send_lock, event_model)
+        except Exception as e:
+            logger.error(f"Failed to emit WS event {getattr(event_model, 'event', 'unknown')}: {e}")
+
+    return emit_ws_event
+
+
+def load_persisted_chat_run_event(session_id: str, run_id: str) -> Any | None:
+    from app.models.events import ChatFinalPayload, EventNamespace, FerrymanEventEnvelope
+
+    with get_session() as db_session:
+        assistant_message = db_session.exec(
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.role == "assistant",
+                func.json_extract(Message.metadata_, "$.run.id") == run_id,
+            )
+            .order_by(desc(Message.created_at))
+        ).first()
+
+        if not assistant_message:
+            return None
+
+        metadata = dict(assistant_message.metadata_ or {})
+        usage = metadata.get("usage") or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        return FerrymanEventEnvelope(
+            namespace=EventNamespace.AGENT,
+            event="chat_final",
+            session_id=session_id,
+            payload=ChatFinalPayload(
+                run_id=run_id,
+                messages=[
+                    {
+                        "role": "assistant",
+                        "content": assistant_message.content,
+                        "metadata": metadata,
+                    }
+                ],
+                usage=usage,
+            ),
+        )
+
+
+def persist_failed_chat_run(
+    session_id: str,
+    run_id: str,
+    error_message: str,
+    instruction: str | None = None,
+) -> Any:
+    from app.models.events import ChatFinalPayload, EventNamespace, FerrymanEventEnvelope
+
+    failure_content = f"Run failed: {error_message}"
+    failure_metadata = {
+        "run": {
+            "id": run_id,
+            "status": "failed",
+            "scope": "master",
+            "error": error_message,
+        }
+    }
+
+    with get_session() as db_session:
+        session_obj = db_session.get(Session, session_id)
+        if not session_obj:
+            session_obj = Session(id=session_id, title="")
+            db_session.add(session_obj)
+            db_session.flush()
+
+        user_message = db_session.exec(
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.role == "user",
+                func.json_extract(Message.metadata_, "$.run.id") == run_id,
+            )
+            .order_by(desc(Message.created_at))
+        ).first()
+        if user_message:
+            user_meta = dict(user_message.metadata_ or {})
+            user_meta["run"] = failure_metadata["run"]
+            user_message.metadata_ = user_meta
+            db_session.add(user_message)
+        elif instruction is not None:
+            db_session.add(
+                Message(
+                    session_id=session_id,
+                    role="user",
+                    content=instruction,
+                    type="text",
+                    metadata_=failure_metadata,
+                )
+            )
+
+        assistant_message = db_session.exec(
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.role == "assistant",
+                func.json_extract(Message.metadata_, "$.run.id") == run_id,
+            )
+            .order_by(desc(Message.created_at))
+        ).first()
+        if not assistant_message:
+            db_session.add(
+                Message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=failure_content,
+                    type="text",
+                    metadata_=failure_metadata,
+                )
+            )
+
+        session_obj.updated_at = datetime.now(timezone.utc)
+        db_session.add(session_obj)
+        db_session.commit()
+
+    persisted_event = load_persisted_chat_run_event(session_id, run_id)
+    if persisted_event is not None:
+        return persisted_event
+
+    return FerrymanEventEnvelope(
+        namespace=EventNamespace.AGENT,
+        event="chat_final",
+        session_id=session_id,
+        payload=ChatFinalPayload(
+            run_id=run_id,
+            messages=[
+                {
+                    "role": "assistant",
+                    "content": failure_content,
+                    "metadata": failure_metadata,
+                }
+            ],
+            usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        ),
+    )
+
+
+def persist_canceled_chat_run(session_id: str, run_id: str) -> Any:
+    from app.models.events import ChatFinalPayload, EventNamespace, FerrymanEventEnvelope
+
+    canceled_message = {
+        "role": "assistant",
+        "content": "Run canceled.",
+        "metadata": {
+            "run": {
+                "id": run_id,
+                "status": "canceled",
+                "scope": "master",
+            }
+        },
+    }
+
+    with get_session() as db_session:
+        session_obj = db_session.get(Session, session_id)
+        if not session_obj:
+            session_obj = Session(id=session_id, title="")
+            db_session.add(session_obj)
+            db_session.flush()
+
+        user_message = db_session.exec(
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.role == "user",
+                func.json_extract(Message.metadata_, "$.run.id") == run_id,
+            )
+            .order_by(desc(Message.created_at))
+        ).first()
+        if user_message:
+            user_meta = dict(user_message.metadata_ or {})
+            user_meta["run"] = {
+                "id": run_id,
+                "status": "canceled",
+                "scope": "master",
+            }
+            user_message.metadata_ = user_meta
+            db_session.add(user_message)
+
+        if session_obj:
+            session_obj.updated_at = datetime.now(timezone.utc)
+            db_session.add(session_obj)
+
+        db_session.commit()
+
+    return FerrymanEventEnvelope(
+        namespace=EventNamespace.AGENT,
+        event="chat_final",
+        session_id=session_id,
+        payload=ChatFinalPayload(
+            run_id=run_id,
+            messages=[canceled_message],
+            usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        ),
+    )
+
+
+async def background_execute_run(
+    *,
+    context,
+    instruction: str,
+    session_id: str,
+    run_id: str,
+    emit_event_cb,
+) -> None:
+    app_state = context.app_state
+    correlation_token = correlation_id.set(run_id)
+    try:
+        try:
+            result = await context.kernel.run_master_agent(
+                instruction=instruction,
+                session_id=session_id,
+                emit_event_cb=emit_event_cb,
+            )
+        except Exception as exc:
+            logger.exception("Background execute run failed for session %s", session_id)
+            failed_event = persist_failed_chat_run(
+                session_id=session_id,
+                run_id=run_id,
+                error_message=str(exc),
+                instruction=instruction,
+            )
+            await emit_event_cb(failed_event)
+            return
+        from app.models.events import FerrymanEventEnvelope
+
+        try:
+            final_event = FerrymanEventEnvelope.model_validate(result)
+        except Exception as exc:
+            logger.exception("Failed to validate final event for session %s", session_id)
+            fallback_event = load_persisted_chat_run_event(session_id, run_id)
+            if fallback_event is None:
+                fallback_event = persist_failed_chat_run(
+                    session_id=session_id,
+                    run_id=run_id,
+                    error_message=str(exc),
+                    instruction=instruction,
+                )
+            await emit_event_cb(fallback_event)
+            return
+
+        await emit_event_cb(final_event)
+
+        need_title_gen = False
+        with get_session() as db_session:
+            session_obj = db_session.get(Session, session_id)
+            if session_obj and not session_obj.title:
+                need_title_gen = True
+
+        if need_title_gen:
+            asyncio.create_task(
+                background_generate_title(context.kernel, session_id, instruction, emit_event_cb)
+            )
+    except asyncio.CancelledError:
+        canceled_event = persist_canceled_chat_run(session_id, run_id)
+        await emit_event_cb(canceled_event)
+        raise
+    finally:
+        correlation_id.reset(correlation_token)
+        app_state.execute_runs.pop(run_id, None)
+        if app_state.session_run_index.get(session_id) == run_id:
+            app_state.session_run_index.pop(session_id, None)
+        try:
+            await emit_refresh_event(
+                emit_event_cb,
+                entity="session",
+                action="updated",
+                entity_id=session_id,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.exception("Failed to emit session refresh for %s", session_id)
+
+
 def is_websocket_authorized(websocket: WebSocket) -> bool:
     presented_token = websocket.query_params.get("access_token")
     expected_token = getattr(websocket.app.state, "bearer_token", None)
@@ -266,6 +598,8 @@ async def lifespan(fastapi_app: FastAPI):
 
     fastapi_app.state.kernel = FerrymanKernel(get_settings())
     fastapi_app.state.bearer_token = os.environ.get("FERRYMAN_BEARER_TOKEN") or DEFAULT_FERRYMAN_BEARER_TOKEN
+    fastapi_app.state.execute_runs = {}
+    fastapi_app.state.session_run_index = {}
 
     # Pre-scan skills
     fastapi_app.state.kernel.scan_skills()
@@ -336,6 +670,16 @@ async def set_llm_config(
         current_config["base_url"] = base_url.strip() if base_url.strip() else ""
     if model is not None and provider == "custom":
         current_config["model"] = model.strip() if model.strip() else ""
+
+    validation_error = await asyncio.to_thread(
+        get_settings().validate_provider_config,
+        provider,
+        current_config.get("api_key", ""),
+        current_config.get("base_url", ""),
+        current_config.get("model", ""),
+    )
+    if validation_error:
+        return Success({"status": "error", "message": validation_error})
 
     get_settings().set(key, current_config, category="llm")
 
@@ -458,45 +802,73 @@ async def background_generate_title(kernel, session_id: str, instruction: str, e
 @method
 async def execute(context, instruction: str, session_id: str = "default"):
     """
-    Ferryman OS 核心指令入口：接收自然语言指令并调度 Master Agent。
+    Ferryman OS 核心指令入口：启动后台Agent Run，并立即返回 run_id。
     """
     if context and hasattr(context, "kernel"):
-        # Provide an emit callback that uses the active websocket
-        async def emit_ws_event(event_model) -> None:
-            try:
-                ws = getattr(context, "active_ws", None)
-                if ws and ws.client_state.name == "CONNECTED":
-                    to_send = {
-                        "jsonrpc": "2.0",
-                        "method": "ferryman_event",
-                        "params": event_model.model_dump(mode="json", exclude_none=True)
-                    }
-                    import json
-                    await ws.send_text(json.dumps(to_send))
-            except Exception as e:
-                logger.error(f"Failed to emit WS event {event_model.event}: {e}")
+        active_run_id = context.app_state.session_run_index.get(session_id)
+        if active_run_id:
+            active_entry = context.app_state.execute_runs.get(active_run_id)
+            if active_entry and not active_entry["task"].done():
+                return Success({
+                    "status": "in_flight",
+                    "run_id": active_run_id,
+                    "session_id": session_id,
+                })
 
-        # 调用 Kernel 的 Master Agent 入口
-        # 这里 Master Agent 会根据 OS Prompt 和可用 Skills 决定下一步
-        result = await context.kernel.run_master_agent(
-            instruction=instruction,
-            session_id=session_id,
-            emit_event_cb=emit_ws_event
+        websocket = getattr(context, "request_ws", None)
+        send_lock = getattr(context, "send_lock", None)
+        if websocket is None or send_lock is None:
+            return Success({"status": "error", "message": "WebSocket context unavailable"})
+
+        run_id = uuid4().hex
+        emit_ws_event = build_emit_ws_event(websocket, send_lock)
+        task = asyncio.create_task(
+            background_execute_run(
+                context=context,
+                instruction=instruction,
+                session_id=session_id,
+                run_id=run_id,
+                emit_event_cb=emit_ws_event,
+            )
         )
-
-        need_title_gen = False
-        with get_session() as db_session:
-            session_obj = db_session.get(Session, session_id)
-            if session_obj and not session_obj.title:
-                need_title_gen = True
-
-        if need_title_gen:
-            asyncio.create_task(background_generate_title(context.kernel, session_id, instruction, emit_ws_event))
-
-        # result is already dumped as a dict in run_master_agent in the new unified format
-        return Success(result)
+        context.app_state.execute_runs[run_id] = {
+            "task": task,
+            "session_id": session_id,
+            "instruction": instruction,
+        }
+        context.app_state.session_run_index[session_id] = run_id
+        return Success({"status": "started", "run_id": run_id, "session_id": session_id})
 
     return Success({"status": "error", "message": "Kernel not initialized"})
+
+
+@method
+async def cancel_run(context, run_id: str, session_id: Optional[str] = None):
+    """Cancel an active chat run."""
+    if not context:
+        return Success({"status": "error", "message": "Context unavailable"})
+
+    entry = context.app_state.execute_runs.get(run_id)
+    if not entry:
+        return Success({"status": "not_found", "run_id": run_id})
+
+    if session_id and entry["session_id"] != session_id:
+        return Success({
+            "status": "error",
+            "message": "run_id does not match session_id",
+            "run_id": run_id,
+        })
+
+    task = entry["task"]
+    if task.done():
+        return Success({
+            "status": "already_finished",
+            "run_id": run_id,
+            "session_id": entry["session_id"],
+        })
+
+    task.cancel()
+    return Success({"status": "canceling", "run_id": run_id, "session_id": entry["session_id"]})
 
 
 @method
@@ -867,8 +1239,8 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     await websocket.accept()
-    websocket.app.state.active_ws = websocket
     logger.info("🔌 WebSocket connection established")
+    send_lock = asyncio.Lock()
 
     try:
         while True:
@@ -880,9 +1252,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
             try:
                 # Process one JSON-RPC request at a time and keep the socket alive on request errors.
-                response = await async_dispatch(data, context=websocket.app.state)
+                response = await async_dispatch(data, context=build_rpc_context(websocket, send_lock))
                 if response:
-                    await websocket.send_text(str(response))
+                    await send_text_locked(websocket, send_lock, str(response))
             except Exception:
                 logger.exception("⚠️ JSON-RPC dispatch failed")
                 request_id = None
@@ -902,7 +1274,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     ),
                     id=request_id,
                 )
-                await websocket.send_text(error_payload.model_dump_json())
+                await send_text_locked(websocket, send_lock, error_payload.model_dump_json())
     except WebSocketDisconnect:
         logger.info("❌ WebSocket disconnected")
     except Exception:

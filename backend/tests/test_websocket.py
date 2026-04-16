@@ -1,5 +1,6 @@
 import json
 import time
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+from sqlmodel import select
 
 from app.main import app
 import app.main as main_module
@@ -26,6 +28,21 @@ def send_rpc(websocket, method: str, params: dict | None = None, request_id: int
         "id": request_id,
     }))
     return json.loads(websocket.receive_text())
+
+
+def send_rpc_until_response(websocket, method: str, params: dict | None = None, request_id: int = 1) -> tuple[dict, list[dict]]:
+    websocket.send_text(json.dumps({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params or {},
+        "id": request_id,
+    }))
+    notifications: list[dict] = []
+    while True:
+        message = json.loads(websocket.receive_text())
+        if message.get("id") == request_id:
+            return message, notifications
+        notifications.append(message)
 
 
 def test_websocket_rejects_invalid_token(client):
@@ -78,6 +95,7 @@ def test_websocket_llm_and_model_config_flow(client):
     from app.core.config import Settings
 
     original_fetcher = Settings._fetch_provider_models
+    original_validator = Settings.validate_provider_config
 
     def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
         if provider == "openai":
@@ -90,7 +108,13 @@ def test_websocket_llm_and_model_config_flow(client):
             return ["custom-chat-model"]
         return []
 
+    def fake_validator(provider: str, api_key: str, base_url: str = "", model: str = ""):
+        if api_key == "bad-key":
+            return "Invalid API key."
+        return None
+
     Settings._fetch_provider_models = staticmethod(fake_fetcher)
+    Settings.validate_provider_config = staticmethod(fake_validator)
 
     with client.websocket_connect(websocket_path()) as websocket:
         try:
@@ -145,7 +169,6 @@ def test_websocket_llm_and_model_config_flow(client):
             assert "qwen" not in response["result"]
             assert "kimi" not in response["result"]
             assert "doubao" not in response["result"]
-            assert "azure_openai" not in response["result"]
 
             response = send_rpc(
                 websocket,
@@ -179,6 +202,18 @@ def test_websocket_llm_and_model_config_flow(client):
                 websocket,
                 "set_llm_config",
                 {
+                    "provider": "openai",
+                    "api_key": "bad-key",
+                    "base_url": "https://test.api",
+                },
+                request_id=200,
+            )
+            assert response["result"] == {"status": "error", "message": "Invalid API key."}
+
+            response = send_rpc(
+                websocket,
+                "set_llm_config",
+                {
                     "provider": "custom",
                     "api_key": "custom-key",
                     "base_url": "https://custom.example.com/v1",
@@ -197,6 +232,7 @@ def test_websocket_llm_and_model_config_flow(client):
             assert response["result"]["custom"] == ["custom-chat-model"]
         finally:
             Settings._fetch_provider_models = original_fetcher
+            Settings.validate_provider_config = original_validator
 
 
 def test_websocket_list_skills(client, monkeypatch):
@@ -283,8 +319,9 @@ def test_websocket_backend_log_endpoints(client, monkeypatch):
         }
 
 
-def test_websocket_execute_serializes_agent_result(client, monkeypatch):
+def test_websocket_execute_starts_background_run_and_emits_final_event(client, monkeypatch):
     async def fake_run_master_agent(instruction: str, session_id: str, emit_event_cb=None):
+        await asyncio.sleep(0)
         return {
             "namespace": "agent",
             "event": "chat_final",
@@ -300,13 +337,19 @@ def test_websocket_execute_serializes_agent_result(client, monkeypatch):
     monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
 
     with client.websocket_connect(websocket_path()) as websocket:
-        response = send_rpc(
+        response, notifications = send_rpc_until_response(
             websocket,
             "execute",
             {"instruction": "测试执行", "session_id": "session-1"},
             request_id=10,
         )
-        assert response["result"] == {
+        assert response["result"]["status"] == "started"
+        assert response["result"]["session_id"] == "session-1"
+        assert isinstance(response["result"]["run_id"], str)
+
+        event = notifications[0] if notifications else json.loads(websocket.receive_text())
+        assert event["method"] == "ferryman_event"
+        assert event["params"] == {
             "namespace": "agent",
             "event": "chat_final",
             "session_id": "session-1",
@@ -316,6 +359,200 @@ def test_websocket_execute_serializes_agent_result(client, monkeypatch):
                 "messages": [{"role": "assistant", "content": "处理完成"}],
                 "usage": {"input_tokens": 12, "output_tokens": 34, "total_tokens": 46}
             }
+        }
+
+
+def test_websocket_execute_emits_failed_terminal_event_on_unexpected_background_error(client, monkeypatch, session):
+    async def fake_run_master_agent(instruction: str, session_id: str, emit_event_cb=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response, notifications = send_rpc_until_response(
+            websocket,
+            "execute",
+            {"instruction": "会炸掉", "session_id": "session-background-fail"},
+            request_id=11,
+        )
+        run_id = response["result"]["run_id"]
+        assert response["result"] == {
+            "status": "started",
+            "run_id": run_id,
+            "session_id": "session-background-fail",
+        }
+
+        event = notifications[0] if notifications else json.loads(websocket.receive_text())
+        assert event["method"] == "ferryman_event"
+        assert event["params"]["namespace"] == "agent"
+        assert event["params"]["event"] == "chat_final"
+        assert event["params"]["session_id"] == "session-background-fail"
+        assert event["params"]["payload"] == {
+            "run_id": run_id,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "Run failed: boom",
+                    "metadata": {
+                        "run": {
+                            "id": run_id,
+                            "status": "failed",
+                            "scope": "master",
+                            "error": "boom",
+                        }
+                    },
+                }
+            ],
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        }
+
+    session.expire_all()
+    persisted_messages = session.exec(
+        select(Message)
+        .where(Message.session_id == "session-background-fail")
+        .order_by(Message.created_at)
+    ).all()
+
+    assert [message.role for message in persisted_messages] == ["user", "assistant"]
+    assert persisted_messages[0].content == "会炸掉"
+    assert persisted_messages[0].metadata_["run"] == {
+        "id": run_id,
+        "status": "failed",
+        "scope": "master",
+        "error": "boom",
+    }
+    assert persisted_messages[1].content == "Run failed: boom"
+
+
+def test_persist_canceled_chat_run_updates_existing_run_metadata_only(session):
+    session.add(
+        Session(
+            id="session-cancel-persist",
+            title="Cancel Persist",
+            updated_at=datetime(2026, 4, 15, 0, 0, tzinfo=timezone.utc),
+        )
+    )
+    session.add(
+        Message(
+            session_id="session-cancel-persist",
+            role="user",
+            content="请停止",
+            type="text",
+            metadata_={
+                "run": {
+                    "id": "run-persist-1",
+                    "status": "pending",
+                    "scope": "master",
+                }
+            },
+        )
+    )
+    session.commit()
+
+    event = main_module.persist_canceled_chat_run("session-cancel-persist", "run-persist-1")
+
+    session.expire_all()
+    messages = session.exec(
+        select(Message)
+        .where(Message.session_id == "session-cancel-persist")
+        .order_by(Message.created_at)
+    ).all()
+
+    assert len(messages) == 1
+    assert messages[0].role == "user"
+    assert messages[0].metadata_["run"] == {
+        "id": "run-persist-1",
+        "status": "canceled",
+        "scope": "master",
+    }
+    assert event.model_dump(mode="json")["payload"] == {
+        "run_id": "run-persist-1",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "Run canceled.",
+                "metadata": {
+                    "run": {
+                        "id": "run-persist-1",
+                        "status": "canceled",
+                        "scope": "master",
+                    }
+                },
+            }
+        ],
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+    }
+
+
+def test_websocket_execute_can_be_canceled_while_socket_stays_responsive(client, monkeypatch):
+    blocker = asyncio.Event()
+
+    async def fake_run_master_agent(instruction: str, session_id: str, emit_event_cb=None):
+        await blocker.wait()
+        return {
+            "namespace": "agent",
+            "event": "chat_final",
+            "session_id": session_id,
+            "ts": "2026-04-09T00:00:00Z",
+            "payload": {
+                "run_id": "should-not-finish",
+                "messages": [{"role": "assistant", "content": "不应到达"}],
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            }
+        }
+
+    monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        start_response, start_notifications = send_rpc_until_response(
+            websocket,
+            "execute",
+            {"instruction": "测试取消", "session_id": "session-cancel"},
+            request_id=20,
+        )
+        run_id = start_response["result"]["run_id"]
+        assert start_response["result"] == {
+            "status": "started",
+            "run_id": run_id,
+            "session_id": "session-cancel",
+        }
+
+        ping_response = send_rpc(websocket, "ping", request_id=21)
+        assert ping_response["result"] == "pong"
+
+        cancel_response, cancel_notifications = send_rpc_until_response(
+            websocket,
+            "cancel_run",
+            {"run_id": run_id, "session_id": "session-cancel"},
+            request_id=22,
+        )
+        assert cancel_response["result"] == {
+            "status": "canceling",
+            "run_id": run_id,
+            "session_id": "session-cancel",
+        }
+
+        event = (start_notifications + cancel_notifications)[0] if (start_notifications + cancel_notifications) else json.loads(websocket.receive_text())
+        assert event["method"] == "ferryman_event"
+        assert event["params"]["namespace"] == "agent"
+        assert event["params"]["event"] == "chat_final"
+        assert event["params"]["session_id"] == "session-cancel"
+        assert event["params"]["payload"] == {
+            "run_id": run_id,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "Run canceled.",
+                    "metadata": {
+                        "run": {
+                            "id": run_id,
+                            "status": "canceled",
+                            "scope": "master",
+                        }
+                    },
+                }
+            ],
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         }
 
 

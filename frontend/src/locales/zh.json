@@ -59,6 +59,8 @@
     "send_mode": "切换发送方式",
     "send_mode_mod_enter": "⌘/Ctrl + Enter发送",
     "send_mode_enter": "Enter发送",
+    "stop": "停止当前执行",
+    "status_canceled": "已取消",
     "untitled": "新对话",
     "schedules_drawer_title": "定时任务列表",
     "tools": {
@@ -124,6 +126,7 @@
     "api_key_placeholder": "请输入 API 密钥",
     "model_placeholder": "请输入模型名称",
     "save": "保存配置",
+    "validating": "校验中...",
     "linked": "已连接",
     "missing": "待配置",
     "setup_kicker": "连接模型",

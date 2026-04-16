@@ -2,11 +2,12 @@ import React, { useState, useEffect, ReactNode, useRef, useCallback } from 'reac
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useBackendConnection, type ToolActivityPayload } from './hooks/useBackendConnection';
-import { useSessions, type Message } from './hooks/useSessions';
+import { useSessions, type Message, type MessageRunStatus } from './hooks/useSessions';
 import { useI18n } from './hooks/useI18n';
 import { 
   Settings, 
   Send, 
+  Square,
   Cpu, 
   Activity,
   CalendarClock,
@@ -157,12 +158,32 @@ function getMessageCopyText(
   toolActivities: ToolActivityPayload[],
   t: (key: string) => string,
 ) {
-  if (message.metadata?.state !== 'pending') {
+  if (!isAssistantPendingMessage(message)) {
     return message.content.trim();
   }
 
   const activityLines = toolActivities.map((activity) => buildToolActivityCopyLine(activity, t));
   return [message.content.trim(), ...activityLines].filter(Boolean).join('\n').trim();
+}
+
+function getMessageRunStatus(message: Message): MessageRunStatus | undefined {
+  return message.metadata?.run?.status;
+}
+
+function isAssistantPendingMessage(message: Message): boolean {
+  return message.role === 'assistant' && getMessageRunStatus(message) === 'pending';
+}
+
+function getUserRunStatusLabel(message: Message, t: (key: string) => string): string | null {
+  if (message.role !== 'user') {
+    return null;
+  }
+
+  if (getMessageRunStatus(message) === 'canceled') {
+    return t('chat.status_canceled');
+  }
+
+  return null;
 }
 
 function pad2(value: number) {
@@ -196,11 +217,12 @@ function formatMessageTimestamp(createdAt?: string) {
 export default function App() {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const connection = useBackendConnection(wsUrl);
-  const { call, execute: executeInstruction, isConnected, toolActivities, clearToolActivities, lastEvent } = connection;
+  const { call, execute: executeInstruction, cancelRun, isConnected, toolActivities, clearToolActivities, lastEvent } = connection;
   const { t, locale, changeLanguage } = useI18n();
   const {
     messages,
     execute,
+    stopActiveRun,
     isExecuting,
     sessions,
     currentSessionId,
@@ -212,6 +234,7 @@ export default function App() {
   } = useSessions({
     call,
     executeInstruction,
+    cancelRun,
     clearToolActivities,
     lastEvent,
   });
@@ -413,6 +436,10 @@ export default function App() {
   }, [isConnected]);
 
   const handleSend = () => {
+    if (isExecuting) {
+      stopActiveRun();
+      return;
+    }
     if (!modelReadiness?.ready || !input.trim()) return;
     execute(input);
     setInput('');
@@ -462,7 +489,10 @@ export default function App() {
       params.model = model;
     }
 
-    await call('set_llm_config', params);
+    const result = await call('set_llm_config', params) as { status?: string; message?: string };
+    if (result?.status === 'error') {
+      throw new Error(result.message || 'Failed to validate provider configuration.');
+    }
     await refreshModelSettings();
   };
 
@@ -606,38 +636,28 @@ export default function App() {
         {/* Header */}
         <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 z-10 backdrop-blur-xl bg-[#0a0a0a]/55">
           <div className="flex items-center gap-4">
-            <span className="text-sm font-bold tracking-tight">
-              {currentView === 'chat' ? (sessions.find(s => s.id === currentSessionId)?.title || t('chat.header_title')) : 
-               currentView === 'tasks' ? t('nav.tasks') : 
-               currentView === 'schedules' ? t('nav.schedules') :
-               currentView === 'skills' ? t('nav.skills') :
-               t('nav.settings')}
-            </span>
             {currentView === 'chat' && (
-              <>
-                <div className="h-4 w-[1px] bg-white/10" />
-                <div className="flex items-center gap-2">
-                  <Cpu size={14} className="text-white/30" />
-                  <select 
-                    value={selectedModelValue}
-                    onChange={(e) => handleSetActiveModel(e.target.value)}
-                    className="text-xs font-medium text-white/60 bg-white/5 px-2 py-1 rounded-md border border-white/10 outline-none cursor-pointer hover:bg-white/10 transition-colors appearance-none"
-                  >
-                    <option value="" disabled>
-                      {t('settings.no_models')}
-                    </option>
-                    {Object.entries(availableModels).map(([provider, models]) => (
-                      <optgroup key={provider} label={providerLabels[provider] || provider.toUpperCase()}>
-                        {models.map(m => (
-                          <option key={buildModelOptionValue(provider, m)} value={buildModelOptionValue(provider, m)} className="bg-[#0a0a0a] text-white">
-                            {m}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-              </>
+              <div className="flex items-center gap-2">
+                <Cpu size={14} className="text-white/30" />
+                <select 
+                  value={selectedModelValue}
+                  onChange={(e) => handleSetActiveModel(e.target.value)}
+                  className="text-xs font-medium text-white/60 bg-white/5 px-2 py-1 rounded-md border border-white/10 outline-none cursor-pointer hover:bg-white/10 transition-colors appearance-none"
+                >
+                  <option value="" disabled>
+                    {t('settings.no_models')}
+                  </option>
+                  {Object.entries(availableModels).map(([provider, models]) => (
+                    <optgroup key={provider} label={providerLabels[provider] || provider.toUpperCase()}>
+                      {models.map(m => (
+                        <option key={buildModelOptionValue(provider, m)} value={buildModelOptionValue(provider, m)} className="bg-[#0a0a0a] text-white">
+                          {m}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
             )}
           </div>
 
@@ -747,11 +767,12 @@ export default function App() {
                       const copyText = getMessageCopyText(msg, toolActivities, t);
                       const isCopied = copiedMessageKey === messageKey;
                       const timestampLabel = formatMessageTimestamp(msg.created_at);
+                      const userRunStatusLabel = getUserRunStatusLabel(msg, t);
                       const bubbleShellClass = cn(
                         "relative rounded-[1.5rem] shadow-lg",
                         msg.role === 'user'
                           ? "bg-white text-[#080808] font-bold shadow-sm px-6 py-4 text-[14px]"
-                          : msg.metadata?.state === 'failed'
+                          : getMessageRunStatus(msg) === 'failed'
                             ? "bg-red-500/10 border border-red-500/30 text-red-100 backdrop-blur-md px-8 py-7 text-[15px] leading-loose markdown-container"
                             : "bg-transparent border border-white/10 text-white/90 backdrop-blur-md px-8 py-7 text-[15px] leading-loose markdown-container"
                       );
@@ -775,7 +796,7 @@ export default function App() {
                         )}
                       >
                         <div className={bubbleShellClass}>
-                          {msg.metadata?.state === 'pending' ? (
+                          {isAssistantPendingMessage(msg) ? (
                             <div className="space-y-4">
                               <ThinkingIndicator />
                               {toolActivities.map((activity, idx) => (
@@ -809,6 +830,13 @@ export default function App() {
                             <Markdown content={msg.content} />
                           )}
                         </div>
+                        {userRunStatusLabel ? (
+                          <div className="mt-2 flex justify-end px-1">
+                            <span className="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/60">
+                              {userRunStatusLabel}
+                            </span>
+                          </div>
+                        ) : null}
                         {(copyText || timestampLabel) ? (
                           <div className={metaBarClass}>
                             {copyText ? (
@@ -877,17 +905,17 @@ export default function App() {
                         >
                           <button
                             onClick={handleSend}
-                            disabled={isExecuting || !input.trim()}
-                            aria-label={sendShortcutHint}
+                            disabled={!isExecuting && !input.trim()}
+                            aria-label={isExecuting ? t('chat.stop') : sendShortcutHint}
                             className={cn(
                               "group relative h-10 w-10 flex items-center justify-center rounded-l-lg transition-colors active:scale-95 disabled:cursor-not-allowed",
                               input.trim() ? "hover:bg-black/[0.04]" : "opacity-55"
                             )}
                           >
                             <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#111] px-2 py-1 font-mono text-[10px] font-bold tracking-[0.04em] text-white/60 opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
-                              {sendShortcutHint}
+                              {isExecuting ? t('chat.stop') : sendShortcutHint}
                             </span>
-                            {isExecuting ? <ThinkingIndicator compact /> : <Send size={17} strokeWidth={input.trim() ? 2.5 : 1.5} className="relative z-10" />}
+                            {isExecuting ? <StopIndicator /> : <Send size={17} strokeWidth={input.trim() ? 2.5 : 1.5} className="relative z-10" />}
                           </button>
                           <button
                             type="button"
@@ -1194,6 +1222,26 @@ function ThinkingIndicator({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function StopIndicator() {
+  return (
+    <div className="relative flex h-4 w-4 items-center justify-center" data-testid="stop-indicator">
+      <motion.span
+        aria-hidden="true"
+        className="absolute inset-0 rounded-[4px] border border-current/35"
+        animate={{ scale: [1, 1.45], opacity: [0.6, 0] }}
+        transition={{ duration: 1.05, repeat: Infinity, ease: 'easeOut' }}
+      />
+      <motion.span
+        aria-hidden="true"
+        className="absolute inset-[1px] rounded-[3px] bg-current/15"
+        animate={{ opacity: [0.12, 0.34, 0.12] }}
+        transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <Square size={12} strokeWidth={2.6} className="relative z-10 fill-current" />
+    </div>
+  );
+}
+
 function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
   return (
     <div 
@@ -1373,19 +1421,22 @@ function ProviderCard({
   t,
 }: {
   config: LlmProviderConfig;
-  onSave: (apiKey: string | undefined, baseUrl: string, model?: string) => void;
+  onSave: (apiKey: string | undefined, baseUrl: string, model?: string) => Promise<void>;
   t: any;
 }) {
   const [apiKey, setApiKey] = useState(config.api_key || '');
   const [baseUrl, setBaseUrl] = useState(config.base_url || '');
   const [model, setModel] = useState(config.model || '');
   const [apiKeyDirty, setApiKeyDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setApiKey(config.api_key || '');
     setBaseUrl(config.base_url || '');
     setModel(config.model || '');
     setApiKeyDirty(false);
+    setSaveError(null);
   }, [config]);
 
   const supportsModel = Boolean(config.metadata.supports_model);
@@ -1409,6 +1460,11 @@ function ProviderCard({
       </div>
 
       <div className="space-y-4 relative z-10">
+        {saveError && (
+          <div className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-100">
+            {saveError}
+          </div>
+        )}
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-white/20 uppercase tracking-widest ml-1">{t('settings.api_key')}</label>
           <div className="relative">
@@ -1463,20 +1519,29 @@ function ProviderCard({
 
       <div className="mt-auto pt-4 relative z-10">
         <button
-          onClick={() => {
-            onSave(apiKeyDirty ? apiKey : undefined, baseUrl, modelChanged ? model : undefined);
-            setApiKeyDirty(false);
+          onClick={async () => {
+            setSaveError(null);
+            setIsSaving(true);
+            try {
+              await onSave(apiKeyDirty ? apiKey : undefined, baseUrl, modelChanged ? model : undefined);
+              setApiKeyDirty(false);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              setSaveError(message);
+            } finally {
+              setIsSaving(false);
+            }
           }}
-          disabled={!hasChanges}
+          disabled={!hasChanges || isSaving}
           className={cn(
             "w-full py-4 rounded-2xl text-[11px] font-bold uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 group/save transition-all active:scale-[0.98]",
-            hasChanges
+            hasChanges && !isSaving
               ? "bg-white text-[#080808] hover:bg-white/90" 
               : "bg-white/5 text-white/20 cursor-not-allowed"
           )}
         >
           <Save size={14} className="group-hover/save:rotate-12 transition-transform" />
-          {t('settings.save')}
+          {isSaving ? t('settings.validating') : t('settings.save')}
         </button>
       </div>
     </div>

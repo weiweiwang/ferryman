@@ -475,9 +475,33 @@ async def test_agent_deps_emit_tool_event():
     assert event_env.session_id == "test-session"
     assert isinstance(event_env.payload, ToolActivityPayload)
     assert event_env.payload.run_id == "xyz"
+    assert isinstance(event_env.payload.event_id, str)
+    assert event_env.payload.event_id
+    assert event_env.payload.seq == 1
     assert event_env.payload.tool_name == "test_tool"
     assert event_env.payload.phase == ToolPhase.COMPLETE
     assert event_env.payload.duration_ms == 450
+
+
+@pytest.mark.asyncio
+async def test_agent_deps_emit_tool_event_increments_seq():
+    mock_cb = AsyncMock()
+
+    deps = AgentDeps(
+        kernel=None,
+        session_id="test-session",
+        emit_event_cb=mock_cb
+    )
+
+    await deps.emit_tool_event(run_id="xyz", tool_name="first_tool", phase="start")
+    await deps.emit_tool_event(run_id="xyz", tool_name="second_tool", phase="complete")
+
+    first_event: FerrymanEventEnvelope = mock_cb.await_args_list[0].args[0]
+    second_event: FerrymanEventEnvelope = mock_cb.await_args_list[1].args[0]
+
+    assert first_event.payload.seq == 1
+    assert second_event.payload.seq == 2
+    assert first_event.payload.event_id != second_event.payload.event_id
 
 
 class DummyToolkit:

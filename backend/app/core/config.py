@@ -426,6 +426,53 @@ class Settings(BaseSettings):
             raise
 
     @staticmethod
+    def validate_provider_config(provider: str, api_key: str, base_url: str = "", model: str = "") -> Optional[str]:
+        catalog = Settings.get_llm_provider_catalog()
+        definition = catalog.get(provider)
+        if not definition:
+            return f"Unsupported provider: {provider}"
+
+        normalized_api_key = str(api_key or "").strip()
+        normalized_base_url = str(base_url or "").strip()
+        normalized_model = str(model or "").strip()
+
+        if not normalized_api_key:
+            return None
+
+        effective_base_url = normalized_base_url or (
+            "" if definition.get("requires_base_url") else definition.get("placeholder_base_url", "")
+        )
+        if provider == "custom" and not effective_base_url:
+            return "Base URL is required."
+        if definition.get("requires_base_url") and not effective_base_url:
+            return "Base URL is required."
+
+        try:
+            Settings._fetch_provider_models(
+                provider=provider,
+                api_key=normalized_api_key,
+                base_url=effective_base_url,
+                list_mode=definition.get("list_mode", "openai_compatible"),
+            )
+        except ModelListEndpointUnavailable:
+            if provider == "custom" and normalized_model:
+                return None
+            return "Provider does not expose a usable models endpoint for validation."
+        except HTTPError as exc:
+            details = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace").strip()
+                if body:
+                    details = f" {body[:300]}"
+            except Exception:
+                details = ""
+            return f"API key validation failed (HTTP {exc.code}).{details}".strip()
+        except Exception as exc:
+            return f"API key validation failed: {exc}"
+
+        return None
+
+    @staticmethod
     def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None, query: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         if query:
             separator = "&" if "?" in url else "?"

@@ -518,7 +518,17 @@ class FerrymanKernel:
                                     input_summary.pop("directory", None)
                                     input_summary["path"] = str(resolved_path)
                                 except Exception as e:
-                                    logger.exception(f"failed to resolve session path:{e}")
+                                    logger.exception({
+                                        "message": {
+                                            "event": "tool_input_path_resolution_failed",
+                                            "run_id": run_id,
+                                            "session_id": ctx.deps.session_id,
+                                            "skill_name": ctx.deps.skill_name,
+                                            "tool_name": tool_name,
+                                            "raw_path": raw_path,
+                                            "error": str(e),
+                                        }
+                                    })
 
                             raw_input = json.dumps(input_summary, default=str)
                             if len(raw_input) > 2000:
@@ -750,7 +760,19 @@ class FerrymanKernel:
             from app.models.events import FerrymanEventEnvelope, EventNamespace, ChatFinalPayload
             payload = ChatFinalPayload(
                 run_id=request_id,
-                messages=[{"role": "assistant", "content": str(result_data)}],
+                messages=[
+                    {
+                        "role": "assistant",
+                        "content": str(result_data),
+                        "metadata": {
+                            "run": {
+                                "id": request_id,
+                                "status": "success",
+                                "scope": "master",
+                            }
+                        },
+                    }
+                ],
                 usage=usage_data
             )
             final_res = FerrymanEventEnvelope(
