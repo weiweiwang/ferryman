@@ -32,6 +32,14 @@ def _require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+def _coerce_json_object(value: str | dict, *, label: str) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        return json.loads(value)
+    raise RuntimeError(f"{label} returned unsupported payload type: {type(value).__name__}")
+
+
 def _write_smoke_skill(skill_dir: Path, name: str) -> None:
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
@@ -269,7 +277,10 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         _require("Ferryman bundled skill asset check." in bundled_asset_text, f"Unexpected bundled asset contents: {bundled_asset_text!r}")
         bundled_reference_text = await FileToolkit.read_file(bundled_skill_ctx, "references/sample.md")
         _require("Bundle Smoke Reference" in bundled_reference_text, f"Unexpected bundled reference contents: {bundled_reference_text!r}")
-        bundled_script_result = json.loads(await CommandToolkit.run_skill_script(bundled_skill_ctx, "verify_bundle_resources.py"))
+        bundled_script_result = _coerce_json_object(
+            await CommandToolkit.run_skill_script(bundled_skill_ctx, "verify_bundle_resources.py"),
+            label="run_skill_script(verify_bundle_resources.py)",
+        )
         _require(bundled_script_result["ok"] is True, f"Bundled skill resource script failed: {bundled_script_result}")
         bundled_payload = json.loads(bundled_script_result["stdout"])
         _require(
@@ -283,7 +294,10 @@ async def run_bundle_smoke_test() -> dict[str, object]:
 
         draft_skill_dir = workspace / "bundle-smoke-draft-skill"
         _write_smoke_skill(draft_skill_dir, "bundle-smoke-draft-skill")
-        publish_result = json.loads(await SkillToolkit.publish_skill(base_ctx, "bundle-smoke-draft-skill"))
+        publish_result = _coerce_json_object(
+            await SkillToolkit.publish_skill(base_ctx, "bundle-smoke-draft-skill"),
+            label="publish_skill(bundle-smoke-draft-skill)",
+        )
         _require(publish_result["ok"] is True, f"publish_skill failed: {publish_result}")
         _require("bundle-smoke-draft-skill" in kernel.skills, "Published smoke skill was not registered.")
 
@@ -293,7 +307,10 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         )
         skill_files = await FileToolkit.list_files(skill_ctx, str(kernel.skills["bundle-smoke-draft-skill"].path))
         _require("SKILL.md" in skill_files, f"Published skill resources not readable: {skill_files}")
-        command_result = json.loads(await CommandToolkit.run_skill_script(skill_ctx, "echo.py"))
+        command_result = _coerce_json_object(
+            await CommandToolkit.run_skill_script(skill_ctx, "echo.py"),
+            label="run_skill_script(echo.py)",
+        )
         _require(command_result["ok"] is True, f"run_skill_script failed: {command_result}")
         _require("bundle-smoke-script" in command_result["stdout"], f"Unexpected script stdout: {command_result}")
 
