@@ -237,6 +237,7 @@ export default function App() {
     cancelRun,
     clearToolActivities,
     lastEvent,
+    isConnected,
   });
   const [input, setInput] = useState('');
   const [sendMode, setSendMode] = useState<SendMode>(() => (

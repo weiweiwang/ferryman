@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FerrymanEvent, RefreshPayload, Usage } from './useBackendConnection';
 import { translateStatic } from './useI18n';
 
@@ -45,6 +45,7 @@ interface UseSessionsArgs {
   cancelRun: (runId: string, sessionId?: string) => Promise<any>;
   clearToolActivities: () => void;
   lastEvent: FerrymanEvent | null;
+  isConnected?: boolean;
 }
 
 type ActiveRun = {
@@ -73,6 +74,7 @@ export function useSessions({
   cancelRun,
   clearToolActivities,
   lastEvent,
+  isConnected = false,
 }: UseSessionsArgs) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -80,6 +82,21 @@ export function useSessions({
   const [currentUsage, setCurrentUsage] = useState<Usage>({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const currentSessionIdRef = useRef(currentSessionId);
+  const sessionsRef = useRef(sessions);
+  const activeRunRef = useRef(activeRun);
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    activeRunRef.current = activeRun;
+  }, [activeRun]);
 
   useEffect(() => {
     if (currentSessionId) {
@@ -117,16 +134,17 @@ export function useSessions({
   }, []);
 
   const reconcileActiveRunFromMessages = useCallback((candidateMessages: Message[], sessionId: string) => {
-    if (!activeRun || sessionId !== activeRun.sessionId) {
+    const currentActiveRun = activeRunRef.current;
+    if (!currentActiveRun || sessionId !== currentActiveRun.sessionId) {
       return false;
     }
 
-    const snapshot = getTerminalRunSnapshot(candidateMessages, activeRun.runId);
+    const snapshot = getTerminalRunSnapshot(candidateMessages, currentActiveRun.runId);
     if (!snapshot) {
       return false;
     }
 
-    if (currentSessionId === sessionId) {
+    if (currentSessionIdRef.current === sessionId) {
       setMessages(candidateMessages);
       setCurrentUsage((prev) => ({
         input_tokens: prev.input_tokens + (snapshot.usage.input_tokens || 0),
@@ -135,23 +153,25 @@ export function useSessions({
       }));
     }
 
+    activeRunRef.current = null;
     setActiveRun(null);
     clearToolActivities();
     refreshSessions().catch((error) => {
       console.error('Failed to refresh sessions after run reconciliation:', error);
     });
     return true;
-  }, [activeRun, clearToolActivities, currentSessionId, getTerminalRunSnapshot, refreshSessions]);
+  }, [clearToolActivities, getTerminalRunSnapshot, refreshSessions]);
 
   const switchSession = useCallback(async (sessionId: string) => {
     setCurrentSessionId(sessionId);
+    currentSessionIdRef.current = sessionId;
     try {
       const res: any = await call('list_messages', { session_id: sessionId, limit: 100 });
       const nextMessages = res.messages || [];
       setMessages(nextMessages);
       const reconciledActiveRun = reconcileActiveRunFromMessages(nextMessages, sessionId);
 
-      const sessionInfo = sessions.find((session) => session.id === sessionId);
+      const sessionInfo = sessionsRef.current.find((session) => session.id === sessionId);
       if (sessionInfo) {
         setCurrentUsage({
           input_tokens: sessionInfo.input_tokens,
@@ -164,7 +184,80 @@ export function useSessions({
     } catch (error) {
       console.error('Failed to load session messages:', error);
     }
-  }, [call, reconcileActiveRunFromMessages, sessions]);
+  }, [call, reconcileActiveRunFromMessages]);
+
+  const refreshCurrentSession = useCallback(async () => {
+    const sessionId = currentSessionIdRef.current;
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      const res: any = await call('list_messages', { session_id: sessionId, limit: 100 });
+      if (currentSessionIdRef.current !== sessionId) {
+        return;
+      }
+
+      const nextMessages = res.messages || [];
+      setMessages(nextMessages);
+
+      const reconciledActiveRun = reconcileActiveRunFromMessages(nextMessages, sessionId);
+      if (reconciledActiveRun) {
+        return;
+      }
+
+      const sessionInfo = sessionsRef.current.find((session) => session.id === sessionId);
+      if (sessionInfo) {
+        setCurrentUsage({
+          input_tokens: sessionInfo.input_tokens,
+          output_tokens: sessionInfo.output_tokens,
+          total_tokens: sessionInfo.input_tokens + sessionInfo.output_tokens,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to refresh current session messages:', error);
+    }
+  }, [call, reconcileActiveRunFromMessages]);
+
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+
+    refreshCurrentSession().catch((error) => {
+      console.error('Failed to refresh current session on connect:', error);
+    });
+  }, [isConnected, refreshCurrentSession]);
+
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      refreshCurrentSession().catch((error) => {
+        console.error('Failed to refresh current session after visibility change:', error);
+      });
+    };
+
+    const refreshOnFocus = () => {
+      refreshCurrentSession().catch((error) => {
+        console.error('Failed to refresh current session on focus:', error);
+      });
+    };
+
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    window.addEventListener('focus', refreshOnFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+      window.removeEventListener('focus', refreshOnFocus);
+    };
+  }, [isConnected, refreshCurrentSession]);
 
   useEffect(() => {
     if (!lastEvent || lastEvent.namespace !== 'data' || lastEvent.event !== 'refresh') {
@@ -384,7 +477,9 @@ export function useSessions({
           metadata: { run: { id: runId, status: 'pending', scope: 'master' } },
         },
       ]);
-      setActiveRun({ runId, sessionId: targetSessionId, userMessageId, pendingMessageId });
+      const nextActiveRun = { runId, sessionId: targetSessionId, userMessageId, pendingMessageId };
+      activeRunRef.current = nextActiveRun;
+      setActiveRun(nextActiveRun);
       return { status: 'started', runId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

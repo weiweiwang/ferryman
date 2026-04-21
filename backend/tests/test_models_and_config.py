@@ -641,8 +641,9 @@ def test_filter_qwen_models_keeps_only_qwen_family_entries():
     ]
 
 
-def test_filter_kimi_models_keeps_latest_supported_chat_family():
+def test_filter_kimi_models_keeps_latest_three_supported_chat_models():
     filtered = config._filter_kimi_models([
+        "kimi-k2.6",
         "kimi-k2.5",
         "kimi-k2-thinking",
         "kimi-k2-thinking-turbo",
@@ -656,7 +657,9 @@ def test_filter_kimi_models_keeps_latest_supported_chat_family():
     ])
 
     assert filtered == [
+        "kimi-k2.6",
         "kimi-k2.5",
+        "kimi-k2-thinking",
     ]
 
 

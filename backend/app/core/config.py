@@ -774,11 +774,8 @@ class Settings(BaseSettings):
 
         latest_kimi = [candidate for candidate in candidates if candidate[2].lower().startswith("kimi-k")]
         selected = latest_kimi or candidates
-        latest_version = max([candidate[0] for candidate in selected if candidate[0]] or [()])
-        if latest_version:
-            selected = [candidate for candidate in selected if candidate[0] == latest_version]
         selected.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return Settings._dedupe_preserve_order([item[2] for item in selected])[:6]
+        return Settings._dedupe_preserve_order([item[2] for item in selected])[:3]
 
     @staticmethod
     def _filter_doubao_models(model_ids: List[str]) -> List[str]:

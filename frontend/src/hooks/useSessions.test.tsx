@@ -324,6 +324,95 @@ describe('useSessions', () => {
     expect(clearToolActivities).toHaveBeenCalledTimes(2);
   });
 
+  it('refreshes the current session when the window regains focus after a missed final event', async () => {
+    const persistedMessages = [
+      {
+        id: 'user-server-focus-1',
+        role: 'user' as const,
+        content: 'Recover on focus',
+        created_at: '2026-04-15T14:51:00Z',
+        metadata: {
+          run: {
+            id: 'run-focus-reconcile-1',
+            status: 'success' as const,
+            scope: 'master',
+          },
+        },
+      },
+      {
+        id: 'assistant-server-focus-1',
+        role: 'assistant' as const,
+        content: 'Recovered after focus.',
+        created_at: '2026-04-15T14:51:04Z',
+        metadata: {
+          run: {
+            id: 'run-focus-reconcile-1',
+            status: 'success' as const,
+            scope: 'master',
+          },
+          usage: {
+            input_tokens: 4,
+            output_tokens: 11,
+            total_tokens: 15,
+          },
+        },
+      },
+    ];
+    let listMessagesCount = 0;
+    const call = vi.fn(async (method: string) => {
+      if (method === 'list_sessions') {
+        return { sessions: [] };
+      }
+      if (method === 'list_messages') {
+        listMessagesCount += 1;
+        return { messages: listMessagesCount === 1 ? [] : persistedMessages };
+      }
+      return {};
+    });
+    const executeInstruction = vi.fn().mockResolvedValue({ status: 'started', run_id: 'run-focus-reconcile-1' });
+    const cancelRun = vi.fn();
+    const clearToolActivities = vi.fn();
+    const lastEvent: FerrymanEvent | null = null;
+
+    const { result } = renderHook(() =>
+      useSessions({
+        call,
+        executeInstruction,
+        cancelRun,
+        clearToolActivities,
+        lastEvent,
+        isConnected: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(call).toHaveBeenCalledWith('list_messages', { session_id: 'default', limit: 100 });
+    });
+
+    await act(async () => {
+      await result.current.execute('Recover on focus');
+    });
+
+    expect(result.current.isExecuting).toBe(true);
+    expect(result.current.messages).toHaveLength(2);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await waitFor(() => {
+      expect(result.current.isExecuting).toBe(false);
+    });
+
+    expect(result.current.messages).toEqual(persistedMessages);
+    expect(result.current.currentUsage).toEqual({
+      input_tokens: 4,
+      output_tokens: 11,
+      total_tokens: 15,
+    });
+    expect(clearToolActivities).toHaveBeenCalledTimes(2);
+  });
+
   it('does not overwrite the currently viewed session when another session run finishes', async () => {
     const sessionTwoMessages = [
       {
