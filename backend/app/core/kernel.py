@@ -1,7 +1,9 @@
 import inspect
 import json
 import logging
+import os
 import platform
+import sys
 import time
 from functools import lru_cache
 from datetime import datetime, timedelta, timezone
@@ -54,6 +56,7 @@ COMPACTION_MEMORY_SCHEMA_VERSION = 1
 COMPACTION_THRESHOLD_TOKENS_DEFAULT = 12000
 COMPACTION_GUARD_SECONDS_DEFAULT = 60
 TOKEN_ESTIMATE_ENCODING = "o200k_base"
+O200K_BASE_CACHE_KEY = "fb374d419588a4632f3f557e76b4b70aebbca790"
 
 
 def _summarize_tool_input_value(key: str, value: Any) -> Any:
@@ -79,9 +82,26 @@ class LLMConfigurationError(RuntimeError):
 
 @lru_cache(maxsize=1)
 def _get_token_encoder():
+    _configure_tiktoken_cache()
     import tiktoken
 
     return tiktoken.get_encoding(TOKEN_ESTIMATE_ENCODING)
+
+
+def _local_tiktoken_cache_dir() -> Path:
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        return Path(frozen_root) / "app" / "assets" / "tiktoken"
+    return Path(__file__).resolve().parents[1] / "assets" / "tiktoken"
+
+
+def _configure_tiktoken_cache() -> None:
+    if "TIKTOKEN_CACHE_DIR" in os.environ:
+        return
+
+    cache_dir = _local_tiktoken_cache_dir()
+    if (cache_dir / O200K_BASE_CACHE_KEY).exists():
+        os.environ["TIKTOKEN_CACHE_DIR"] = str(cache_dir)
 
 
 # ---------------------------------------------------------------------------

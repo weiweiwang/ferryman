@@ -12,6 +12,8 @@ hiddenimports = sorted(
     set(
         [
             "app.core.browser",
+            "tiktoken",
+            "tiktoken_ext.openai_public",
             "pydantic_ai.agent",
             "pydantic_ai.messages",
             "pydantic_ai.models.anthropic",
@@ -38,6 +40,12 @@ datas = []
 datas += collect_data_files("playwright_stealth", includes=["js/**/*.js"])
 datas += collect_data_files("trafilatura", includes=["settings.cfg"])
 datas += collect_data_files("justext", includes=["stoplists/*"])
+datas.append(
+    (
+        str(BACKEND_ROOT / "app" / "assets" / "tiktoken" / "fb374d419588a4632f3f557e76b4b70aebbca790"),
+        "app/assets/tiktoken",
+    )
+)
 runtime_defaults = BACKEND_ROOT / "app" / "assets" / "defaults" / "runtime_defaults.json"
 if runtime_defaults.exists():
     datas.append((str(runtime_defaults), "app/assets/defaults"))
@@ -76,7 +84,6 @@ a = Analysis(
         "pytest",
         "sentence_transformers",
         "temporalio",
-        "tiktoken",
         "tokenizers",
         "xai_sdk",
         "pydantic_ai.durable_exec",

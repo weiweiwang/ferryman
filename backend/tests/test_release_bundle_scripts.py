@@ -49,6 +49,15 @@ def test_stage_backend_copy_skills_does_not_inject_smoke_skill(tmp_path, monkeyp
     assert not (skills_dst / smoke_skill_name).exists()
 
 
+def test_pyinstaller_spec_bundles_tiktoken_cache_and_keeps_tiktoken():
+    spec_text = (REPO_ROOT / "backend" / "ferryman_backend.spec").read_text(encoding="utf-8")
+
+    assert "app/assets/tiktoken" in spec_text
+    assert "fb374d419588a4632f3f557e76b4b70aebbca790" in spec_text
+    assert '"tiktoken",' in spec_text.split("hiddenimports = sorted", 1)[1].split("datas = []", 1)[0]
+    assert '"tiktoken",' not in spec_text.split("excludes=[", 1)[1].split("],", 1)[0]
+
+
 def test_pyinstaller_spec_bundles_resend_and_optional_runtime_defaults():
     spec_text = (REPO_ROOT / "backend" / "ferryman_backend.spec").read_text(encoding="utf-8")
 

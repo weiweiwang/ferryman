@@ -1,4 +1,6 @@
 import json
+import hashlib
+import os
 import pytest
 import asyncio
 import logging
@@ -27,7 +29,15 @@ from sqlmodel import select
 from app.core.browser import BrowserActionError
 from app.core.config import Settings
 from app.core.db import get_session
-from app.core.kernel import FerrymanKernel, LLMConfigurationError
+from app.core.kernel import (
+    O200K_BASE_CACHE_KEY,
+    TOKEN_ESTIMATE_ENCODING,
+    FerrymanKernel,
+    LLMConfigurationError,
+    _configure_tiktoken_cache,
+    _get_token_encoder,
+    _local_tiktoken_cache_dir,
+)
 from app.core.deps import AgentDeps
 from app.core.toolkits.skill import SkillToolkit
 from app.core.toolkits.web import WebToolkit
@@ -41,6 +51,7 @@ logger = logging.getLogger(__name__)
 TEST_ROOT = Path("/tmp/ferryman_execution_test")
 TEST_USER_SKILLS = TEST_ROOT / "user" / "skills"
 TEST_BUNDLED_SKILLS = TEST_ROOT / "bundled" / "skills"
+O200K_BASE_EXPECTED_HASH = "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +89,35 @@ version: 1.0.0
 
 def parse_tool_payload(raw: str) -> dict:
     return json.loads(raw)
+
+
+def test_o200k_base_tiktoken_cache_is_bundled():
+    cache_file = _local_tiktoken_cache_dir() / O200K_BASE_CACHE_KEY
+
+    assert cache_file.exists()
+    assert hashlib.sha256(cache_file.read_bytes()).hexdigest() == O200K_BASE_EXPECTED_HASH
+
+
+def test_tiktoken_encoder_uses_bundled_cache_without_remote_read(monkeypatch):
+    import tiktoken.load
+    import tiktoken.registry
+
+    _get_token_encoder.cache_clear()
+    tiktoken.registry.ENCODINGS.clear()
+    monkeypatch.delenv("TIKTOKEN_CACHE_DIR", raising=False)
+    monkeypatch.delenv("DATA_GYM_CACHE_DIR", raising=False)
+
+    def fail_remote_read(blobpath: str) -> bytes:
+        raise AssertionError(f"Unexpected remote tiktoken read: {blobpath}")
+
+    monkeypatch.setattr(tiktoken.load, "read_file", fail_remote_read)
+
+    _configure_tiktoken_cache()
+    encoder = _get_token_encoder()
+
+    assert encoder.name == TOKEN_ESTIMATE_ENCODING
+    assert len(encoder.encode("Ferryman本地token估算")) > 0
+    assert Path(os.environ["TIKTOKEN_CACHE_DIR"]) == _local_tiktoken_cache_dir()
 
 
 def assert_success_tool_payload(raw: str, tool_name: str, expected_data):

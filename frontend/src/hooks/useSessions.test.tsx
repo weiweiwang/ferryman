@@ -34,6 +34,50 @@ describe('useSessions', () => {
     vi.restoreAllMocks();
   });
 
+  it('optimistically cancels the active run before the backend final event arrives', async () => {
+    const call = vi.fn().mockResolvedValue({ sessions: [] });
+    const executeInstruction = vi.fn().mockResolvedValue({ status: 'started', run_id: 'run-optimistic-cancel-1' });
+    const cancelRun = vi.fn().mockResolvedValue({ status: 'canceling' });
+    const clearToolActivities = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions({
+        call,
+        executeInstruction,
+        cancelRun,
+        clearToolActivities,
+        lastEvent: null,
+      })
+    );
+
+    await act(async () => {
+      await result.current.execute('Stop this immediately');
+    });
+
+    expect(result.current.isExecuting).toBe(true);
+    expect(result.current.messages).toHaveLength(2);
+
+    await act(async () => {
+      await result.current.stopActiveRun();
+    });
+
+    expect(cancelRun).toHaveBeenCalledWith('run-optimistic-cancel-1', 'default');
+    expect(result.current.isExecuting).toBe(false);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      role: 'user',
+      content: 'Stop this immediately',
+      metadata: {
+        run: {
+          id: 'run-optimistic-cancel-1',
+          status: 'canceled',
+          scope: 'master',
+        },
+      },
+    });
+    expect(clearToolActivities).toHaveBeenCalledTimes(2);
+  });
+
   it('removes the pending assistant bubble and marks the user message as canceled', async () => {
     const call = vi.fn().mockResolvedValue({ sessions: [] });
     const executeInstruction = vi.fn().mockResolvedValue({ status: 'started', run_id: 'run-cancel-1' });

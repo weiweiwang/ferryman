@@ -550,13 +550,40 @@ export function useSessions({
   }, [activeRun, clearToolActivities, currentSessionId, executeInstruction, isSubmitting]);
 
   const stopActiveRun = useCallback(async () => {
-    if (!activeRun) return;
+    const runToStop = activeRunRef.current;
+    if (!runToStop) return;
+
+    if (currentSessionIdRef.current === runToStop.sessionId) {
+      setMessages((prev) => prev
+        .filter((message) => message.id !== runToStop.pendingMessageId)
+        .map((message) => (
+          message.id === runToStop.userMessageId
+            ? {
+                ...message,
+                metadata: {
+                  ...(message.metadata || {}),
+                  run: {
+                    ...(message.metadata?.run || {}),
+                    id: runToStop.runId,
+                    status: 'canceled',
+                    scope: message.metadata?.run?.scope || 'master',
+                  },
+                },
+              }
+            : message
+        )));
+    }
+
+    activeRunRef.current = null;
+    setActiveRun(null);
+    clearToolActivities();
+
     try {
-      await cancelRun(activeRun.runId, activeRun.sessionId);
+      await cancelRun(runToStop.runId, runToStop.sessionId);
     } catch (error) {
       console.error('Failed to cancel active run:', error);
     }
-  }, [activeRun, cancelRun]);
+  }, [cancelRun, clearToolActivities]);
 
   return {
     messages,
