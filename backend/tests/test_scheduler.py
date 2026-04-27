@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -16,9 +16,21 @@ class FakeScheduler:
     def __init__(self) -> None:
         self.jobs: dict[str, SimpleNamespace] = {}
 
-    def add_job(self, func, *, trigger, args, id, replace_existing):
-        next_run_time = trigger.get_next_fire_time(previous_fire_time=None, now=datetime.now(timezone.utc))
-        job = SimpleNamespace(id=id, func=func, args=args, next_run_time=next_run_time)
+    def add_job(self, func, *, trigger, args, id, replace_existing, **kwargs):
+        if id in self.jobs and not replace_existing:
+            raise ValueError(f"Job {id} already exists.")
+        if trigger == "date":
+            next_run_time = kwargs["run_date"]
+        else:
+            next_run_time = trigger.get_next_fire_time(previous_fire_time=None, now=datetime.now(timezone.utc))
+        job = SimpleNamespace(
+            id=id,
+            func=func,
+            trigger=trigger,
+            args=args,
+            next_run_time=next_run_time,
+            kwargs=kwargs,
+        )
         self.jobs[id] = job
         return job
 
@@ -144,8 +156,12 @@ async def test_scheduler_run_uses_schedule_id_as_session_and_updates_metrics(ses
         "summary": "Completed: Prepare the nightly digest.",
         "error": None,
         "run_id": "run-123",
+        "trigger": "scheduled",
+        "started_at": refreshed.last_run_result["started_at"],
         "finished_at": refreshed.last_run_result["finished_at"],
+        "duration_ms": refreshed.last_run_result["duration_ms"],
     }
+    assert refreshed.last_run_result["duration_ms"] >= 0
     assert persisted_session is not None
     assert persisted_session.title == "Nightly digest"
     assert persisted_session.metadata_ == {"kind": "schedule", "schedule_id": schedule.id}
@@ -186,8 +202,12 @@ async def test_scheduler_run_updates_metrics_even_when_agent_execution_fails(ses
         "summary": None,
         "error": "scheduler failure",
         "run_id": None,
+        "trigger": "scheduled",
+        "started_at": refreshed.last_run_result["started_at"],
         "finished_at": refreshed.last_run_result["finished_at"],
+        "duration_ms": refreshed.last_run_result["duration_ms"],
     }
+    assert refreshed.last_run_result["duration_ms"] >= 0
 
 
 @pytest.mark.asyncio
@@ -265,3 +285,137 @@ async def test_scheduler_sync_all_disables_invalid_persisted_schedule(session):
     assert refreshed_invalid.last_run_result["summary"] == "Schedule disabled because its configuration is invalid."
     assert refreshed_invalid.last_run_result["error"]
     assert scheduler._scheduler.get_job(invalid_schedule.id) is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_sync_schedule_adds_catchup_job_for_recent_missed_run(session):
+    missed_run_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    schedule = Schedule(
+        id="schedule-catchup",
+        name="Catch up",
+        cron_expression="0 8 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Run catch-up."},
+        next_run_at=missed_run_at,
+    )
+    session.add(schedule)
+    session.commit()
+
+    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler._scheduler = FakeScheduler()
+
+    await scheduler.sync_schedule(schedule.id)
+
+    regular_job = scheduler._scheduler.get_job(schedule.id)
+    catchup_job = scheduler._scheduler.get_job(f"{schedule.id}:catchup")
+    assert regular_job is not None
+    assert catchup_job is not None
+    assert regular_job.args == [schedule.id, "scheduled"]
+    assert catchup_job.args == [schedule.id, "catch_up"]
+    assert catchup_job.trigger == "date"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_sync_schedule_skips_catchup_outside_grace_time(session):
+    schedule = Schedule(
+        id="schedule-stale-missed-run",
+        name="Stale missed run",
+        cron_expression="0 8 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Run only if recent."},
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=5),
+    )
+    session.add(schedule)
+    session.commit()
+
+    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler._scheduler = FakeScheduler()
+
+    await scheduler.sync_schedule(schedule.id)
+
+    assert scheduler._scheduler.get_job(schedule.id) is not None
+    assert scheduler._scheduler.get_job(f"{schedule.id}:catchup") is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_sync_schedule_skips_catchup_when_next_regular_run_is_close(session):
+    schedule = Schedule(
+        id="schedule-next-run-close",
+        name="Next run close",
+        cron_expression="* * * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Run frequently."},
+        next_run_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+    )
+    session.add(schedule)
+    session.commit()
+
+    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler._scheduler = FakeScheduler()
+
+    await scheduler.sync_schedule(schedule.id)
+
+    assert scheduler._scheduler.get_job(schedule.id) is not None
+    assert scheduler._scheduler.get_job(f"{schedule.id}:catchup") is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_sync_schedule_replaces_only_existing_catchup_job(session):
+    schedule = Schedule(
+        id="schedule-catchup-replace",
+        name="Catch up replace",
+        cron_expression="0 8 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Run one catch-up."},
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    session.add(schedule)
+    session.commit()
+
+    fake_scheduler = FakeScheduler()
+    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler._scheduler = fake_scheduler
+
+    await scheduler.sync_schedule(schedule.id)
+    first_regular_job = fake_scheduler.get_job(schedule.id)
+    first_catchup_job = fake_scheduler.get_job(f"{schedule.id}:catchup")
+    await scheduler.sync_schedule(schedule.id)
+
+    assert fake_scheduler.get_job(schedule.id) is not None
+    assert fake_scheduler.get_job(f"{schedule.id}:catchup") is not None
+    assert fake_scheduler.get_job(schedule.id) is not first_catchup_job
+    assert fake_scheduler.get_job(f"{schedule.id}:catchup") is not first_regular_job
+
+
+@pytest.mark.asyncio
+async def test_scheduler_run_records_catchup_trigger_and_duration(session):
+    schedule = Schedule(
+        id="schedule-catchup-result",
+        name="Catch-up result",
+        cron_expression="0 1 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Prepare the catch-up result."},
+    )
+    session.add(schedule)
+    session.commit()
+
+    kernel = StubKernel()
+    scheduler = FerrymanScheduler(kernel, get_settings())
+    scheduler._scheduler = FakeScheduler()
+    await scheduler.sync_schedule(schedule.id)
+
+    await scheduler._run_schedule(schedule.id, "catch_up")
+
+    session.expire_all()
+    refreshed = session.exec(select(Schedule).where(Schedule.id == schedule.id)).one()
+
+    assert refreshed.last_run_result is not None
+    assert refreshed.last_run_result["trigger"] == "catch_up"
+    assert refreshed.last_run_result["started_at"]
+    assert refreshed.last_run_result["finished_at"]
+    assert refreshed.last_run_result["duration_ms"] >= 0

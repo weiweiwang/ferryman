@@ -892,19 +892,22 @@ def test_websocket_list_endpoints_use_cursor_pagination(client, session):
             id="schedule-b",
             name="Schedule B",
             cron_expression="0 1 * * *",
+            created_at=now - timedelta(minutes=1),
             updated_at=now,
         ),
         Schedule(
             id="schedule-a",
             name="Schedule A",
             cron_expression="0 2 * * *",
-            updated_at=now,
+            created_at=now,
+            updated_at=now - timedelta(minutes=1),
         ),
         Schedule(
             id="schedule-old",
             name="Schedule Old",
             cron_expression="0 3 * * *",
-            updated_at=now - timedelta(minutes=1),
+            created_at=now - timedelta(minutes=2),
+            updated_at=now - timedelta(minutes=2),
         ),
     ])
     session.commit()
@@ -960,7 +963,7 @@ def test_websocket_list_endpoints_use_cursor_pagination(client, session):
         assert second_tasks["next_cursor"] is not None
 
         first_schedules = send_rpc(websocket, "list_schedules", {"limit": 1}, request_id=26)["result"]
-        assert [item["id"] for item in first_schedules["schedules"]] == ["schedule-b"]
+        assert [item["id"] for item in first_schedules["schedules"]] == ["schedule-a"]
         assert first_schedules["next_cursor"] is not None
 
         second_schedules = send_rpc(
@@ -969,7 +972,7 @@ def test_websocket_list_endpoints_use_cursor_pagination(client, session):
             {"limit": 1, "cursor": first_schedules["next_cursor"]},
             request_id=27,
         )["result"]
-        assert [item["id"] for item in second_schedules["schedules"]] == ["schedule-a"]
+        assert [item["id"] for item in second_schedules["schedules"]] == ["schedule-b"]
         assert second_schedules["next_cursor"] is not None
 
         response = send_rpc(

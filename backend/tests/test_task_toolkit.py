@@ -301,17 +301,19 @@ async def test_list_schedules_orders_results_and_displays_enabled_state(session)
     now = datetime.now(timezone.utc)
     session.add_all([
         Schedule(
-            id="schedule-old",
-            name="Nightly crawl",
-            cron_expression="0 2 * * *",
-            enabled=False,
-            updated_at=now - timedelta(hours=1),
-        ),
-        Schedule(
-            id="schedule-new",
+            id="schedule-created-new",
             name="Morning report",
             cron_expression="0 8 * * *",
             enabled=True,
+            created_at=now,
+            updated_at=now - timedelta(hours=1),
+        ),
+        Schedule(
+            id="schedule-updated-new",
+            name="Nightly crawl",
+            cron_expression="0 2 * * *",
+            enabled=False,
+            created_at=now - timedelta(hours=1),
             updated_at=now,
         ),
     ])
@@ -320,6 +322,6 @@ async def test_list_schedules_orders_results_and_displays_enabled_state(session)
     result = await TaskToolkit.list_schedules(make_ctx())
 
     assert result.startswith("Registered Automated Routines:")
-    assert result.index("schedule-new") < result.index("schedule-old")
-    assert "- [Enabled] ID: schedule-new | Name: Morning report | Cron: 0 8 * * *" in result
-    assert "- [Disabled] ID: schedule-old | Name: Nightly crawl | Cron: 0 2 * * *" in result
+    assert result.index("schedule-created-new") < result.index("schedule-updated-new")
+    assert "- [Enabled] ID: schedule-created-new | Name: Morning report | Cron: 0 8 * * *" in result
+    assert "- [Disabled] ID: schedule-updated-new | Name: Nightly crawl | Cron: 0 2 * * *" in result

@@ -177,10 +177,10 @@ class TaskToolkit:
 
     @staticmethod
     async def list_schedules(ctx: RunContext[AgentDeps]) -> str:
-        """List persisted schedule definitions in recency order."""
+        """List persisted schedule definitions by creation recency."""
         with get_session() as session:
             schedules = session.exec(
-                select(Schedule).order_by(desc(Schedule.updated_at), desc(Schedule.id))
+                select(Schedule).order_by(desc(Schedule.created_at), desc(Schedule.id))
             ).all()
             if not schedules:
                 return "No schedules registered."

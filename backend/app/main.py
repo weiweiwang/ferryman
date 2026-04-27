@@ -1117,7 +1117,7 @@ async def list_schedules(context, cursor: Optional[str] = None, limit: int = 50)
             session,
             select(Schedule),
             model=Schedule,
-            sort_field="updated_at",
+            sort_field="created_at",
             cursor=cursor,
             limit=limit,
         )
