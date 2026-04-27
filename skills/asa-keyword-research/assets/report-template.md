@@ -47,35 +47,37 @@ Adapt the headings and labels to match the user's requested language.
 ## 3. Campaign Strategy
 
 > Default Architecture: Exact Match is the primary budget driver; Broad Match is only used for Discovery; Search Match is only a low-budget experiment when explicitly requested.
+> 
+> **Important Formatting Rule for Keywords**: For Exact Match, wrap each keyword in brackets and separate them with commas (e.g., `[keyword1], [keyword2]`). For Broad Match, omit the brackets (e.g., `keyword1, keyword2`). This ensures they can be copy-pasted directly into the ASA console.
 
 ### 📂 Campaign: [Brand - Defense]
 **Strategy**: Lock in 100% Share of Voice, bid high, protect brand assets.
 
 | Ad Group | Match Type | Keywords | Suggested CPT | Target CPA |
 | :--- | :--- | :--- | :--- | :--- |
-| `Brand_Exact` | Exact | [brand_keywords] | [cpt] | [cpa] |
+| `Brand_Exact` | Exact | [[keyword_1], [keyword_2]] | [cpt] | [cpa] |
 
 ### 📂 Campaign: [Generic]
 **Strategy**: Group by semantic function (Cluster) to adjust bids per feature.
 
 | Ad Group (Cluster) | Match Type | Keywords | Suggested CPT | Target CPA |
 | :--- | :--- | :--- | :--- | :--- |
-| `[Cluster_Name_1]` | Exact | [keywords_1] | [cpt] | [cpa] |
-| `[Cluster_Name_2]` | Exact | [keywords_2] | [cpt] | [cpa] |
+| `[Cluster_Name_1]` | Exact | [[keyword_1], [keyword_2]] | [cpt] | [cpa] |
+| `[Cluster_Name_2]` | Exact | [[keyword_3], [keyword_4]] | [cpt] | [cpa] |
 
 ### 📂 Campaign: [Competitor - Conquesting]
 **Strategy**: Target direct competitors to siphon brand traffic, closely monitor CPA.
 
 | Ad Group | Match Type | Keywords | Suggested CPT | Target CPA |
 | :--- | :--- | :--- | :--- | :--- |
-| `[Competitor_Name]` | Exact | [competitor_keywords] | [cpt] | [cpa] |
+| `[Competitor_Name]` | Exact | [[comp_word_1], [comp_word_2]] | [cpt] | [cpa] |
 
 ### 📂 Campaign: [Discovery]
 **Strategy**: **[Search Match disabled by default]**. Find long-tail commercial keywords via broad match on core seeds. Must be paired with strict negative keywords.
 
 | Ad Group | Match Type | Keywords | Suggested CPT | Target CPA |
 | :--- | :--- | :--- | :--- | :--- |
-| `Discovery_Broad` | Broad | [core_seed_keywords] | [cpt] | [cpa] |
+| `Discovery_Broad` | Broad | core_seed_1, core_seed_2 | [cpt] | [cpa] |
 
 ## 4. Negative Keywords
 - **Global Negative**: [negative_word] (Reason: [reason])
