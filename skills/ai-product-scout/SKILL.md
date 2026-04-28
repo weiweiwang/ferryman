@@ -158,7 +158,7 @@ Titles should make the payoff legible, not merely sound exciting.
 For Chinese deliverables, do a final language cleanup pass before saving.
 
 - Remove unnecessary spaces between Chinese and adjacent English words, numbers, or units.
-- Keep spaces only when needed to preserve literal names, model identifiers, commands, code, paths, URLs, protocol strings, or direct quotations.
+- Keep spaces only when needed to preserve URLs, commands, code, paths, protocol strings, or direct quotations.
 - Aim for natural Chinese publishing style, not translated-looking spacing.
 
 ## Execution Workflow
@@ -213,10 +213,11 @@ The article draft must end with an `Operations Publishing Zone`, marked in the t
 
 ## Safety & Quality Guardrails
 
-1. **Concreteness**: Every case must involve a real, named product with a working URL. Never fabricate products, pricing, growth, or features.
-2. **Integrity**: If a source is blocked or too thin, mark it and move on. Never hallucinate access.
-3. **Signal over Noise**: A short list of genuinely instructive cases beats a padded list of generic tools.
-4. **Do Not Overstate Business Facts**: If revenue, pricing strategy, user numbers, or retention cannot be confirmed, label your statements as interpretation or hypothesis.
-5. **Builder Value**: Every featured case should teach something useful about productization, commercialization, or distribution.
-6. **Final Handoff**: In your concluding reply, provide the path or a clickable Markdown link to every generated file.
-7. **Publishing Zone Hygiene**: The `Operations Publishing Zone` must contain only the copy-paste-ready final title and article body.
+1. **Formatting**: Target the user's requested language consistently in headings and field labels. Do not mix bilingual aliases. For Chinese deliverables, use native Chinese publishing typography and do not add spaces between Chinese and adjacent English words, numbers, or units unless preserving URLs, commands, code, paths, protocol strings, or direct quotations.
+2. **Concreteness**: Every case must involve a real, named product with a working URL. Never fabricate products, pricing, growth, or features.
+3. **Integrity**: If a source is blocked or too thin, mark it and move on. Never hallucinate access.
+4. **Signal over Noise**: A short list of genuinely instructive cases beats a padded list of generic tools.
+5. **Do Not Overstate Business Facts**: If revenue, pricing strategy, user numbers, or retention cannot be confirmed, label your statements as interpretation or hypothesis.
+6. **Builder Value**: Every featured case should teach something useful about productization, commercialization, or distribution.
+7. **Final Handoff**: In your concluding reply, provide the path or a clickable Markdown link to every generated file.
+8. **Publishing Zone Hygiene**: The `Operations Publishing Zone` must contain only the copy-paste-ready final title and article body.
