@@ -41,6 +41,7 @@ from app.core.prompts import (
 from app.core.toolkits.command import CommandToolkit
 from app.core.toolkits.file import FileToolkit
 from app.core.toolkits.email import EmailToolkit
+from app.core.toolkits.image import ImageToolkit
 from app.core.toolkits.skill import SkillToolkit
 from app.core.toolkits.task import TaskToolkit
 from app.core.toolkits.time import TimeToolkit
@@ -63,6 +64,11 @@ O200K_BASE_CACHE_KEY = "fb374d419588a4632f3f557e76b4b70aebbca790"
 def _summarize_tool_input_value(key: str, value: Any) -> Any:
     if hasattr(value, "model_dump"):
         value = value.model_dump()
+
+    if key.lower() in {"api_key", "base_url"} or any(
+        secret_key in key.lower() for secret_key in ("secret", "token", "password")
+    ):
+        return {"_summary": "redacted"}
 
     if isinstance(value, str):
         if key in {"content", "text", "body", "markdown", "html", "instruction", "prompt"}:
@@ -717,6 +723,7 @@ class FerrymanKernel:
         self._register_toolkit(agent, TaskToolkit)
         self._register_toolkit(agent, TimeToolkit)
         self._register_toolkit(agent, EmailToolkit)
+        self._register_toolkit(agent, ImageToolkit)
         self._register_toolkit(agent, CommandToolkit)
         return agent
 

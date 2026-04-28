@@ -80,6 +80,7 @@
       "updating_task": "更新任务进度",
       "listing_tasks": "正在检索任务板",
       "sending_email": "正在发送邮件",
+      "generating_image": "正在生成图片",
       "listing_skills": "获取技能列表",
       "installing_skill": "安装新技能",
       "reading_skill": "读取技能SOP"

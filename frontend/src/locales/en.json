@@ -80,6 +80,7 @@
       "updating_task": "Updating task progress",
       "listing_tasks": "Checking task board",
       "sending_email": "Sending email",
+      "generating_image": "Generating image",
       "listing_skills": "Fetching skills",
       "installing_skill": "Installing new skill",
       "reading_skill": "Reading skill SOP"

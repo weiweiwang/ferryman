@@ -24,6 +24,9 @@ export const ToolLabels: Record<string, string> = {
     // Email Actions
     send_email: "sending_email",
 
+    // Image Actions
+    generate_image: "generating_image",
+
     // Skill Actions
     list_skills: "listing_skills",
     install_skill: "installing_skill",
