@@ -430,7 +430,7 @@ describe('useSessions', () => {
     );
 
     await waitFor(() => {
-      expect(call).toHaveBeenCalledWith('list_messages', { session_id: 'default', limit: 100 });
+      expect(call).toHaveBeenCalledWith('list_messages', { session_id: 'default', limit: 20 });
     });
 
     await act(async () => {
@@ -501,7 +501,7 @@ describe('useSessions', () => {
     );
 
     await waitFor(() => {
-      expect(call).toHaveBeenCalledWith('list_messages', { session_id: 'default', limit: 100 });
+      expect(call).toHaveBeenCalledWith('list_messages', { session_id: 'default', limit: 20 });
     });
 
     await act(async () => {
@@ -641,5 +641,81 @@ describe('useSessions', () => {
       output_tokens: 0,
       total_tokens: 0,
     });
+  });
+
+  it('loads the latest 20 messages first and prepends older messages with the cursor', async () => {
+    const latestMessages = [
+      {
+        id: 'message-21',
+        role: 'user' as const,
+        content: 'Latest page start',
+        created_at: '2026-04-15T14:21:00Z',
+      },
+      {
+        id: 'message-40',
+        role: 'assistant' as const,
+        content: 'Latest page end',
+        created_at: '2026-04-15T14:40:00Z',
+      },
+    ];
+    const olderMessages = [
+      {
+        id: 'message-1',
+        role: 'user' as const,
+        content: 'Older page start',
+        created_at: '2026-04-15T14:01:00Z',
+      },
+      {
+        id: 'message-20',
+        role: 'assistant' as const,
+        content: 'Older page end',
+        created_at: '2026-04-15T14:20:00Z',
+      },
+    ];
+    const call = vi.fn(async (method: string, params?: any) => {
+      if (method === 'list_messages' && params?.cursor === 'older-cursor-1') {
+        return { messages: olderMessages, next_cursor: null };
+      }
+      if (method === 'list_messages') {
+        return { messages: latestMessages, next_cursor: 'older-cursor-1' };
+      }
+      if (method === 'list_sessions') {
+        return { sessions: [] };
+      }
+      return {};
+    });
+    const executeInstruction = vi.fn();
+    const cancelRun = vi.fn();
+    const clearToolActivities = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions({
+        call,
+        executeInstruction,
+        cancelRun,
+        clearToolActivities,
+        lastEvent: null,
+      })
+    );
+
+    await act(async () => {
+      await result.current.switchSession('session-paged');
+    });
+
+    expect(call).toHaveBeenCalledWith('list_messages', { session_id: 'session-paged', limit: 20 });
+    expect(result.current.messages).toEqual(latestMessages);
+    expect(result.current.hasOlderMessages).toBe(true);
+
+    await act(async () => {
+      await result.current.loadOlderMessages();
+    });
+
+    expect(call).toHaveBeenCalledWith('list_messages', {
+      session_id: 'session-paged',
+      limit: 20,
+      cursor: 'older-cursor-1',
+    });
+    expect(result.current.messages).toEqual([...olderMessages, ...latestMessages]);
+    expect(result.current.hasOlderMessages).toBe(false);
   });
 });

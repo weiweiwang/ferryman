@@ -171,8 +171,11 @@ describe('App chat interactions', () => {
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
       deleteSession: vi.fn(),
+      loadOlderMessages: vi.fn(),
       execute: vi.fn().mockResolvedValue({ status: 'started' }),
       stopActiveRun: vi.fn(),
+      hasOlderMessages: false,
+      isLoadingOlderMessages: false,
       isSubmitting: false,
       isExecuting: false,
     }));
@@ -233,7 +236,7 @@ describe('App chat interactions', () => {
     rerender(<App />);
 
     await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalled();
     });
 
     scrollIntoView.mockClear();
@@ -248,7 +251,55 @@ describe('App chat interactions', () => {
     rerender(<App />);
 
     await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
+  });
+
+  it('loads older messages when the chat is scrolled near the top', async () => {
+    const loadOlderMessages = vi.fn().mockResolvedValue(true);
+    mockedMessages = [
+      { id: 'user-1', role: 'user', content: 'Earlier visible message.', created_at: new Date().toISOString() },
+      { id: 'assistant-1', role: 'assistant', content: 'Latest visible message.', created_at: new Date().toISOString() },
+    ];
+
+    mockedUseSessions.mockImplementation(() => ({
+      messages: mockedMessages,
+      setMessages: vi.fn(),
+      sessions: [
+        {
+          id: 'session-1',
+          title: 'Session 1',
+          updated_at: '2026-04-15T00:00:00Z',
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+      ],
+      currentSessionId: 'session-1',
+      currentUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      refreshSessions: vi.fn(),
+      switchSession: vi.fn(),
+      createNewSession: vi.fn().mockResolvedValue('session-2'),
+      deleteSession: vi.fn(),
+      loadOlderMessages,
+      execute: vi.fn().mockResolvedValue({ status: 'started' }),
+      stopActiveRun: vi.fn(),
+      hasOlderMessages: true,
+      isLoadingOlderMessages: false,
+      isSubmitting: false,
+      isExecuting: false,
+    }));
+
+    render(<App />);
+
+    const scrollContainer = screen.getByTestId('chat-scroll-container');
+    Object.defineProperty(scrollContainer, 'scrollTop', { configurable: true, writable: true, value: 40 });
+    Object.defineProperty(scrollContainer, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(scrollContainer, 'clientHeight', { configurable: true, value: 500 });
+
+    fireEvent.scroll(scrollContainer);
+
+    await waitFor(() => {
+      expect(loadOlderMessages).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -333,8 +384,11 @@ describe('App chat interactions', () => {
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
       deleteSession: vi.fn(),
+      loadOlderMessages: vi.fn(),
       execute: vi.fn().mockResolvedValue({ status: 'started' }),
       stopActiveRun,
+      hasOlderMessages: false,
+      isLoadingOlderMessages: false,
       isSubmitting: false,
       isExecuting: true,
     }));
@@ -389,8 +443,11 @@ describe('App chat interactions', () => {
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
       deleteSession: vi.fn(),
+      loadOlderMessages: vi.fn(),
       execute,
       stopActiveRun: vi.fn(),
+      hasOlderMessages: false,
+      isLoadingOlderMessages: false,
       isSubmitting: false,
       isExecuting: false,
     }));

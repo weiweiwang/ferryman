@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ReactNode, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, ReactNode, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useBackendConnection, type ToolActivityPayload } from './hooks/useBackendConnection';
@@ -244,6 +244,9 @@ export default function App() {
     switchSession,
     createNewSession,
     deleteSession,
+    loadOlderMessages,
+    hasOlderMessages,
+    isLoadingOlderMessages,
   } = useSessions({
     call,
     executeInstruction,
@@ -274,11 +277,28 @@ export default function App() {
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatContentRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const didApplyInitialModelRouteRef = useRef(false);
   const copyResetTimerRef = useRef<number | null>(null);
+  const pendingHistoryScrollOffsetRef = useRef<number | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const autoScrollSessionRef = useRef(currentSessionId);
   const sendShortcutHint = sendMode === 'enter' ? t('chat.send_shortcut_enter_hint') : t('chat.send_shortcut_mod_enter_hint');
+
+  const scrollChatToBottom = useCallback(() => {
+    const scrollContainer = chatScrollRef.current;
+    if (!scrollContainer) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      return;
+    }
+
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    shouldStickToBottomRef.current = true;
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('ferryman_send_mode', sendMode);
@@ -297,19 +317,82 @@ export default function App() {
       window.clearTimeout(timeoutId);
     };
   }, [composerNotice]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (currentView !== 'chat') {
       return;
     }
 
+    const scrollContainer = chatScrollRef.current;
+    const pendingHistoryScrollOffset = pendingHistoryScrollOffsetRef.current;
+    if (scrollContainer && pendingHistoryScrollOffset !== null) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight - pendingHistoryScrollOffset;
+      pendingHistoryScrollOffsetRef.current = null;
+      return;
+    }
+
+    const sessionChanged = autoScrollSessionRef.current !== currentSessionId;
+    if (sessionChanged) {
+      autoScrollSessionRef.current = currentSessionId;
+      shouldStickToBottomRef.current = true;
+    }
+
+    if (!sessionChanged && !shouldStickToBottomRef.current) {
+      return;
+    }
+
+    scrollChatToBottom();
     const frameId = window.requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      scrollChatToBottom();
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [currentView, messages, toolActivities]);
+  }, [currentSessionId, currentView, messages, scrollChatToBottom, toolActivities]);
+
+  useEffect(() => {
+    if (currentView !== 'chat') {
+      return;
+    }
+
+    const resizeTarget = chatContentRef.current || chatScrollRef.current;
+    if (!resizeTarget || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (pendingHistoryScrollOffsetRef.current === null && shouldStickToBottomRef.current) {
+        scrollChatToBottom();
+      }
+    });
+
+    observer.observe(resizeTarget);
+    return () => {
+      observer.disconnect();
+    };
+  }, [currentView, scrollChatToBottom]);
+
+  const handleChatScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const scrollContainer = event.currentTarget;
+    const distanceToBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+    shouldStickToBottomRef.current = distanceToBottom < 120;
+
+    if (
+      scrollContainer.scrollTop > 80 ||
+      !hasOlderMessages ||
+      isLoadingOlderMessages ||
+      !loadOlderMessages
+    ) {
+      return;
+    }
+
+    pendingHistoryScrollOffsetRef.current = scrollContainer.scrollHeight - scrollContainer.scrollTop;
+    loadOlderMessages().then((loaded) => {
+      if (!loaded) {
+        pendingHistoryScrollOffsetRef.current = null;
+      }
+    });
+  }, [hasOlderMessages, isLoadingOlderMessages, loadOlderMessages]);
 
   useEffect(() => () => {
     if (copyResetTimerRef.current !== null) {
@@ -743,7 +826,12 @@ export default function App() {
                 <BrowserRuntimeBanner t={t} onOpenChromeDownload={handleOpenChromeDownload} />
               )}
               {/* Chat Area */}
-              <div className="flex-1 overflow-y-auto p-8 space-y-8 flex flex-col scrollbar-hide">
+              <div
+                ref={chatScrollRef}
+                onScroll={handleChatScroll}
+                data-testid="chat-scroll-container"
+                className="flex-1 overflow-y-auto p-8 space-y-8 flex flex-col scrollbar-hide"
+              >
                 {messages.length === 0 ? (
                     <div className="flex-1 flex items-center justify-center pb-10">
                       <div className={CHAT_RAIL_CLASS}>
@@ -808,7 +896,7 @@ export default function App() {
                       </div>
                     </div>
                 ) : (
-                  <div className={cn(CHAT_RAIL_CLASS, "flex flex-col gap-8")}>
+                  <div ref={chatContentRef} className={cn(CHAT_RAIL_CLASS, "flex flex-col gap-8")}>
                     {messages.map((msg, i) => {
                       const messageKey = msg.id || `${msg.role}-${i}`;
                       const copyText = getMessageCopyText(msg, toolActivities, t);

@@ -1036,6 +1036,124 @@ def test_websocket_list_endpoints_use_cursor_pagination(client, session):
         assert response["result"] == {"status": "error", "message": "Session not found"}
 
 
+def test_websocket_list_messages_returns_latest_page_then_older_pages_in_display_order(client, session):
+    base_time = datetime(2026, 4, 13, 12, 0, tzinfo=timezone.utc)
+    session.add(Session(id="session-message-pages", title="Message Pages", updated_at=base_time))
+    session.add_all([
+        Message(
+            id=f"message-{index:02d}",
+            session_id="session-message-pages",
+            role="user" if index % 2 else "assistant",
+            content=f"message-{index:02d}",
+            type="text",
+            created_at=base_time + timedelta(minutes=index),
+        )
+        for index in range(1, 46)
+    ])
+    session.commit()
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        latest_page = send_rpc(
+            websocket,
+            "list_messages",
+            {"session_id": "session-message-pages", "limit": 20},
+            request_id=30,
+        )["result"]
+
+        assert [item["content"] for item in latest_page["messages"]] == [
+            f"message-{index:02d}" for index in range(26, 46)
+        ]
+        assert latest_page["next_cursor"] is not None
+
+        older_page = send_rpc(
+            websocket,
+            "list_messages",
+            {
+                "session_id": "session-message-pages",
+                "limit": 20,
+                "cursor": latest_page["next_cursor"],
+            },
+            request_id=31,
+        )["result"]
+
+        assert [item["content"] for item in older_page["messages"]] == [
+            f"message-{index:02d}" for index in range(6, 26)
+        ]
+        assert older_page["next_cursor"] is not None
+
+        oldest_page = send_rpc(
+            websocket,
+            "list_messages",
+            {
+                "session_id": "session-message-pages",
+                "limit": 20,
+                "cursor": older_page["next_cursor"],
+            },
+            request_id=32,
+        )["result"]
+
+        assert [item["content"] for item in oldest_page["messages"]] == [
+            f"message-{index:02d}" for index in range(1, 6)
+        ]
+        assert oldest_page["next_cursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_messages_python_implementation_pages_in_memory_sqlite(session):
+    base_time = datetime(2026, 4, 13, 12, 0, tzinfo=timezone.utc)
+    session.add(Session(id="session-message-python-pages", title="Message Python Pages", updated_at=base_time))
+    session.add_all([
+        Message(
+            id=f"message-python-{index:02d}",
+            session_id="session-message-python-pages",
+            role="user" if index % 2 else "assistant",
+            content=f"message-python-{index:02d}",
+            type="text",
+            created_at=base_time + timedelta(minutes=index),
+        )
+        for index in range(1, 46)
+    ])
+    session.commit()
+
+    latest_page_response = await main_module.list_messages(
+        None,
+        session_id="session-message-python-pages",
+        limit=20,
+    )
+    latest_page = latest_page_response._value.result
+
+    assert [item["content"] for item in latest_page["messages"]] == [
+        f"message-python-{index:02d}" for index in range(26, 46)
+    ]
+    assert latest_page["next_cursor"] is not None
+
+    older_page_response = await main_module.list_messages(
+        None,
+        session_id="session-message-python-pages",
+        limit=20,
+        cursor=latest_page["next_cursor"],
+    )
+    older_page = older_page_response._value.result
+
+    assert [item["content"] for item in older_page["messages"]] == [
+        f"message-python-{index:02d}" for index in range(6, 26)
+    ]
+    assert older_page["next_cursor"] is not None
+
+    oldest_page_response = await main_module.list_messages(
+        None,
+        session_id="session-message-python-pages",
+        limit=20,
+        cursor=older_page["next_cursor"],
+    )
+    oldest_page = oldest_page_response._value.result
+
+    assert [item["content"] for item in oldest_page["messages"]] == [
+        f"message-python-{index:02d}" for index in range(1, 6)
+    ]
+    assert oldest_page["next_cursor"] is None
+
+
 def test_websocket_update_schedule_syncs_schedule_manager(client, session):
     schedule = Schedule(
         id="schedule-sync-update",

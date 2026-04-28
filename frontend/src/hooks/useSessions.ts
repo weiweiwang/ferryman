@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FerrymanEvent, RefreshPayload, Usage } from './useBackendConnection';
 import { translateStatic } from './useI18n';
 
+const MESSAGE_PAGE_SIZE = 20;
+
 export type MessageRunStatus = 'pending' | 'success' | 'failed' | 'canceled';
 
 export interface MessageRunMetadata {
@@ -82,10 +84,14 @@ export function useSessions({
   const [currentUsage, setCurrentUsage] = useState<Usage>({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [olderMessagesCursor, setOlderMessagesCursor] = useState<string | null>(null);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const currentSessionIdRef = useRef(currentSessionId);
   const sessionsRef = useRef(sessions);
   const activeRunRef = useRef(activeRun);
   const messagesRef = useRef(messages);
+  const olderMessagesCursorRef = useRef<string | null>(olderMessagesCursor);
+  const isLoadingOlderMessagesRef = useRef(isLoadingOlderMessages);
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
@@ -102,6 +108,14 @@ export function useSessions({
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    olderMessagesCursorRef.current = olderMessagesCursor;
+  }, [olderMessagesCursor]);
+
+  useEffect(() => {
+    isLoadingOlderMessagesRef.current = isLoadingOlderMessages;
+  }, [isLoadingOlderMessages]);
 
   useEffect(() => {
     if (currentSessionId) {
@@ -222,10 +236,16 @@ export function useSessions({
   const switchSession = useCallback(async (sessionId: string) => {
     setCurrentSessionId(sessionId);
     currentSessionIdRef.current = sessionId;
+    setOlderMessagesCursor(null);
     try {
-      const res: any = await call('list_messages', { session_id: sessionId, limit: 100 });
+      const res: any = await call('list_messages', { session_id: sessionId, limit: MESSAGE_PAGE_SIZE });
+      if (currentSessionIdRef.current !== sessionId) {
+        return;
+      }
+
       const nextMessages = mergePendingAssistantPlaceholder(res.messages || [], sessionId);
       setMessages(nextMessages);
+      setOlderMessagesCursor(res.next_cursor || null);
       const reconciledActiveRun = reconcileActiveRunFromMessages(nextMessages, sessionId);
 
       const sessionInfo = sessionsRef.current.find((session) => session.id === sessionId);
@@ -250,13 +270,14 @@ export function useSessions({
     }
 
     try {
-      const res: any = await call('list_messages', { session_id: sessionId, limit: 100 });
+      const res: any = await call('list_messages', { session_id: sessionId, limit: MESSAGE_PAGE_SIZE });
       if (currentSessionIdRef.current !== sessionId) {
         return;
       }
 
       const nextMessages = mergePendingAssistantPlaceholder(res.messages || [], sessionId);
       setMessages(nextMessages);
+      setOlderMessagesCursor(res.next_cursor || null);
 
       const reconciledActiveRun = reconcileActiveRunFromMessages(nextMessages, sessionId);
       if (reconciledActiveRun) {
@@ -432,7 +453,7 @@ export function useSessions({
 
     let cancelled = false;
 
-    call('list_messages', { session_id: activeRun.sessionId, limit: 100 })
+    call('list_messages', { session_id: activeRun.sessionId, limit: MESSAGE_PAGE_SIZE })
       .then((res: any) => {
         if (cancelled) {
           return;
@@ -456,6 +477,7 @@ export function useSessions({
     const newId = crypto.randomUUID();
     setCurrentSessionId(newId);
     setMessages([]);
+    setOlderMessagesCursor(null);
     setCurrentUsage({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
 
     try {
@@ -585,6 +607,48 @@ export function useSessions({
     }
   }, [cancelRun, clearToolActivities]);
 
+  const loadOlderMessages = useCallback(async () => {
+    const sessionId = currentSessionIdRef.current;
+    const cursor = olderMessagesCursorRef.current;
+    if (!sessionId || !cursor || isLoadingOlderMessagesRef.current) {
+      return false;
+    }
+
+    isLoadingOlderMessagesRef.current = true;
+    setIsLoadingOlderMessages(true);
+
+    try {
+      const res: any = await call('list_messages', {
+        session_id: sessionId,
+        limit: MESSAGE_PAGE_SIZE,
+        cursor,
+      });
+
+      if (currentSessionIdRef.current !== sessionId) {
+        return false;
+      }
+
+      const olderMessages = (res.messages || []) as Message[];
+      setOlderMessagesCursor(res.next_cursor || null);
+      setMessages((prev) => {
+        const existingKeys = new Set(prev.map((message, index) => message.id || `${message.role}-${message.created_at || ''}-${index}`));
+        const uniqueOlderMessages = olderMessages.filter((message, index) => {
+          const key = message.id || `${message.role}-${message.created_at || ''}-${index}`;
+          return !existingKeys.has(key);
+        });
+        return [...uniqueOlderMessages, ...prev];
+      });
+
+      return olderMessages.length > 0;
+    } catch (error) {
+      console.error('Failed to load older messages:', error);
+      return false;
+    } finally {
+      isLoadingOlderMessagesRef.current = false;
+      setIsLoadingOlderMessages(false);
+    }
+  }, [call]);
+
   return {
     messages,
     setMessages,
@@ -595,8 +659,11 @@ export function useSessions({
     switchSession,
     createNewSession,
     deleteSession,
+    loadOlderMessages,
     execute,
     stopActiveRun,
+    hasOlderMessages: olderMessagesCursor !== null,
+    isLoadingOlderMessages,
     isSubmitting,
     isExecuting: activeRun !== null,
   };
