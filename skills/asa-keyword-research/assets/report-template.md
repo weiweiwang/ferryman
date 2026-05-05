@@ -85,26 +85,36 @@ _Payback analysis based on [Category] benchmarks for the **Monthly SKU**. We pro
 
 **Strategy**: Group by semantic function (Cluster) to adjust bids per feature.
 
-| Ad Group (Cluster) | Match Type | Search Match Enabled | Keywords                   | **Target CPA (Install)** |
-| :----------------- | :--------- | :------------------- | :------------------------- | :----------------------- |
-| `[Cluster_Name_1]` | Exact      | false                | [[keyword_1], [keyword_2]] | **$[Value]**             |
-| `[Cluster_Name_2]` | Exact      | false                | [[keyword_3], [keyword_4]] | **$[Value]**             |
+#### Ad Group: `[Cluster_Name_1]`
+- **Match Type**: Exact
+- **Copy-paste Ready**: `[keyword_1], [keyword_2], [keyword_3]`
+- **Target CPA (Install)**: **$[Value]**
+
+| Keyword | Popularity | Source |
+| :--- | :--- | :--- |
+| [keyword_1] | [0-100] | [src] |
 
 ### 📂 Campaign: [Competitor - Conquesting]
 
-**Strategy**: Target direct competitors to siphon brand traffic, closely monitor CPA.
+**Strategy**: Target direct competitors to siphon brand traffic.
 
-| Ad Group            | Match Type | Search Match Enabled | Keywords                       | **Target CPA (Install)** |
-| :------------------ | :--------- | :------------------- | :----------------------------- | :----------------------- |
-| `[Competitor_Name]` | Exact      | false                | [[comp_word_1], [comp_word_2]] | **$[Value]**             |
+#### Ad Group: `[Competitor_Name]`
+- **Match Type**: Exact
+- **Copy-paste Ready**: `[comp_word_1], [comp_word_2]`
+- **Target CPA (Install)**: **$[Value]**
+
+| Keyword | Popularity | Source |
+| :--- | :--- | :--- |
+| [comp_word_1] | [0-100] | [src] |
 
 ### 📂 Campaign: [Discovery]
 
-**Strategy**: **[Search Match disabled by default]**. Find long-tail commercial keywords via broad match on core seeds. Must be paired with strict negative keywords.
+**Strategy**: Find long-tail keywords via Broad Match.
 
-| Ad Group          | Match Type | Search Match Enabled | Keywords                 | **Target CPA (Install)** |
-| :---------------- | :--------- | :------------------- | :----------------------- | :----------------------- |
-| `Discovery_Broad` | Broad      | false                | core_seed_1, core_seed_2 | **$[Value]**             |
+#### Ad Group: `Discovery_Broad`
+- **Match Type**: Broad
+- **Copy-paste Ready**: `seed_word_1, seed_word_2`
+- **Target CPA (Install)**: **$[Value]**
 
 
 ## 5. Negative Keyword Matrix

@@ -96,22 +96,20 @@ You MUST use the `Current Date` from the Runtime Context to adjust keyword prior
 
 Never present a normalized score without `popularity_source`, `raw_popularity`, and `normalization_method`.
 
-### 5. Campaign Structure Rules
+### 5. Campaign Structure & Execution Formatting
 
 Follow the "Manual Exact, Budget Isolation, Disable Auto" expert principles:
 
-- **Exact Match is the Primary Driver**: Brand, high-intent Generic, and Competitor terms default to Exact Match campaigns for 100% control over bids, budgets, and attribution.
-- **Discovery Strategy**: Use Broad Match exclusively for Discovery. Create an isolated, low-budget Discovery Campaign for a few high-intent core seeds, utilizing strict negative keywords to prevent cannibalization of Exact Match terms.
-- **Ad Group Setting**: Use SKAG (Single Keyword Ad Group) or very tight semantic clusters.
+- **Exact Match is the Primary Driver**: Brand, high-intent Generic, and Competitor terms default to Exact Match.
+- **Discovery Strategy**: Use Broad Match exclusively for Discovery.
 
-Recommended campaign segmentation:
-
-| Campaign Type  | Keyword Nature                              | Objective                                      | Match Type                               |
-| :------------- | :------------------------------------------ | :--------------------------------------------- | :--------------------------------------- |
-| **Brand**      | Own app name, company name, misspellings    | Defend territory and protect brand traffic     | Exact Match                              |
-| **Generic**    | Feature keywords, e.g. "Translator", "Scan" | Acquire high-intent new users                  | Exact Match                              |
-| **Competitor** | Direct competitor app names                 | Conquesting                                    | Exact Match                              |
-| **Discovery**  | High-intent core seeds                      | Discover new commercial and long-tail keywords | Broad Match, Search Match off by default |
+**CRITICAL: Formatting for ASA Console Copy-Paste**:
+To ensure the user can copy-paste directly into the Search Ads dashboard:
+1. **Exact Match**: Every keyword MUST be wrapped in brackets and separated by commas.
+   - Example: `[滴答清单], [极简待办], [todo list]`
+2. **Broad Match**: Omit brackets, separate by commas.
+   - Example: `ai planner, voice todo, smart list`
+3. **Negative Keywords**: Apply the same bracket rules based on negative match type.
 
 ## CSV Output Contract
 
