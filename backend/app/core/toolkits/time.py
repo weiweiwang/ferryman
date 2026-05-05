@@ -3,9 +3,10 @@ from datetime import datetime
 from pydantic_ai.tools import RunContext
 
 from app.core.deps import AgentDeps
+from app.core.toolkits.base import Toolkit
 
 
-class TimeToolkit:
+class TimeToolkit(Toolkit):
     """Return the current time in ISO 8601 format."""
 
     @staticmethod

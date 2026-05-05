@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Any, Dict
+from typing import Optional
 
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
@@ -8,8 +8,9 @@ from sqlalchemy import String as SAString, desc, or_
 from sqlmodel import select
 
 from app.core.db import get_session
-from app.core.deps import AgentDeps
-from app.core.scheduler import compute_next_run_at, normalize_timezone_name
+from app.core.deps import AgentDeps, get_schedule_manager, get_task_manager
+from app.core.schedule_manager import compute_next_run_at, normalize_timezone_name
+from app.core.toolkits.base import Toolkit
 from app.models.database import Schedule, Task
 
 VALID_TASK_STATUSES = frozenset({"pending", "running", "success", "failed", "canceled"})
@@ -30,7 +31,7 @@ def _render_preview(value: str, *, limit: int = PREVIEW_LIMIT) -> str:
     return f"{compact[:limit - 3].rstrip()}..."
 
 
-class TaskToolkit:
+class TaskToolkit(Toolkit):
     """Persist and query tasks and schedule definitions for the agent runtime."""
 
     @staticmethod
@@ -48,7 +49,7 @@ class TaskToolkit:
             ctx: RunContext[AgentDeps],
             title: str,
             instruction: str,
-            metadata: Optional[Dict[str, Any]] = None,
+            metadata: Optional[dict[str, object]] = None,
             parent_id: Optional[str] = None
     ) -> str:
         """Create or deduplicate a persisted task.
@@ -56,7 +57,6 @@ class TaskToolkit:
         Stores the task title, instruction, and optional metadata, then returns
         a confirmation with the canonical task ID.
         """
-        kernel = ctx.deps.kernel
         session_id = ctx.deps.session_id
         normalized_title = _require_non_empty("title", title)
         normalized_instruction = _require_non_empty("instruction", instruction)
@@ -66,7 +66,7 @@ class TaskToolkit:
             "payload": dict(metadata or {}),
         }
 
-        task = kernel.persist_task(
+        task = get_task_manager(ctx.deps).persist_task(
             session_id=session_id,
             title=normalized_title,
             parent_id=parent_id,
@@ -82,7 +82,6 @@ class TaskToolkit:
 
         `status` must be one of: pending, running, success, failed, or canceled.
         """
-        kernel = ctx.deps.kernel
         normalized_task_id = _require_non_empty("task_id", task_id)
         normalized_status = status.strip().lower()
         if normalized_status not in VALID_TASK_STATUSES:
@@ -90,7 +89,7 @@ class TaskToolkit:
             raise ModelRetry(f"status must be one of: {allowed}.")
 
         meta = {"progress_note": progress_note} if progress_note is not None else None
-        kernel.persist_task_update(normalized_task_id, status=normalized_status, metadata=meta)
+        get_task_manager(ctx.deps).persist_task_update(normalized_task_id, status=normalized_status, metadata=meta)
         return f"Task {normalized_task_id} updated to {normalized_status}"
 
     @staticmethod
@@ -152,7 +151,6 @@ class TaskToolkit:
         Stores the name, cron expression, and instruction in the database. This
         tool does not execute the schedule.
         """
-        kernel = ctx.deps.kernel
         normalized_name = _require_non_empty("name", name)
         normalized_cron = _require_non_empty("cron_expression", cron_expression)
         normalized_instruction = _require_non_empty("instruction", instruction)
@@ -170,7 +168,7 @@ class TaskToolkit:
             session.add(new_schedule)
             session.commit()
             session.refresh(new_schedule)
-        schedule_manager = getattr(kernel, "schedule_manager", None)
+        schedule_manager = get_schedule_manager(ctx.deps)
         if schedule_manager:
             await schedule_manager.sync_schedule(new_schedule.id)
         return f"Schedule '{normalized_name}' created with ID: {new_schedule.id}"

@@ -4,7 +4,6 @@ import asyncio
 import base64
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
@@ -12,10 +11,13 @@ from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
 from app.core.deps import AgentDeps
+from app.core.toolkits.base import Toolkit
 from app.core.toolkits.file import FileToolkit
 
+ImageRequestParams = dict[str, str | int]
 
-class ImageToolkit:
+
+class ImageToolkit(Toolkit):
     """Generate images through an OpenAI-compatible Images API."""
 
     @staticmethod
@@ -56,7 +58,7 @@ class ImageToolkit:
 
         try:
             first_path = FileToolkit.resolve_session_path(
-                ctx.deps.kernel,
+                ctx.deps,
                 ctx.deps.session_id,
                 normalized_path,
             )
@@ -87,7 +89,7 @@ class ImageToolkit:
         return OpenAI(api_key=api_key, base_url=base_url)
 
     @staticmethod
-    def _normalize_request_params(params: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_request_params(params: ImageRequestParams) -> ImageRequestParams:
         base_url = str(params["base_url"])
         if ".azure.com" not in base_url:
             return params
@@ -100,11 +102,11 @@ class ImageToolkit:
         return params
 
     @staticmethod
-    def _generate_image(params: dict[str, Any]) -> dict[str, Any]:
+    def _generate_image(params: ImageRequestParams) -> dict[str, object]:
         params = ImageToolkit._normalize_request_params(params)
-        api_key = params.pop("api_key")
-        base_url = params.pop("base_url")
-        api_version = params.pop("api_version")
+        api_key = str(params.pop("api_key"))
+        base_url = str(params.pop("base_url"))
+        api_version = str(params.pop("api_version"))
         client = ImageToolkit._build_client(api_key, base_url, api_version)
         result = client.images.generate(**params)
         return result.model_dump()
@@ -123,7 +125,7 @@ class ImageToolkit:
         output_compression: int = 100,
         n: int = 1,
         output_path: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Generate images through OpenAI-compatible `client.images.generate`.
 
         Pass `api_key` and `base_url` at call time. When `base_url` contains
@@ -155,7 +157,7 @@ class ImageToolkit:
             normalized_output_format,
         )
 
-        request_params: dict[str, Any] = {
+        request_params: ImageRequestParams = {
             "api_key": normalized_api_key,
             "base_url": normalized_base_url,
             "api_version": normalized_api_version,
@@ -180,7 +182,7 @@ class ImageToolkit:
                 normalized_output_format,
             )
 
-        saved_images: list[dict[str, Any]] = []
+        saved_images: list[dict[str, object]] = []
         for index, image in enumerate(images):
             if not isinstance(image, dict):
                 raise ModelRetry("Image generation response included an invalid image item.")

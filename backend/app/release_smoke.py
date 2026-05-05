@@ -17,8 +17,7 @@ from pydantic_ai.usage import RequestUsage, Usage
 
 from app.core.browser import BrowserController
 from app.core.config import get_settings
-from app.core.deps import AgentDeps
-from app.core.kernel import FerrymanKernel
+from app.core.runtime import FerrymanRuntime
 from app.main import DEFAULT_FERRYMAN_BEARER_TOKEN, app as fastapi_app
 from app.core.toolkits.command import CommandToolkit
 from app.core.toolkits.file import FileToolkit
@@ -217,17 +216,17 @@ async def _run_live_gemini_smoke(report: dict[str, object]) -> None:
 
 async def run_bundle_smoke_test() -> dict[str, object]:
     settings = get_settings()
-    kernel = FerrymanKernel(settings)
+    runtime = FerrymanRuntime(settings)
     session_id = "bundle-smoke"
-    workspace = kernel.get_session_workspace(session_id)
-    base_ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id), usage=Usage())
+    workspace = runtime.get_session_workspace(session_id)
+    base_ctx = SimpleNamespace(deps=runtime.create_agent_deps(session_id=session_id), usage=Usage())
     report: dict[str, object] = {"root_dir": str(settings.root_dir), "checks": []}
 
     try:
-        kernel.scan_skills()
-        report["checks"].append({"name": "scan_skills", "count": len(kernel.skills)})
-        _require(bool(kernel.skills), "No skills were loaded from the bundled skill directories.")
-        _require("bundle-smoke-skill" in kernel.skills, "Bundled smoke skill was not staged into the release assets.")
+        runtime.skill_manager.scan_skills()
+        report["checks"].append({"name": "scan_skills", "count": len(runtime.skill_manager.skills)})
+        _require(bool(runtime.skill_manager.skills), "No skills were loaded from the bundled skill directories.")
+        _require("bundle-smoke-skill" in runtime.skill_manager.skills, "Bundled smoke skill was not staged into the release assets.")
 
         stoplists = get_stoplists()
         _require(bool(stoplists), "jusText stoplists were not found in the bundled runtime.")
@@ -268,7 +267,7 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         report["checks"].append({"name": "task_tools"})
 
         bundled_skill_ctx = SimpleNamespace(
-            deps=AgentDeps(kernel=kernel, session_id=session_id, skill_name="bundle-smoke-skill"),
+            deps=runtime.create_agent_deps(session_id=session_id, skill_name="bundle-smoke-skill"),
             usage=Usage(),
         )
         bundled_assets = await FileToolkit.list_files(bundled_skill_ctx, "assets")
@@ -299,13 +298,13 @@ async def run_bundle_smoke_test() -> dict[str, object]:
             label="publish_skill(bundle-smoke-draft-skill)",
         )
         _require(publish_result["ok"] is True, f"publish_skill failed: {publish_result}")
-        _require("bundle-smoke-draft-skill" in kernel.skills, "Published smoke skill was not registered.")
+        _require("bundle-smoke-draft-skill" in runtime.skill_manager.skills, "Published smoke skill was not registered.")
 
         skill_ctx = SimpleNamespace(
-            deps=AgentDeps(kernel=kernel, session_id=session_id, skill_name="bundle-smoke-draft-skill"),
+            deps=runtime.create_agent_deps(session_id=session_id, skill_name="bundle-smoke-draft-skill"),
             usage=Usage(),
         )
-        skill_files = await FileToolkit.list_files(skill_ctx, str(kernel.skills["bundle-smoke-draft-skill"].path))
+        skill_files = await FileToolkit.list_files(skill_ctx, str(runtime.skill_manager.skills["bundle-smoke-draft-skill"].path))
         _require("SKILL.md" in skill_files, f"Published skill resources not readable: {skill_files}")
         command_result = _coerce_json_object(
             await CommandToolkit.run_skill_script(skill_ctx, "echo.py"),
@@ -314,7 +313,7 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         _require(command_result["ok"] is True, f"run_skill_script failed: {command_result}")
         _require("bundle-smoke-script" in command_result["stdout"], f"Unexpected script stdout: {command_result}")
 
-        original_build_skill_agent = kernel.build_skill_agent
+        original_build_skill_agent = runtime.agent_manager.build_skill_agent
 
         class FakeSkillResult:
             output = "bundle-smoke-skill-ran"
@@ -330,11 +329,11 @@ async def run_bundle_smoke_test() -> dict[str, object]:
                 _require(usage is base_ctx.usage, "Skill usage object was not forwarded.")
                 return FakeSkillResult()
 
-        kernel.build_skill_agent = MethodType(lambda self, skill_name: FakeSkillAgent(), kernel)
+        runtime.agent_manager.build_skill_agent = MethodType(lambda self, skill_name: FakeSkillAgent(), runtime.agent_manager)
         try:
             skill_run_result = await SkillToolkit.run_skill(base_ctx, "bundle-smoke-skill", "Run smoke skill")
         finally:
-            kernel.build_skill_agent = original_build_skill_agent
+            runtime.agent_manager.build_skill_agent = original_build_skill_agent
         _require(skill_run_result == "bundle-smoke-skill-ran", f"run_skill returned unexpected output: {skill_run_result}")
         report["checks"].append({"name": "skill_tools"})
 
@@ -360,7 +359,7 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         distilled = await WebToolkit.browser_get_distilled_dom(base_ctx)
         _require("Bundle smoke article" in distilled, f"browser_get_distilled_dom failed: {distilled[:200]}")
 
-        browser = await kernel.get_browser(session_id)
+        browser = await runtime.browser_manager.get_browser(session_id)
         page_status = await browser._page.evaluate("document.getElementById('status').innerText")
         _require(page_status == "Confirmed: Ferryman", f"Browser interaction did not update page state: {page_status}")
         screenshot = await WebToolkit.browser_screenshot(base_ctx)
@@ -383,7 +382,7 @@ async def run_bundle_smoke_test() -> dict[str, object]:
 
         return report
     finally:
-        await kernel.shutdown()
+        await runtime.browser_manager.shutdown()
 
 
 def main() -> int:

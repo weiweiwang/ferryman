@@ -26,21 +26,23 @@ from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.usage import RunUsage
 from sqlmodel import select
 
-from app.core.browser import BrowserActionError
 from app.core.config import Settings
 from app.core.db import get_session
-from app.core.kernel import (
+from app.core.context_manager import (
+    ContextManager,
     O200K_BASE_CACHE_KEY,
     TOKEN_ESTIMATE_ENCODING,
-    FerrymanKernel,
-    LLMConfigurationError,
     _configure_tiktoken_cache,
     _get_token_encoder,
     _local_tiktoken_cache_dir,
 )
-from app.core.deps import AgentDeps
+from app.core.model_manager import LLMConfigurationError
+from app.core.runtime import FerrymanRuntime
+from app.core.tool_errors import RetryableToolError
+from app.core.toolkits.base import Toolkit
 from app.core.toolkits.skill import SkillToolkit
 from app.core.toolkits.web import WebToolkit
+from app.core.utc_datetime import format_utc_datetime
 from app.models.database import Message, Session
 from app.models.events import FerrymanEventEnvelope, EventNamespace, ToolPhase, ToolActivityPayload
 from app.models.schemas import Usage
@@ -148,7 +150,7 @@ def assert_error_tool_payload(
     return payload
 
 
-def test_init_llm_model_uses_openai_provider_for_kimi(monkeypatch):
+def test_create_active_model_uses_openai_provider_for_kimi(monkeypatch):
     settings = create_test_settings()
     monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "kimi:kimi-k2.5")
     monkeypatch.setattr(Settings, "get_provider_llm_config", lambda self, provider: {"api_key": "sk-test"})
@@ -173,9 +175,9 @@ def test_init_llm_model_uses_openai_provider_for_kimi(monkeypatch):
     monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
     monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider", FakeOpenAIProvider)
 
-    kernel = FerrymanKernel(settings=settings)
+    kernel = FerrymanRuntime(settings=settings)
 
-    assert kernel._init_llm_model() == "kimi-model"
+    assert kernel.model_manager.create_active_model() == "kimi-model"
     assert captured["model_name"] == "kimi-k2.5"
     assert isinstance(captured["provider"], FakeOpenAIProvider)
     assert captured["client_kwargs"] == {
@@ -185,7 +187,7 @@ def test_init_llm_model_uses_openai_provider_for_kimi(monkeypatch):
     assert captured["provider_kwargs"] == {"openai_client": captured["client_instance"]}
 
 
-def test_init_llm_model_supports_custom_kimi_base_url(monkeypatch):
+def test_create_active_model_supports_custom_kimi_base_url(monkeypatch):
     settings = create_test_settings()
     monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "kimi:kimi-k2.5")
     monkeypatch.setattr(
@@ -214,9 +216,9 @@ def test_init_llm_model_supports_custom_kimi_base_url(monkeypatch):
     monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
     monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider", FakeOpenAIProvider)
 
-    kernel = FerrymanKernel(settings=settings)
+    kernel = FerrymanRuntime(settings=settings)
 
-    assert kernel._init_llm_model() == "kimi-model"
+    assert kernel.model_manager.create_active_model() == "kimi-model"
     assert captured["client_kwargs"] == {
         "api_key": "sk-test",
         "base_url": "https://proxy.example.com/v1",
@@ -224,7 +226,7 @@ def test_init_llm_model_supports_custom_kimi_base_url(monkeypatch):
     assert captured["provider_kwargs"] == {"openai_client": captured["client_instance"]}
 
 
-def test_init_llm_model_uses_openai_provider_for_doubao(monkeypatch):
+def test_create_active_model_uses_openai_provider_for_doubao(monkeypatch):
     settings = create_test_settings()
     monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "doubao:doubao-seed-2-0-pro-260215")
     monkeypatch.setattr(Settings, "get_provider_llm_config", lambda self, provider: {"api_key": "sk-test"})
@@ -243,9 +245,9 @@ def test_init_llm_model_uses_openai_provider_for_doubao(monkeypatch):
     monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
     monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider", FakeOpenAIProvider)
 
-    kernel = FerrymanKernel(settings=settings)
+    kernel = FerrymanRuntime(settings=settings)
 
-    assert kernel._init_llm_model() == "doubao-model"
+    assert kernel.model_manager.create_active_model() == "doubao-model"
     assert captured["model_name"] == "doubao-seed-2-0-pro-260215"
     assert isinstance(captured["provider"], FakeOpenAIProvider)
     assert captured["provider_kwargs"] == {
@@ -254,7 +256,37 @@ def test_init_llm_model_uses_openai_provider_for_doubao(monkeypatch):
     }
 
 
-def test_init_llm_model_strips_trailing_v1_for_anthropic(monkeypatch):
+def test_create_active_model_uses_openai_provider_for_deepseek(monkeypatch):
+    settings = create_test_settings()
+    monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "deepseek:deepseek-v4-pro")
+    monkeypatch.setattr(Settings, "get_provider_llm_config", lambda self, provider: {"api_key": "sk-test"})
+
+    captured = {}
+
+    class FakeOpenAIProvider:
+        def __init__(self, **kwargs):
+            captured["provider_kwargs"] = kwargs
+
+    def fake_openai_chat_model(model_name, provider):
+        captured["model_name"] = model_name
+        captured["provider"] = provider
+        return "deepseek-model"
+
+    monkeypatch.setattr("pydantic_ai.models.openai.OpenAIChatModel", fake_openai_chat_model)
+    monkeypatch.setattr("pydantic_ai.providers.openai.OpenAIProvider", FakeOpenAIProvider)
+
+    kernel = FerrymanRuntime(settings=settings)
+
+    assert kernel.model_manager.create_active_model() == "deepseek-model"
+    assert captured["model_name"] == "deepseek-v4-pro"
+    assert isinstance(captured["provider"], FakeOpenAIProvider)
+    assert captured["provider_kwargs"] == {
+        "api_key": "sk-test",
+        "base_url": "https://api.deepseek.com",
+    }
+
+
+def test_create_active_model_strips_trailing_v1_for_anthropic(monkeypatch):
     settings = create_test_settings()
     monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "anthropic:claude-haiku-4-5-20251001")
     monkeypatch.setattr(
@@ -280,9 +312,9 @@ def test_init_llm_model_strips_trailing_v1_for_anthropic(monkeypatch):
     monkeypatch.setattr("pydantic_ai.models.anthropic.AnthropicModel", fake_anthropic_model)
     monkeypatch.setattr("pydantic_ai.providers.anthropic.AnthropicProvider", FakeAnthropicProvider)
 
-    kernel = FerrymanKernel(settings=settings)
+    kernel = FerrymanRuntime(settings=settings)
 
-    assert kernel._init_llm_model() == "anthropic-model"
+    assert kernel.model_manager.create_active_model() == "anthropic-model"
     assert captured["model_name"] == "claude-haiku-4-5-20251001"
     assert isinstance(captured["provider"], FakeAnthropicProvider)
     assert captured["provider_kwargs"] == {
@@ -291,15 +323,15 @@ def test_init_llm_model_strips_trailing_v1_for_anthropic(monkeypatch):
     }
 
 
-def test_init_llm_model_raises_clear_error_when_gemini_api_key_missing(monkeypatch):
+def test_create_active_model_raises_clear_error_when_gemini_api_key_missing(monkeypatch):
     settings = create_test_settings()
     monkeypatch.setattr(Settings, "get_active_model_id", lambda self: "gemini:gemini-3-flash-preview")
     monkeypatch.setattr(Settings, "get_provider_llm_config", lambda self, provider: {})
 
-    kernel = FerrymanKernel(settings=settings)
+    kernel = FerrymanRuntime(settings=settings)
 
     with pytest.raises(LLMConfigurationError, match="missing API Key"):
-        kernel._init_llm_model()
+        kernel.model_manager.create_active_model()
 
 
 # --- test_agent_closure.py ---
@@ -309,7 +341,7 @@ async def test_agent_execution_closure(monkeypatch):
     Verifies the full 'Closure' of a MasterAgent instruction using FunctionModel to simulate turns.
     """
     mock_settings = create_test_settings()
-    kernel = FerrymanKernel(settings=mock_settings)
+    kernel = FerrymanRuntime(settings=mock_settings)
     
     from pydantic_ai.models.gemini import GeminiModel
     from pydantic_ai.models.openai import OpenAIModel
@@ -333,7 +365,7 @@ async def test_agent_execution_closure(monkeypatch):
     def mock_get_master_agent(session_id: str):
         return Agent(model=mock_model, system_prompt="You are a test agent.")
         
-    monkeypatch.setattr(kernel, "_get_master_agent", mock_get_master_agent)
+    monkeypatch.setattr(kernel.agent_manager, "get_master_agent", mock_get_master_agent)
 
     result = await kernel.run_master_agent("Help me list files", session_id="test_session")
     
@@ -348,8 +380,8 @@ async def test_agent_execution_closure(monkeypatch):
 @pytest.mark.asyncio
 async def test_master_agent_can_recover_from_soft_failed_run_skill(monkeypatch):
     create_mock_skill("target_skill", "Test skill", TEST_USER_SKILLS)
-    kernel = FerrymanKernel(settings=create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(settings=create_test_settings())
+    kernel.skill_manager.scan_skills()
 
     from pydantic_ai.models.gemini import GeminiModel
     from pydantic_ai.models.openai import OpenAIModel
@@ -362,7 +394,7 @@ async def test_master_agent_can_recover_from_soft_failed_run_skill(monkeypatch):
         async def run(self, instruction, **kwargs):
             raise RuntimeError("delegate exploded")
 
-    monkeypatch.setattr(kernel, "build_skill_agent", lambda skill_name: FailingSkillAgent())
+    monkeypatch.setattr(kernel.agent_manager, "build_skill_agent", lambda skill_name: FailingSkillAgent())
 
     async def mock_agent_logic(messages, info):
         tool_returns = [
@@ -396,7 +428,7 @@ async def test_master_agent_can_recover_from_soft_failed_run_skill(monkeypatch):
         ])
 
     mock_model = FunctionModel(mock_agent_logic)
-    monkeypatch.setattr(kernel, "_init_llm_model", lambda: mock_model)
+    monkeypatch.setattr(kernel.model_manager, "create_active_model", lambda: mock_model)
 
     result = await kernel.run_master_agent("Use the skill first", session_id="test_session")
 
@@ -435,10 +467,10 @@ async def test_run_master_agent_mocked(monkeypatch, caplog):
     def mock_get_master_agent(session_id: str):
         return MockAgent()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_master_agent", mock_get_master_agent)
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.agent_manager, "get_master_agent", mock_get_master_agent)
 
-    with caplog.at_level(logging.INFO, logger="app.core.kernel"):
+    with caplog.at_level(logging.INFO, logger="app.core.agent_manager"):
         response = await kernel.run_master_agent("Please list files", "test-session")
     
     assert "Please list files" in response["payload"]["messages"][0]["content"]
@@ -479,8 +511,8 @@ async def test_run_master_agent_history_keeps_system_prompt_and_token_estimates(
             captured["message_history"] = message_history
             return MockResult()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_master_agent", lambda session_id: MockAgent())
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.agent_manager, "get_master_agent", lambda session_id: MockAgent())
 
     await kernel.run_master_agent("Please list files", "test-session")
 
@@ -504,7 +536,7 @@ async def test_run_master_agent_history_keeps_system_prompt_and_token_estimates(
 
 
 def test_get_session_messages_includes_summary_and_only_tail_messages():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     session_id = "session-with-summary"
     cutoff = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
 
@@ -565,7 +597,7 @@ def test_get_session_messages_includes_summary_and_only_tail_messages():
         )
         db_session.commit()
 
-    history = kernel._get_session_messages(session_id)
+    history = kernel.context_manager.get_session_messages(session_id)
 
     assert isinstance(history[0], ModelRequest)
     assert isinstance(history[0].parts[0], SystemPromptPart)
@@ -582,7 +614,7 @@ def test_get_session_messages_includes_summary_and_only_tail_messages():
 
 
 def test_get_session_messages_respects_microsecond_cutoff():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     session_id = "session-with-microsecond-cutoff"
     cutoff = datetime(2026, 4, 16, 12, 0, 0, 123456, tzinfo=timezone.utc)
 
@@ -595,7 +627,7 @@ def test_get_session_messages_respects_microsecond_cutoff():
                     "schema_version": 1,
                     "compaction": {
                         "summary": "compressed history",
-                        "cutoff_created_at": kernel._format_utc_timestamp(cutoff),
+                        "cutoff_created_at": format_utc_datetime(cutoff),
                         "updated_at": "2026-04-16T12:05:00Z",
                     },
                 },
@@ -623,14 +655,14 @@ def test_get_session_messages_respects_microsecond_cutoff():
         )
         db_session.commit()
 
-    history = kernel._get_session_messages(session_id)
+    history = kernel.context_manager.get_session_messages(session_id)
 
     rendered_tail = [message.parts[0].content for message in history[2:]]
     assert rendered_tail == ["same-second new user"]
 
 
 def test_get_session_messages_ignores_invalid_memory_timestamps():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     session_id = "session-with-invalid-memory-timestamps"
 
     with get_session() as db_session:
@@ -660,7 +692,7 @@ def test_get_session_messages_ignores_invalid_memory_timestamps():
         )
         db_session.commit()
 
-    history = kernel._get_session_messages(session_id)
+    history = kernel.context_manager.get_session_messages(session_id)
 
     assert history[1].parts[0].content.startswith("[CONTEXT COMPACTION")
     assert history[2].parts[0].content == "tail user"
@@ -710,13 +742,11 @@ async def test_run_master_agent_compacts_after_current_turn(monkeypatch):
             captured["compaction_input"] = instruction
             return CompactionResult()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_master_agent", lambda current_session_id: MasterAgent())
-    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
-    monkeypatch.setattr(
-        kernel,
-        "get_setting",
-        lambda key, default=None: (
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.agent_manager, "get_master_agent", lambda current_session_id: MasterAgent())
+    monkeypatch.setattr(kernel.context_manager, "get_compaction_agent", lambda: CompactionAgent())
+    kernel.context_manager._settings = SimpleNamespace(
+        get=lambda key, default=None: (
             10 if key == "system.llm.compaction_threshold_tokens"
             else 10 if key == "system.llm.compaction_tail_tokens"
             else default
@@ -796,13 +826,11 @@ async def test_run_master_agent_skips_failed_compaction_and_sets_guard(monkeypat
             captured["compaction_calls"] += 1
             raise RuntimeError("compaction backend unavailable")
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_master_agent", lambda current_session_id: MasterAgent())
-    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: FailingCompactionAgent())
-    monkeypatch.setattr(
-        kernel,
-        "get_setting",
-        lambda key, default=None: (
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.agent_manager, "get_master_agent", lambda current_session_id: MasterAgent())
+    monkeypatch.setattr(kernel.context_manager, "get_compaction_agent", lambda: FailingCompactionAgent())
+    kernel.context_manager._settings = SimpleNamespace(
+        get=lambda key, default=None: (
             10 if key == "system.llm.compaction_threshold_tokens"
             else 60 if key == "system.llm.compaction_guard_seconds"
             else 10 if key == "system.llm.compaction_tail_tokens"
@@ -839,7 +867,7 @@ async def test_run_master_agent_skips_failed_compaction_and_sets_guard(monkeypat
     assert response["payload"]["messages"][0]["content"] == "normal reply"
     assert captured["compaction_calls"] == 1
 
-    await kernel._maybe_compact_session(session_id)
+    await kernel.context_manager.maybe_compact_session(session_id)
     assert captured["compaction_calls"] == 1
 
     with get_session() as db_session:
@@ -907,13 +935,11 @@ async def test_run_master_agent_backfills_legacy_zero_token_estimates_for_compac
             captured["compaction_calls"] += 1
             return CompactionResult()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_master_agent", lambda current_session_id: MasterAgent())
-    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
-    monkeypatch.setattr(
-        kernel,
-        "get_setting",
-        lambda key, default=None: (
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.agent_manager, "get_master_agent", lambda current_session_id: MasterAgent())
+    monkeypatch.setattr(kernel.context_manager, "get_compaction_agent", lambda: CompactionAgent())
+    kernel.context_manager._settings = SimpleNamespace(
+        get=lambda key, default=None: (
             20 if key == "system.llm.compaction_threshold_tokens"
             else 10 if key == "system.llm.compaction_tail_tokens"
             else default
@@ -990,12 +1016,10 @@ async def test_maybe_compact_session_uses_rolling_chunk_window(monkeypatch):
             captured["input"] = instruction
             return CompactionResult()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
-    monkeypatch.setattr(
-        kernel,
-        "get_setting",
-        lambda key, default=None: (
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.context_manager, "get_compaction_agent", lambda: CompactionAgent())
+    kernel.context_manager._settings = SimpleNamespace(
+        get=lambda key, default=None: (
             20 if key == "system.llm.compaction_threshold_tokens"
             else 25 if key == "system.llm.compaction_chunk_tokens"
             else 10 if key == "system.llm.compaction_tail_tokens"
@@ -1018,7 +1042,7 @@ async def test_maybe_compact_session_uses_rolling_chunk_window(monkeypatch):
             )
         db_session.commit()
 
-    await kernel._maybe_compact_session(session_id)
+    await kernel.context_manager.maybe_compact_session(session_id)
 
     assert "message 0" in captured["input"]
     assert "message 1" in captured["input"]
@@ -1055,12 +1079,10 @@ async def test_maybe_compact_session_rolls_forward_after_existing_cutoff(monkeyp
             captured["input"] = instruction
             return CompactionResult()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
-    monkeypatch.setattr(
-        kernel,
-        "get_setting",
-        lambda key, default=None: (
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.context_manager, "get_compaction_agent", lambda: CompactionAgent())
+    kernel.context_manager._settings = SimpleNamespace(
+        get=lambda key, default=None: (
             20 if key == "system.llm.compaction_threshold_tokens"
             else 25 if key == "system.llm.compaction_chunk_tokens"
             else 10 if key == "system.llm.compaction_tail_tokens"
@@ -1095,7 +1117,7 @@ async def test_maybe_compact_session_rolls_forward_after_existing_cutoff(monkeyp
             )
         db_session.commit()
 
-    await kernel._maybe_compact_session(session_id)
+    await kernel.context_manager.maybe_compact_session(session_id)
 
     assert "previous summary" in captured["input"]
     assert "message 0" not in captured["input"]
@@ -1132,12 +1154,10 @@ async def test_maybe_compact_session_includes_single_message_larger_than_chunk(m
             captured["input"] = instruction
             return CompactionResult()
 
-    kernel = FerrymanKernel(create_test_settings())
-    monkeypatch.setattr(kernel, "_get_compaction_agent", lambda: CompactionAgent())
-    monkeypatch.setattr(
-        kernel,
-        "get_setting",
-        lambda key, default=None: (
+    kernel = FerrymanRuntime(create_test_settings())
+    monkeypatch.setattr(kernel.context_manager, "get_compaction_agent", lambda: CompactionAgent())
+    kernel.context_manager._settings = SimpleNamespace(
+        get=lambda key, default=None: (
             20 if key == "system.llm.compaction_threshold_tokens"
             else 25 if key == "system.llm.compaction_chunk_tokens"
             else 10 if key == "system.llm.compaction_tail_tokens"
@@ -1169,7 +1189,7 @@ async def test_maybe_compact_session_includes_single_message_larger_than_chunk(m
         )
         db_session.commit()
 
-    await kernel._maybe_compact_session(session_id)
+    await kernel.context_manager.maybe_compact_session(session_id)
 
     assert "oversized message" in captured["input"]
     assert "later message" not in captured["input"]
@@ -1195,7 +1215,7 @@ def test_split_compaction_tail_preserves_recent_messages():
         for index in range(4)
     ]
 
-    compactable, tail = FerrymanKernel._split_compaction_tail(messages, tail_tokens=20)
+    compactable, tail = ContextManager.split_compaction_tail(messages, tail_tokens=20)
 
     assert [message.content for message in compactable] == ["message 0", "message 1"]
     assert [message.content for message in tail] == ["message 2", "message 3"]
@@ -1203,11 +1223,11 @@ def test_split_compaction_tail_preserves_recent_messages():
 
 # --- test_prompt_and_usage_limits.py ---
 def test_runtime_context_moves_to_user_prompt():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     session_id = "test-session"
 
-    system_prompt = kernel._build_system_prompt(session_id)
-    augmented_instruction = kernel.build_runtime_augmented_instruction("Inspect files", session_id)
+    system_prompt = kernel.prompt_builder.build_system_prompt(session_id)
+    augmented_instruction = kernel.prompt_builder.build_runtime_augmented_instruction("Inspect files", session_id)
 
     assert "Host OS:" not in system_prompt
     assert "Root Dir:" not in system_prompt
@@ -1224,15 +1244,15 @@ def test_runtime_context_moves_to_user_prompt():
 @pytest.mark.asyncio
 async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
     create_mock_skill("target_skill", "Test skill", TEST_USER_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
     
     def settings_get(key: str, default=None):
         if key == "system.llm.request_limit":
             return 42
         return Settings.get(key, default)
 
-    monkeypatch.setattr(type(kernel._settings), "get", staticmethod(settings_get))
+    monkeypatch.setattr(type(kernel.settings), "get", staticmethod(settings_get))
 
     captured = {}
 
@@ -1249,11 +1269,11 @@ async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
             captured["kwargs"] = kwargs
             return MockSkillResult()
 
-    monkeypatch.setattr(kernel, "build_skill_agent", lambda skill_name: MockSkillAgent())
+    monkeypatch.setattr(kernel.agent_manager, "build_skill_agent", lambda skill_name: MockSkillAgent())
 
     shared_usage = RunUsage()
     ctx = SimpleNamespace(
-        deps=AgentDeps(kernel=kernel, session_id="test-session", emit_event_cb=AsyncMock()),
+        deps=kernel.create_agent_deps(session_id="test-session", emit_event_cb=AsyncMock()),
         usage=shared_usage,
     )
 
@@ -1269,9 +1289,9 @@ async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_skill_run_missing_skill_requests_retry():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     ctx = SimpleNamespace(
-        deps=AgentDeps(kernel=kernel, session_id="test-session", emit_event_cb=AsyncMock()),
+        deps=kernel.create_agent_deps(session_id="test-session", emit_event_cb=AsyncMock()),
         usage=RunUsage(),
     )
 
@@ -1282,17 +1302,17 @@ async def test_skill_run_missing_skill_requests_retry():
 @pytest.mark.asyncio
 async def test_skill_run_returns_soft_failure_payload_when_delegate_fails(monkeypatch):
     create_mock_skill("target_skill", "Test skill", TEST_USER_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
 
     class MockSkillAgent:
         async def run(self, instruction, **kwargs):
             raise RuntimeError("delegate exploded")
 
-    monkeypatch.setattr(kernel, "build_skill_agent", lambda skill_name: MockSkillAgent())
+    monkeypatch.setattr(kernel.agent_manager, "build_skill_agent", lambda skill_name: MockSkillAgent())
 
     ctx = SimpleNamespace(
-        deps=AgentDeps(kernel=kernel, session_id="test-session", emit_event_cb=AsyncMock()),
+        deps=kernel.create_agent_deps(session_id="test-session", emit_event_cb=AsyncMock()),
         usage=RunUsage(),
     )
 
@@ -1309,12 +1329,8 @@ async def test_skill_run_returns_soft_failure_payload_when_delegate_fails(monkey
 @pytest.mark.asyncio
 async def test_agent_deps_emit_tool_event():
     mock_cb = AsyncMock()
-    
-    deps = AgentDeps(
-        kernel=None,
-        session_id="test-session",
-        emit_event_cb=mock_cb
-    )
+    runtime = FerrymanRuntime(create_test_settings())
+    deps = runtime.create_agent_deps(session_id="test-session", emit_event_cb=mock_cb)
 
     await deps.emit_tool_event(
         run_id="xyz",
@@ -1342,12 +1358,8 @@ async def test_agent_deps_emit_tool_event():
 @pytest.mark.asyncio
 async def test_agent_deps_emit_tool_event_increments_seq():
     mock_cb = AsyncMock()
-
-    deps = AgentDeps(
-        kernel=None,
-        session_id="test-session",
-        emit_event_cb=mock_cb
-    )
+    runtime = FerrymanRuntime(create_test_settings())
+    deps = runtime.create_agent_deps(session_id="test-session", emit_event_cb=mock_cb)
 
     await deps.emit_tool_event(run_id="xyz", tool_name="first_tool", phase="start")
     await deps.emit_tool_event(run_id="xyz", tool_name="second_tool", phase="complete")
@@ -1360,7 +1372,7 @@ async def test_agent_deps_emit_tool_event_increments_seq():
     assert first_event.payload.event_id != second_event.payload.event_id
 
 
-class DummyToolkit:
+class DummyToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def dummy_tool(ctx, arg1: str):
@@ -1372,7 +1384,7 @@ class DummyToolkit:
         return [dummy_tool]
 
 
-class MultiToolDummyToolkit:
+class MultiToolDummyToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def first_tool(ctx):
@@ -1384,7 +1396,7 @@ class MultiToolDummyToolkit:
         return [first_tool, second_tool]
 
 
-class FileSummaryDummyToolkit:
+class FileSummaryDummyToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def write_file(ctx, file_path: str, content: str):
@@ -1393,25 +1405,25 @@ class FileSummaryDummyToolkit:
         return [write_file]
 
 
-class SoftFailBrowserToolkit:
+class SoftFailBrowserToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def browser_navigate(ctx):
-            raise BrowserActionError("Failed to navigate: boom")
+            raise RetryableToolError("Failed to navigate: boom", error_type="browser_action_error")
 
         return [browser_navigate]
 
 
-class HardFailBrowserToolkit:
+class HardFailBrowserToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def browser_screenshot(ctx):
-            raise BrowserActionError("Failed to take screenshot: boom")
+            raise RetryableToolError("Failed to take screenshot: boom", error_type="browser_action_error")
 
         return [browser_screenshot]
 
 
-class RetryDummyToolkit:
+class RetryDummyToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def retry_tool(ctx):
@@ -1420,7 +1432,7 @@ class RetryDummyToolkit:
         return [retry_tool]
 
 
-class ImageDummyToolkit:
+class ImageDummyToolkit(Toolkit):
     @staticmethod
     def get_tools():
         async def browser_screenshot(ctx):
@@ -1430,17 +1442,17 @@ class ImageDummyToolkit:
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_wrapper():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
     
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
     
-    kernel._register_toolkit(agent, DummyToolkit)
+    kernel.tool_manager.register_toolkit(agent, DummyToolkit)
     registered_tool = agent.tool.call_args[0][0]
     
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1478,20 +1490,20 @@ async def test_kernel_register_toolkit_wrapper():
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_preserves_each_tool_binding():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, MultiToolDummyToolkit)
+    kernel.tool_manager.register_toolkit(agent, MultiToolDummyToolkit)
 
     first_registered = agent.tool.call_args_list[0][0][0]
     second_registered = agent.tool.call_args_list[1][0][0]
 
     class MockContext:
         def __init__(self):
-            self.deps = AgentDeps(kernel=kernel, session_id="sess")
+            self.deps = kernel.create_agent_deps(session_id="sess")
 
     ctx = MockContext()
 
@@ -1503,17 +1515,17 @@ async def test_kernel_register_toolkit_preserves_each_tool_binding():
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_preserves_file_path_when_input_is_large():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, FileSummaryDummyToolkit)
+    kernel.tool_manager.register_toolkit(agent, FileSummaryDummyToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1532,17 +1544,17 @@ async def test_kernel_register_toolkit_preserves_file_path_when_input_is_large()
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_retries_browser_action_error_before_last_attempt():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, SoftFailBrowserToolkit)
+    kernel.tool_manager.register_toolkit(agent, SoftFailBrowserToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1559,17 +1571,17 @@ async def test_kernel_register_toolkit_retries_browser_action_error_before_last_
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_soft_fails_browser_action_error_on_last_attempt():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, SoftFailBrowserToolkit)
+    kernel.tool_manager.register_toolkit(agent, SoftFailBrowserToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1591,17 +1603,17 @@ async def test_kernel_register_toolkit_soft_fails_browser_action_error_on_last_a
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_soft_fails_browser_screenshot_on_last_attempt():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, HardFailBrowserToolkit)
+    kernel.tool_manager.register_toolkit(agent, HardFailBrowserToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1621,22 +1633,22 @@ async def test_kernel_register_toolkit_soft_fails_browser_screenshot_on_last_att
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_soft_fails_when_browser_boot_fails(monkeypatch):
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, WebToolkit)
+    kernel.tool_manager.register_toolkit(agent, WebToolkit)
     registered_tool = agent.tool.call_args_list[0][0][0]
 
     async def mock_get_browser(session_id, headless=None):
         raise RuntimeError("Chrome runtime is unavailable.")
 
-    monkeypatch.setattr(kernel, "get_browser", mock_get_browser)
+    monkeypatch.setattr(kernel.browser_manager, "get_browser", mock_get_browser)
 
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1657,17 +1669,17 @@ async def test_kernel_register_toolkit_soft_fails_when_browser_boot_fails(monkey
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_soft_fails_model_retry_on_last_attempt():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, RetryDummyToolkit)
+    kernel.tool_manager.register_toolkit(agent, RetryDummyToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
 
     class MockContext:
         def __init__(self, d):
@@ -1685,16 +1697,16 @@ async def test_kernel_register_toolkit_soft_fails_model_retry_on_last_attempt():
 
 @pytest.mark.asyncio
 async def test_kernel_register_toolkit_wraps_binary_image_with_json_payload():
-    kernel = FerrymanKernel(settings=create_test_settings())
+    kernel = FerrymanRuntime(settings=create_test_settings())
     agent = Agent('test')
 
     import unittest.mock
     agent.tool = unittest.mock.MagicMock()
 
-    kernel._register_toolkit(agent, ImageDummyToolkit)
+    kernel.tool_manager.register_toolkit(agent, ImageDummyToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
-    deps = AgentDeps(kernel=kernel, session_id="sess", emit_event_cb=AsyncMock())
+    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=AsyncMock())
 
     class MockContext:
         def __init__(self, d):

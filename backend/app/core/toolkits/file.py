@@ -5,10 +5,11 @@ from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
 from app.core.deps import AgentDeps
+from app.core.toolkits.base import Toolkit
 
 logger = logging.getLogger(__name__)
 
-class FileToolkit:
+class FileToolkit(Toolkit):
     """Read and write files for the current session.
 
     Writes stay inside the session workspace. Reads may also access the current
@@ -37,12 +38,31 @@ class FileToolkit:
         return file_path or "."
 
     @staticmethod
-    def resolve_session_path(kernel, session_id: str, raw_path: str) -> Path:
+    def _get_workspace(tool_context, session_id: str) -> Path:
+        workspace_dir = getattr(tool_context, "workspace_dir", None)
+        if workspace_dir is not None:
+            return Path(workspace_dir).resolve()
+        if hasattr(tool_context, "get_session_workspace"):
+            try:
+                return tool_context.get_session_workspace(session_id).resolve()
+            except TypeError:
+                return tool_context.get_session_workspace().resolve()
+        raise AttributeError("tool_context must expose workspace_dir or get_session_workspace().")
+
+    @staticmethod
+    def _get_skills(tool_context):
+        skill_manager = getattr(tool_context, "skill_manager", None)
+        if skill_manager is not None:
+            return skill_manager.skills
+        return tool_context.skills
+
+    @staticmethod
+    def resolve_session_path(tool_context, session_id: str, raw_path: str) -> Path:
         """Resolve a path inside the current session workspace.
 
         Raises ValueError if the path escapes the workspace.
         """
-        workspace_dir = kernel.get_session_workspace(session_id).resolve()
+        workspace_dir = FileToolkit._get_workspace(tool_context, session_id)
         normalized = FileToolkit._normalize_workspace_path(raw_path)
         candidate = (workspace_dir / normalized).resolve()
 
@@ -54,9 +74,9 @@ class FileToolkit:
         return candidate
 
     @staticmethod
-    def _resolve_current_skill_resource_path(kernel, skill_name: str, raw_path: str) -> Path:
+    def _resolve_current_skill_resource_path(tool_context, skill_name: str, raw_path: str) -> Path:
         """Resolve a read-only path inside the current skill directory."""
-        skill = kernel.skills.get(skill_name)
+        skill = FileToolkit._get_skills(tool_context).get(skill_name)
         if not skill:
             raise ValueError(f"Current skill '{skill_name}' is not registered.")
 
@@ -73,14 +93,14 @@ class FileToolkit:
         return candidate
 
     @staticmethod
-    def resolve_read_path(kernel, session_id: str, raw_path: str, skill_name: str | None = None) -> Path:
+    def resolve_read_path(tool_context, session_id: str, raw_path: str, skill_name: str | None = None) -> Path:
         """Resolve a readable path for agent tools.
 
         Prefers the session workspace. During skill execution, falls back to the
         current skill's bundled resources for read-only access.
         """
         try:
-            workspace_path = FileToolkit.resolve_session_path(kernel, session_id, raw_path)
+            workspace_path = FileToolkit.resolve_session_path(tool_context, session_id, raw_path)
         except ValueError:
             logger.debug({
                 "message": {
@@ -91,7 +111,7 @@ class FileToolkit:
                 }
             })
             if skill_name:
-                skill_path = FileToolkit._resolve_current_skill_resource_path(kernel, skill_name, raw_path)
+                skill_path = FileToolkit._resolve_current_skill_resource_path(tool_context, skill_name, raw_path)
                 logger.debug({
                     "message": {
                         "event": "file_read_skill_fallback",
@@ -108,7 +128,7 @@ class FileToolkit:
             return workspace_path
 
         try:
-            skill_path = FileToolkit._resolve_current_skill_resource_path(kernel, skill_name, raw_path)
+            skill_path = FileToolkit._resolve_current_skill_resource_path(tool_context, skill_name, raw_path)
         except ValueError:
             logger.debug({
                 "message": {
@@ -143,7 +163,7 @@ class FileToolkit:
         """
         try:
             p = FileToolkit.resolve_read_path(
-                ctx.deps.kernel,
+                ctx.deps,
                 ctx.deps.session_id,
                 file_path,
                 ctx.deps.skill_name,
@@ -163,7 +183,7 @@ class FileToolkit:
         """
         normalized = FileToolkit._normalize_workspace_path(file_path)
         try:
-            full_path = FileToolkit.resolve_session_path(ctx.deps.kernel, ctx.deps.session_id, file_path)
+            full_path = FileToolkit.resolve_session_path(ctx.deps, ctx.deps.session_id, file_path)
         except ValueError:
             FileToolkit._raise_path_retry(file_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +198,7 @@ class FileToolkit:
         """
         try:
             p = FileToolkit.resolve_read_path(
-                ctx.deps.kernel,
+                ctx.deps,
                 ctx.deps.session_id,
                 directory,
                 ctx.deps.skill_name,

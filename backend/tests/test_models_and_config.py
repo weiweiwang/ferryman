@@ -215,6 +215,7 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
     """Configured providers should be fetched online and custom models remain selectable."""
     config.set("llm.openai", {"api_key": "sk-openai"}, category="llm")
     config.set("llm.qwen", {"api_key": "sk-qwen"}, category="llm")
+    config.set("llm.deepseek", {"api_key": "sk-deepseek"}, category="llm")
     config.set("llm.kimi", {"api_key": "sk-kimi"}, category="llm")
     config.set("llm.doubao", {"api_key": "sk-doubao"}, category="llm")
     config.set(
@@ -231,6 +232,8 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
             return ["gpt-4o", "text-embedding-3-large"]
         if provider == "qwen":
             raise ModelListEndpointUnavailable("HTTP 404")
+        if provider == "deepseek":
+            return ["deepseek-v4-pro", "deepseek-v4-flash"]
         if provider == "kimi":
             return ["kimi-k2.5", "kimi-k2-thinking"]
         if provider == "doubao":
@@ -247,8 +250,10 @@ def test_available_models_include_qwen_and_dynamic_custom_model():
     assert "gemini" not in models
     assert models["openai"] == ["gpt-4o", "text-embedding-3-large"]
     assert "qwen" not in models
+    assert "deepseek" in models
     assert "kimi" in models
     assert "doubao" in models
+    assert models["deepseek"] == ["deepseek-v4-pro", "deepseek-v4-flash"]
     assert "custom" in models
     assert models["kimi"] == ["kimi-k2.5", "kimi-k2-thinking"]
     assert models["doubao"] == ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215"]
@@ -464,6 +469,10 @@ def test_fetch_provider_models_routes_to_provider_specific_fetchers(monkeypatch)
                     "gpt-5.4-nano-2026-03-17",
                     "gpt-5.4-audio-preview-2026-03-17",
                     "kimi-k2.5",
+                    "deepseek-v4-pro",
+                    "deepseek-v4-flash",
+                    "deepseek-r1-distill-qwen-32b",
+                    "deepseek-embedding",
                     "moonshot-v1-8k-vision-preview",
                     "doubao-seed-2-0-pro-260215",
                     "doubao-seed-1-6-251015",
@@ -491,6 +500,12 @@ def test_fetch_provider_models_routes_to_provider_specific_fetchers(monkeypatch)
         "https://api.openai.com/v1",
         "openai_compatible",
     ) == ["gpt-5.4-mini-2026-03-17", "gpt-5.4-nano-2026-03-17"]
+    assert config._fetch_provider_models(
+        "deepseek",
+        "sk-ds",
+        "https://api.deepseek.com",
+        "openai_compatible",
+    ) == ["deepseek-v4-pro", "deepseek-v4-flash"]
     assert config._fetch_provider_models(
         "kimi",
         "sk-k",
@@ -699,6 +714,25 @@ def test_filter_kimi_models_keeps_latest_three_supported_chat_models():
         "kimi-k2.6",
         "kimi-k2.5",
         "kimi-k2-thinking",
+    ]
+
+
+def test_filter_deepseek_models_prioritizes_current_chat_models():
+    filtered = config._filter_deepseek_models([
+        "deepseek-reasoner",
+        "deepseek-v4-flash",
+        "deepseek-embedding",
+        "deepseek-v4-pro",
+        "qwen-plus",
+        "deepseek-chat",
+        "deepseek-r1-distill-qwen-32b",
+    ])
+
+    assert filtered == [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-chat",
+        "deepseek-reasoner",
     ]
 
 

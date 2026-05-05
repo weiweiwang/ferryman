@@ -1,10 +1,12 @@
-from datetime import datetime, timezone
+import logging
+from datetime import date, datetime, timezone
 from enum import IntEnum
 from pathlib import Path
-from typing import Optional, Any, Dict, List, Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+logger = logging.getLogger(__name__)
 
 class TaskStatus:
     PENDING = "pending"
@@ -20,17 +22,17 @@ class SkillModel(BaseModel):
     sop_content: Optional[str] = None
     version: str = "0.1.0"
     author: str = "Unknown"
-    created: Optional[str] = None
-    updated: Optional[str] = None
+    created: Optional[date] = None
+    updated: Optional[date] = None
 
 class MCPToolModel(BaseModel):
     name: str
     description: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, object]
     server_name: str
 
 
-def _normalize_utc_string(value: Any) -> Optional[str]:
+def _normalize_utc_string(value: object) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, str):
@@ -59,7 +61,7 @@ class SessionCompactionMemory(BaseModel):
 
     @field_validator("summary", mode="before")
     @classmethod
-    def normalize_summary(cls, value: Any) -> Optional[str]:
+    def normalize_summary(cls, value: object) -> Optional[str]:
         if not isinstance(value, str):
             return None
         summary = value.strip()
@@ -67,37 +69,38 @@ class SessionCompactionMemory(BaseModel):
 
     @field_validator("cutoff_created_at", "updated_at", "guard_until", mode="before")
     @classmethod
-    def normalize_utc_fields(cls, value: Any) -> Optional[str]:
+    def normalize_utc_fields(cls, value: object) -> Optional[str]:
         try:
             return _normalize_utc_string(value)
-        except Exception:
+        except Exception as e:
+            logger.exception(f"failed to parse utc timestamp with exception:{e}")
             return None
 
 
 class SessionMemory(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    schema_version: Literal[1] = 1
+    schema_version: int = 1
     compaction: SessionCompactionMemory = Field(default_factory=SessionCompactionMemory)
 
     @field_validator("schema_version", mode="before")
     @classmethod
-    def normalize_schema_version(cls, value: Any) -> Literal[1]:
+    def normalize_schema_version(cls, value: object) -> int:
         return 1
 
     @field_validator("compaction", mode="before")
     @classmethod
-    def normalize_compaction(cls, value: Any) -> Dict[str, Any]:
+    def normalize_compaction(cls, value: object) -> dict[str, object]:
         return value if isinstance(value, dict) else {}
 
-    def as_storage_dict(self) -> Dict[str, Any]:
+    def as_storage_dict(self) -> dict[str, object]:
         return self.model_dump(mode="json", exclude_none=True)
 
 class SessionModel(BaseModel):
     id: str
     title: str
-    memory: Optional[Dict[str, Any]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    memory: Optional[dict[str, object]] = None
+    metadata: dict[str, object] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -108,8 +111,8 @@ class MessageModel(BaseModel):
     content: str
     type: str
     token_estimate: int = 0
-    parts: List[Dict[str, Any]] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    parts: list[dict[str, object]] = Field(default_factory=list)
+    metadata: dict[str, object] = Field(default_factory=dict)
     created_at: datetime
 
 class TaskModel(BaseModel):
@@ -117,8 +120,8 @@ class TaskModel(BaseModel):
     session_id: str
     title: str
     status: str = TaskStatus.PENDING
-    args: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    args: dict[str, object] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
     parent_id: Optional[str] = None
     project_id: Optional[str] = None
     created_at: datetime
@@ -129,13 +132,13 @@ class ScheduleModel(BaseModel):
     id: str
     name: str
     cron_expression: str
-    args: Dict[str, Any] = Field(default_factory=dict)
+    args: dict[str, object] = Field(default_factory=dict)
     timezone: str = "UTC"
     enabled: bool = True
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
     total_run_count: int = 0
-    last_run_result: Optional[Dict[str, Any]] = None
+    last_run_result: Optional[dict[str, object]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -149,7 +152,7 @@ class Usage(BaseModel):
 class AgentRunResult(BaseModel):
     status: Literal["success", "error"]
     session_id: str
-    response: Optional[Any] = None
+    response: object | None = None
     message: Optional[str] = None
     usage: Usage = Field(default_factory=Usage)
 

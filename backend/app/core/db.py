@@ -137,11 +137,8 @@ def migrate_datetime_columns_to_explicit_utc_strings() -> None:
                         parsed = parse_utc_datetime(raw_value)
                     except Exception as exc:
                         logger.warning(
-                            "Skipping invalid datetime during UTC normalization: %s.%s=%r (%s)",
-                            table_name,
-                            column_name,
-                            raw_value,
-                            exc,
+                            f"Skipping invalid datetime during UTC normalization: "
+                            f"{table_name}.{column_name}={raw_value!r} ({exc})"
                         )
                         continue
 

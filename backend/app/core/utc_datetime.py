@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
 from sqlalchemy.types import String, TypeDecorator
 
@@ -16,7 +15,7 @@ def format_utc_datetime(value: datetime) -> str:
     return ensure_utc_datetime(value).isoformat().replace("+00:00", "Z")
 
 
-def parse_utc_datetime(value: Any) -> datetime | None:
+def parse_utc_datetime(value: object) -> datetime | None:
     if value is None:
         return None
 
@@ -42,10 +41,10 @@ class UTCDateTime(TypeDecorator):
     impl = String
     cache_ok = True
 
-    def process_bind_param(self, value: Any, dialect) -> str | None:
+    def process_bind_param(self, value: datetime | None, dialect: object) -> str | None:
         if value is None:
             return None
         return format_utc_datetime(value)
 
-    def process_result_value(self, value: Any, dialect) -> datetime | None:
+    def process_result_value(self, value: object, dialect: object) -> datetime | None:
         return parse_utc_datetime(value)

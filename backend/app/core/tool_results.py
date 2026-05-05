@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai.messages import BinaryImage, ToolReturn
@@ -25,27 +25,15 @@ class ToolResultEnvelope(BaseModel):
     tool_name: str
     status: Literal["success", "error"]
     summary: str
-    data: Any = None
+    data: object = None
     error: ToolErrorPayload | None = None
 
 
-def _json_default(value: Any) -> Any:
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, Path):
-        return str(value)
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, set):
-        return sorted(value)
-    return str(value)
-
-
-def _normalize_data(value: Any) -> Any:
+def _normalize_data(value: object) -> object:
     if hasattr(value, "model_dump"):
         value = value.model_dump()
 
-    if isinstance(value, str):
+    if value is None or isinstance(value, (str, int, float, bool)):
         return value
 
     if isinstance(value, Path):
@@ -60,14 +48,14 @@ def _normalize_data(value: Any) -> Any:
     if isinstance(value, (list, tuple, set)):
         return [_normalize_data(item) for item in value]
 
-    return value
+    return str(value)
 
 
-def is_tool_result_envelope(value: Any) -> bool:
+def is_tool_result_envelope(value: object) -> bool:
     return isinstance(value, dict) and TOOL_RESULT_KEYS.issubset(value.keys())
 
 
-def _extract_embedded_error_message(value: Any) -> str | None:
+def _extract_embedded_error_message(value: object) -> str | None:
     if not isinstance(value, dict):
         return None
 
@@ -93,7 +81,7 @@ def _extract_embedded_error_message(value: Any) -> str | None:
     return None
 
 
-def _looks_like_embedded_error(value: Any) -> bool:
+def _looks_like_embedded_error(value: object) -> bool:
     if not isinstance(value, dict):
         return False
     if value.get("ok") is False or value.get("success") is False:
@@ -106,8 +94,8 @@ def build_tool_result_envelope(
     tool_name: str,
     *,
     status: str,
-    data: Any = None,
-    error: dict[str, Any] | None = None,
+    data: object = None,
+    error: dict[str, object] | None = None,
     summary: str | None = None,
 ) -> ToolResultEnvelope:
     return ToolResultEnvelope(
@@ -123,13 +111,13 @@ def build_tool_result_envelope(
     )
 
 
-def dump_tool_result_envelope(envelope: ToolResultEnvelope | dict[str, Any]) -> str:
+def dump_tool_result_envelope(envelope: ToolResultEnvelope | dict[str, object]) -> str:
     if isinstance(envelope, dict):
         envelope = ToolResultEnvelope.model_validate(envelope)
     return envelope.model_dump_json(ensure_ascii=False)
 
 
-def build_tool_success_result(tool_name: str, raw_result: Any) -> str | ToolReturn:
+def build_tool_success_result(tool_name: str, raw_result: object) -> str | ToolReturn:
     if isinstance(raw_result, ToolReturn):
         normalized = _normalize_data(raw_result.return_value)
         envelope = (
@@ -175,7 +163,7 @@ def build_tool_error_result(
     error_type: str,
     retryable: bool,
     summary: str | None = None,
-    data: Any = None,
+    data: object = None,
 ) -> str:
     envelope = build_tool_result_envelope(
         tool_name,
@@ -191,7 +179,7 @@ def build_tool_error_result(
     return dump_tool_result_envelope(envelope)
 
 
-def _build_normalized_envelope(tool_name: str, normalized: Any) -> ToolResultEnvelope:
+def _build_normalized_envelope(tool_name: str, normalized: object) -> ToolResultEnvelope:
     if _looks_like_embedded_error(normalized):
         return build_tool_result_envelope(
             tool_name,

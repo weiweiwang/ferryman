@@ -1,18 +1,36 @@
 import logging
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import UsageLimits
 
-from app.core.deps import AgentDeps
-from app.core.utils import load_skill_from_directory
+from app.core.deps import (
+    AgentDeps,
+    get_agent_manager,
+    get_prompt_builder,
+    get_setting_value,
+    get_skill_manager,
+    get_user_skills_dir,
+    get_workspace,
+)
+from app.core.toolkits.base import Toolkit
 
 logger = logging.getLogger(__name__)
 
 
-class SkillToolkit:
+def _coerce_request_limit(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 100
+
+
+class SkillToolkit(Toolkit):
     """Delegate work to installed skills and publish draft skills."""
 
     @staticmethod
@@ -31,28 +49,25 @@ class SkillToolkit:
         skill's output text. If the delegated skill run fails, returns a JSON
         failure payload instead of aborting the master run.
         """
-        kernel = ctx.deps.kernel
         session_id = ctx.deps.session_id
 
-        if skill_name not in kernel.skills:
+        skill_manager = get_skill_manager(ctx.deps)
+        agent_manager = get_agent_manager(ctx.deps)
+        prompt_builder = get_prompt_builder(ctx.deps)
+        if skill_name not in skill_manager.skills:
             raise ModelRetry(f"Skill '{skill_name}' not found.")
 
-        workspace = kernel.get_session_workspace(session_id)
+        workspace = get_workspace(ctx.deps)
 
         logger.info(f"Executing skill '{skill_name}' in {workspace}")
 
         try:
             # IMPORTANT: Pass ctx.usage to sub-agent so request/token accounting
             # and request budgeting are shared across the master agent and delegated skills.
-            skill_agent = kernel.build_skill_agent(skill_name)
-            request_limit = kernel.get_setting("system.llm.request_limit", 100)
-            augmented_instruction = kernel.build_runtime_augmented_instruction(instruction, session_id)
-            skill_deps = AgentDeps(
-                kernel=kernel,
-                session_id=session_id,
-                skill_name=skill_name,
-                emit_event_cb=ctx.deps.emit_event_cb,
-            )
+            skill_agent = agent_manager.build_skill_agent(skill_name)
+            request_limit = _coerce_request_limit(get_setting_value(ctx.deps, "system.llm.request_limit", 100))
+            augmented_instruction = prompt_builder.build_runtime_augmented_instruction(instruction, session_id)
+            skill_deps = replace(ctx.deps, skill_name=skill_name)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug({
                     "message": {
@@ -119,8 +134,7 @@ class SkillToolkit:
         `SKILL.md`. Copies the directory into the user skills folder and returns
         a JSON result string.
         """
-        kernel = ctx.deps.kernel
-        workspace_dir = kernel.get_session_workspace(ctx.deps.session_id).resolve()
+        workspace_dir = get_workspace(ctx.deps).resolve()
         normalized = draft_path.strip()
         if not normalized:
             raise RuntimeError("draft_path cannot be empty.")
@@ -136,23 +150,24 @@ class SkillToolkit:
         if not source_path.is_dir():
             raise RuntimeError(f"Draft path is not a directory: {draft_path}")
 
-        skill = load_skill_from_directory(source_path)
+        skill_manager = get_skill_manager(ctx.deps)
+        skill = skill_manager.load_skill_from_directory(source_path)
         if not skill:
             raise RuntimeError(f"Draft directory is not a valid skill: {draft_path}")
 
-        destination_dir = kernel._settings.user_skills_dir.resolve()
+        destination_dir = get_user_skills_dir(ctx.deps).resolve()
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination_path = destination_dir / skill.name
         if destination_path.exists():
             raise RuntimeError(f"Skill '{skill.name}' already exists in user skills.")
 
         shutil.copytree(str(source_path), str(destination_path))
-        kernel.scan_skills()
+        skill_manager.scan_skills()
 
         return {
             "ok": True,
             "skill_name": skill.name,
             "source_path": str(source_path),
             "destination_path": str(destination_path),
-            "registered": skill.name in kernel.skills,
+            "registered": skill.name in skill_manager.skills,
         }

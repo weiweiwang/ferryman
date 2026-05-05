@@ -1,8 +1,13 @@
+from __future__ import annotations
 
-# Ferryman System Prompts Template
-# All fundamental SOPs and Guardrails live here.
+import platform
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
 
-# Shared snippets to avoid redundancy
+from app.core.config import Settings
+from app.core.skill_manager import SkillManager
+
 GUARDRAILS_SNIPPET = """
 ## Safety
 - No Hallucinations: If a tool fails, report it. Never fake output.
@@ -53,7 +58,6 @@ Before taking ANY action, scan the available skills list. Follow this hierarchy 
 - Never claim a file/report was saved unless you actually created it during this run using a tool that writes that file.
 """
 
-# Specialized Prompt for Skill Execution
 SKILL_SYSTEM_PROMPT = """
 You are executing the specialized Skill: {skill_name}.
 
@@ -111,19 +115,19 @@ The latest real goal the user wants to accomplish.
 Important things that have already been finished.
 
 ## Current State
-The current known state of the conversation, workspace, outputs, or progress.
+Current progress and latest completed state only. Avoid repeating paths or operational details listed below unless they affect current status.
 
 ## Unresolved Issues
-Problems, blockers, failures, or missing information that are not resolved yet.
+Current blockers or risks for the next turn. Mark transient run-state errors as previous-run observations, not permanent facts.
 
 ## Pending Work
 Work that still needs to be done, including unresolved user requests and next steps, even if there is no blocker.
 
 ## Exact Identifiers
-Important exact values that must be preserved literally, such as file paths, URLs, config keys, IDs, ports, timestamps, model names, and error messages.
+Task identifiers, local paths, filenames, case names, exclusion lists, skill names, and exact error messages needed for continuity.
 
 ## User-Provided Operational Access Details
-User-provided exact values needed for future tool calls, API access, browser login, or delivery, such as endpoints, keys, accounts, emails, and credential constraints. If none are present, write "None."
+User-provided exact values needed for future tool calls, API access, browser login, or delivery, such as endpoints, keys, accounts, emails, and credential constraints. If none, write "None."
 
 ## User Preferences and Constraints
 Important user-stated preferences, rules, restrictions, or style requirements that should continue to be followed.
@@ -155,3 +159,48 @@ Reflect newly completed work, newly introduced blockers, and newly unresolved as
 
 Produce the first compaction summary.
 """
+
+
+class PromptBuilder:
+    """Build master, skill, and per-run runtime prompts."""
+
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        skill_manager: SkillManager,
+        get_session_workspace: Callable[[str], Path],
+    ) -> None:
+        self._settings = settings
+        self._skill_manager = skill_manager
+        self._get_session_workspace = get_session_workspace
+
+    def build_system_prompt(self, session_id: str) -> str:
+        self._get_session_workspace(session_id)
+        return MASTER_SYSTEM_PROMPT.format(
+            skill_list=self._skill_manager.get_skill_index_text(),
+            session_id=session_id,
+        )
+
+    def build_runtime_augmented_instruction(self, instruction: str, session_id: str) -> str:
+        now = datetime.now().astimezone()
+        timezone_name = now.tzname() or str(now.tzinfo) or "Unknown"
+        current_date = now.date().isoformat()
+        workspace_dir = self._get_session_workspace(session_id)
+        return (
+            "Runtime Context:\n"
+            f"- Host OS: {platform.system()}\n"
+            f"- Root Dir: {self._settings.root_dir}\n"
+            f"- Session Workspace: {workspace_dir}\n"
+            f"- Current Date: {current_date}\n"
+            f"- Time Zone: {timezone_name}\n\n"
+            "Current Request:\n"
+            f"{instruction}"
+        )
+
+    def build_skill_system_prompt(self, skill_name: str) -> str:
+        return SKILL_SYSTEM_PROMPT.format(
+            skill_name=skill_name,
+            sop=self._skill_manager.read_skill_sop(skill_name),
+            skill_list=self._skill_manager.get_skill_index_text(),
+        )

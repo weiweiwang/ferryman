@@ -9,17 +9,23 @@ from pydantic_ai.exceptions import ModelRetry
 from sqlalchemy import text
 from sqlmodel import select
 
-import app.core.kernel as kernel_module
-from app.core.kernel import FerrymanKernel
+import app.core.task_manager as task_manager_module
+from app.core.task_manager import TaskManager
 from app.core.toolkits.task import TaskToolkit
 from app.models.database import Schedule, Task
 
 
-def make_ctx(*, kernel=None, session_id: str = "session-1"):
-    return SimpleNamespace(deps=SimpleNamespace(kernel=kernel, session_id=session_id))
+def make_ctx(*, task_manager=None, schedule_manager=None, session_id: str = "session-1"):
+    return SimpleNamespace(
+        deps=SimpleNamespace(
+            task_manager=task_manager,
+            schedule_manager=schedule_manager,
+            session_id=session_id,
+        )
+    )
 
 
-class StubKernel:
+class StubTaskManager:
     def __init__(self) -> None:
         self.persist_task_calls: list[dict] = []
         self.persist_task_update_calls: list[dict] = []
@@ -43,8 +49,8 @@ class StubKernel:
 
 @pytest.mark.asyncio
 async def test_create_task_packages_instruction_metadata_and_parent_id():
-    kernel = StubKernel()
-    ctx = make_ctx(kernel=kernel, session_id="session-alpha")
+    task_manager = StubTaskManager()
+    ctx = make_ctx(task_manager=task_manager, session_id="session-alpha")
 
     result = await TaskToolkit.create_task(
         ctx,
@@ -55,7 +61,7 @@ async def test_create_task_packages_instruction_metadata_and_parent_id():
     )
 
     assert result == "Task created/verified: ID=task-123, Title='Monitor SKU-123'"
-    assert kernel.persist_task_calls == [{
+    assert task_manager.persist_task_calls == [{
         "session_id": "session-alpha",
         "title": "Monitor SKU-123",
         "parent_id": "parent-1",
@@ -67,9 +73,24 @@ async def test_create_task_packages_instruction_metadata_and_parent_id():
 
 
 @pytest.mark.asyncio
+async def test_create_task_uses_task_manager_when_provided():
+    task_manager = StubTaskManager()
+    ctx = make_ctx(task_manager=task_manager, session_id="session-manager")
+
+    result = await TaskToolkit.create_task(
+        ctx,
+        title="Manager task",
+        instruction="Use the injected manager.",
+    )
+
+    assert "Task created/verified" in result
+    assert task_manager.persist_task_calls[0]["session_id"] == "session-manager"
+
+
+@pytest.mark.asyncio
 async def test_create_task_defaults_metadata_to_empty_payload():
-    kernel = StubKernel()
-    ctx = make_ctx(kernel=kernel)
+    task_manager = StubTaskManager()
+    ctx = make_ctx(task_manager=task_manager)
 
     await TaskToolkit.create_task(
         ctx,
@@ -77,7 +98,7 @@ async def test_create_task_defaults_metadata_to_empty_payload():
         instruction="Capture the current price sheet and summarize major deltas.",
     )
 
-    assert kernel.persist_task_calls[0]["args"]["payload"] == {}
+    assert task_manager.persist_task_calls[0]["args"]["payload"] == {}
 
 
 @pytest.mark.asyncio
@@ -89,8 +110,8 @@ async def test_create_task_defaults_metadata_to_empty_payload():
     ],
 )
 async def test_create_task_rejects_blank_required_fields(title, instruction, expected_message):
-    kernel = StubKernel()
-    ctx = make_ctx(kernel=kernel)
+    task_manager = StubTaskManager()
+    ctx = make_ctx(task_manager=task_manager)
 
     with pytest.raises(ModelRetry, match=expected_message):
         await TaskToolkit.create_task(ctx, title=title, instruction=instruction)
@@ -98,13 +119,13 @@ async def test_create_task_rejects_blank_required_fields(title, instruction, exp
 
 @pytest.mark.asyncio
 async def test_update_task_forwards_status_and_allows_clearing_progress_note():
-    kernel = StubKernel()
-    ctx = make_ctx(kernel=kernel)
+    task_manager = StubTaskManager()
+    ctx = make_ctx(task_manager=task_manager)
 
     result = await TaskToolkit.update_task(ctx, task_id="task-77", status="RUNNING", progress_note="")
 
     assert result == "Task task-77 updated to running"
-    assert kernel.persist_task_update_calls == [{
+    assert task_manager.persist_task_update_calls == [{
         "task_id": "task-77",
         "status": "running",
         "metadata": {"progress_note": ""},
@@ -113,8 +134,8 @@ async def test_update_task_forwards_status_and_allows_clearing_progress_note():
 
 @pytest.mark.asyncio
 async def test_update_task_rejects_invalid_status():
-    kernel = StubKernel()
-    ctx = make_ctx(kernel=kernel)
+    task_manager = StubTaskManager()
+    ctx = make_ctx(task_manager=task_manager)
 
     with pytest.raises(ModelRetry, match="status must be one of:"):
         await TaskToolkit.update_task(ctx, task_id="task-77", status="queued")
@@ -201,12 +222,11 @@ def test_kernel_persist_task_update_writes_utc_timestamps(session, monkeypatch):
                 return datetime(2026, 4, 20, 2, 0, 0, tzinfo=timezone.utc)
             return datetime(2026, 4, 20, 10, 0, 0)
 
-    monkeypatch.setattr(kernel_module, "datetime", FakeDateTime)
+    monkeypatch.setattr(task_manager_module, "datetime", FakeDateTime)
 
-    kernel = FerrymanKernel.__new__(FerrymanKernel)
-    kernel.tasks = {}
+    task_manager = TaskManager()
 
-    kernel.persist_task_update(
+    task_manager.persist_task_update(
         "task-utc-update",
         status="success",
         metadata={"progress_note": "done"},
@@ -253,10 +273,10 @@ async def test_create_schedule_persists_instruction_and_leaves_runtime_fields_em
 @pytest.mark.asyncio
 async def test_create_schedule_syncs_schedule_manager_when_available(session):
     sync_schedule = AsyncMock()
-    kernel = SimpleNamespace(schedule_manager=SimpleNamespace(sync_schedule=sync_schedule))
+    schedule_manager = SimpleNamespace(sync_schedule=sync_schedule)
 
     result = await TaskToolkit.create_schedule(
-        make_ctx(kernel=kernel),
+        make_ctx(schedule_manager=schedule_manager),
         name="Hourly check",
         cron_expression="0 * * * *",
         instruction="Run the hourly check.",

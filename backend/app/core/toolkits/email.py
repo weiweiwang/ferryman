@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
-from app.core.deps import AgentDeps
+from app.core.deps import AgentDeps, get_resend_default_from, get_setting_value
+from app.core.toolkits.base import Toolkit
 from app.core.toolkits.file import FileToolkit
 
 MAX_EMAIL_BYTES = 40 * 1024 * 1024
+EmailParams = dict[str, str | list[str] | list[dict[str, str]]]
 
 
 class EmailAttachment(BaseModel):
@@ -22,7 +24,7 @@ class EmailAttachment(BaseModel):
     url: Optional[str] = None
 
 
-class EmailToolkit:
+class EmailToolkit(Toolkit):
     """Send transactional emails through the configured Resend account."""
 
     @staticmethod
@@ -47,7 +49,7 @@ class EmailToolkit:
 
     @staticmethod
     def _resolve_api_key(ctx: RunContext[AgentDeps]) -> str:
-        api_key = ctx.deps.kernel.get_setting("email.resend.api_key")
+        api_key = get_setting_value(ctx.deps, "email.resend.api_key")
         if isinstance(api_key, str) and api_key.strip():
             return api_key.strip()
         raise ModelRetry("Resend API Key is not configured.")
@@ -56,17 +58,17 @@ class EmailToolkit:
     def _resolve_from_email(ctx: RunContext[AgentDeps], from_email: str | None) -> str:
         if from_email and from_email.strip():
             return from_email.strip()
-        configured = ctx.deps.kernel.get_setting("email.resend.default_from")
+        configured = get_setting_value(ctx.deps, "email.resend.default_from")
         if isinstance(configured, str) and configured.strip():
             return configured.strip()
-        return ctx.deps.kernel._settings.resend_default_from
+        return get_resend_default_from(ctx.deps)
 
     @staticmethod
     def _build_local_attachment(ctx: RunContext[AgentDeps], attachment: EmailAttachment) -> dict[str, str]:
         raw_path = EmailToolkit._require_non_empty("attachment.path", attachment.path)
         try:
             resolved_path = FileToolkit.resolve_read_path(
-                ctx.deps.kernel,
+                ctx.deps,
                 ctx.deps.session_id,
                 raw_path,
                 ctx.deps.skill_name,
@@ -112,24 +114,39 @@ class EmailToolkit:
         return payload
 
     @staticmethod
-    def _estimate_payload_size(params: dict[str, Any]) -> int:
+    def _estimate_payload_size(params: EmailParams) -> int:
         total = 0
         for key in ("html", "text", "subject"):
             value = params.get(key)
             if isinstance(value, str):
                 total += len(value.encode("utf-8"))
-        for attachment in params.get("attachments", []) or []:
-            content = attachment.get("content")
-            if isinstance(content, str):
-                total += len(content.encode("ascii"))
+        attachments = params.get("attachments")
+        if isinstance(attachments, list):
+            for attachment in attachments:
+                if isinstance(attachment, dict):
+                    content = attachment.get("content")
+                    if isinstance(content, str):
+                        total += len(content.encode("ascii"))
         return total
 
     @staticmethod
-    def _send_with_resend(api_key: str, params: dict[str, Any]) -> Any:
+    def _send_with_resend(api_key: str, params: EmailParams) -> object:
         import resend
 
         resend.api_key = api_key
         return resend.Emails.send(params)
+
+    @staticmethod
+    def _normalize_provider_result(result: object) -> object:
+        if hasattr(result, "model_dump"):
+            result = result.model_dump()
+        if result is None or isinstance(result, (str, int, float, bool)):
+            return result
+        if isinstance(result, dict):
+            return {str(key): EmailToolkit._normalize_provider_result(value) for key, value in result.items()}
+        if isinstance(result, (list, tuple, set)):
+            return [EmailToolkit._normalize_provider_result(value) for value in result]
+        return str(result)
 
     @staticmethod
     async def send_email(
@@ -143,7 +160,7 @@ class EmailToolkit:
         bcc: Optional[list[str]] = None,
         reply_to: Optional[list[str]] = None,
         attachments: Optional[list[EmailAttachment]] = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Send an email with optional multiple attachments through Resend.
 
         Local attachment paths are resolved from the current session workspace
@@ -160,7 +177,7 @@ class EmailToolkit:
         if not normalized_html and not normalized_text:
             raise ModelRetry("Either html or text must be provided.")
 
-        params: dict[str, Any] = {
+        params: EmailParams = {
             "from": EmailToolkit._resolve_from_email(ctx, from_email),
             "to": normalized_to,
             "subject": normalized_subject,
@@ -194,5 +211,5 @@ class EmailToolkit:
             "to": normalized_to,
             "subject": normalized_subject,
             "attachment_count": len(attachment_payload),
-            "result": result,
+            "result": EmailToolkit._normalize_provider_result(result),
         }

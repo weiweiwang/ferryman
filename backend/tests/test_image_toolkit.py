@@ -6,15 +6,15 @@ import pytest
 from pydantic_ai.exceptions import ModelRetry
 
 from app.core.config import Settings
-from app.core.deps import AgentDeps
-from app.core.kernel import FerrymanKernel, _summarize_tool_input_value
+from app.core.runtime import FerrymanRuntime
 from app.core.toolkits.image import ImageToolkit
+from app.core.tool_manager import summarize_tool_input_value
 
 
 def make_context(tmp_path: Path, session_id: str = "image-session"):
     settings = Settings(root_dir=tmp_path / "ferryman")
-    kernel = FerrymanKernel(settings=settings)
-    deps = AgentDeps(kernel=kernel, session_id=session_id)
+    runtime = FerrymanRuntime(settings=settings)
+    deps = runtime.create_agent_deps(session_id=session_id)
     return SimpleNamespace(deps=deps)
 
 
@@ -89,7 +89,7 @@ async def test_generate_image_uses_azure_client_for_azure_base_url(monkeypatch, 
     saved_path = Path(result["images"][0]["path"])
     assert saved_path.name.startswith("image-")
     assert saved_path.read_bytes() == b"fake-image-bytes"
-    assert saved_path.is_relative_to(ctx.deps.kernel.get_session_workspace(ctx.deps.session_id))
+    assert saved_path.is_relative_to(ctx.deps.workspace_dir)
 
 
 @pytest.mark.asyncio
@@ -149,12 +149,12 @@ async def test_generate_image_rejects_output_path_escape(tmp_path):
 
 
 def test_sensitive_image_tool_inputs_are_redacted_from_activity_summary():
-    assert _summarize_tool_input_value("api_key", "super-secret") == {"_summary": "redacted"}
-    assert _summarize_tool_input_value("base_url", "https://example.azure.com/") == {
+    assert summarize_tool_input_value("api_key", "super-secret") == {"_summary": "redacted"}
+    assert summarize_tool_input_value("base_url", "https://example.azure.com/") == {
         "_summary": "redacted"
     }
-    assert _summarize_tool_input_value("access_token", "tok") == {"_summary": "redacted"}
-    assert _summarize_tool_input_value("prompt", "hello") == {"_summary": "omitted", "length": 5}
+    assert summarize_tool_input_value("access_token", "tok") == {"_summary": "redacted"}
+    assert summarize_tool_input_value("prompt", "hello") == {"_summary": "omitted", "length": 5}
 
 
 def test_full_azure_generation_url_is_reduced_to_resource_root(monkeypatch):

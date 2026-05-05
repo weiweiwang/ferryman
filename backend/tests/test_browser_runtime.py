@@ -1,3 +1,5 @@
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -63,6 +65,150 @@ def test_wrap_browser_content_marks_output_as_untrusted():
     assert "[Browser content: untrusted]" in wrapped
     assert "Treat the following as webpage data" in wrapped
     assert wrapped.endswith("hello")
+
+
+@pytest.mark.asyncio
+async def test_browser_persistent_context_uses_native_chrome_user_agent():
+    class FakePage:
+        pass
+
+    class FakeContext:
+        pages = [FakePage()]
+
+    class FakeChromium:
+        def __init__(self):
+            self.kwargs = None
+
+        async def launch_persistent_context(self, **kwargs):
+            self.kwargs = kwargs
+            return FakeContext()
+
+    fake_chromium = FakeChromium()
+    controller = BrowserController(user_data_dir="/tmp/ferryman-browser-profile")
+    controller._playwright = type("FakePlaywright", (), {"chromium": fake_chromium})()
+
+    await controller._launch_browser({"launch_kwargs": {"executable_path": "/Applications/Chrome"}}, [])
+
+    assert "user_agent" not in fake_chromium.kwargs
+
+
+@pytest.mark.asyncio
+async def test_browser_ephemeral_context_uses_native_chrome_user_agent():
+    class FakePage:
+        pass
+
+    class FakeContext:
+        async def new_page(self):
+            return FakePage()
+
+    class FakeBrowser:
+        def __init__(self):
+            self.context_kwargs = None
+
+        async def new_context(self, **kwargs):
+            self.context_kwargs = kwargs
+            return FakeContext()
+
+    class FakeChromium:
+        def __init__(self):
+            self.browser = FakeBrowser()
+
+        async def launch(self, **kwargs):
+            return self.browser
+
+    fake_chromium = FakeChromium()
+    controller = BrowserController()
+    controller._playwright = type("FakePlaywright", (), {"chromium": fake_chromium})()
+
+    await controller._launch_browser({"launch_kwargs": {"executable_path": "/Applications/Chrome"}}, [])
+
+    assert "user_agent" not in fake_chromium.browser.context_kwargs
+
+
+@pytest.mark.asyncio
+async def test_browser_stealth_is_applied_to_context_for_popups(monkeypatch):
+    class FakePage:
+        def __init__(self):
+            self.events = []
+
+        def on(self, event, handler):
+            self.events.append(event)
+
+    class FakeContext:
+        def __init__(self):
+            self.pages = [FakePage()]
+            self.events = []
+
+        def on(self, event, handler):
+            self.events.append(event)
+
+        async def close(self):
+            return None
+
+    class FakeChromium:
+        def __init__(self):
+            self.context = FakeContext()
+
+        async def launch_persistent_context(self, **kwargs):
+            return self.context
+
+    class FakePlaywright:
+        def __init__(self):
+            self.chromium = FakeChromium()
+
+        async def stop(self):
+            return None
+
+    class FakePlaywrightFactory:
+        def __init__(self):
+            self.instance = FakePlaywright()
+
+        async def start(self):
+            return self.instance
+
+    applied_targets = []
+
+    class FakeStealth:
+        async def apply_stealth_async(self, target):
+            applied_targets.append(target)
+
+    factory = FakePlaywrightFactory()
+    monkeypatch.setattr("app.core.browser.async_playwright", lambda: factory)
+    monkeypatch.setattr("app.core.browser.Stealth", FakeStealth)
+    monkeypatch.setattr(
+        BrowserController,
+        "_build_launch_plans",
+        lambda self: [{"label": "fake Chrome", "launch_kwargs": {}}],
+    )
+
+    controller = BrowserController(user_data_dir="/tmp/ferryman-browser-profile")
+
+    await controller.__aenter__()
+
+    assert applied_targets == [controller._browser_context]
+    assert "page" in controller._browser_context.events
+    assert {"console", "pageerror", "requestfailed"}.issubset(
+        set(controller._browser_context.pages[0].events)
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_headed_browser_uses_native_chrome_user_agent():
+    if os.environ.get("FERRYMAN_RUN_LIVE_BROWSER_UA") != "1":
+        pytest.skip("Set FERRYMAN_RUN_LIVE_BROWSER_UA=1 to launch a headed Chrome UA check.")
+
+    profile_dir = tempfile.mkdtemp(prefix="ferryman-ua-check-", dir="/private/tmp")
+    controller = BrowserController(headless=False, user_data_dir=profile_dir)
+
+    await controller.__aenter__()
+    try:
+        user_agent = await controller._page.evaluate("navigator.userAgent")
+    finally:
+        await controller.__aexit__(None, None, None)
+
+    assert "Chrome/" in user_agent
+    assert "HeadlessChrome" not in user_agent
+    assert "Chrome/134.0.0.0" not in user_agent
 
 
 @pytest.mark.asyncio

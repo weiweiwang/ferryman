@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.events import EVENT_JOB_MISSED
@@ -29,7 +30,7 @@ def get_default_timezone_name() -> str:
             ZoneInfo(env_timezone)
             return env_timezone
         except ZoneInfoNotFoundError:
-            logger.warning("Ignoring invalid TZ environment variable: %s", env_timezone)
+            logger.warning(f"Ignoring invalid TZ environment variable: {env_timezone}")
 
     local_tz = datetime.now().astimezone().tzinfo
     for attr in ("key", "zone"):
@@ -43,7 +44,7 @@ def get_default_timezone_name() -> str:
             ZoneInfo(candidate)
             return candidate
         except ZoneInfoNotFoundError:
-            logger.warning("Falling back to UTC for unrecognized local timezone: %s", candidate)
+            logger.warning(f"Falling back to UTC for unrecognized local timezone: {candidate}")
 
     return DEFAULT_TIMEZONE
 
@@ -73,10 +74,10 @@ def build_cron_trigger(cron_expression: str, timezone_name: Optional[str] = None
 
 
 def compute_next_run_at(
-    cron_expression: str,
-    timezone_name: Optional[str] = None,
-    *,
-    now: Optional[datetime] = None,
+        cron_expression: str,
+        timezone_name: Optional[str] = None,
+        *,
+        now: Optional[datetime] = None,
 ) -> Optional[datetime]:
     current_time = now or datetime.now(timezone.utc)
     if current_time.tzinfo is None:
@@ -93,11 +94,11 @@ def compute_next_run_at(
     return next_fire_time.astimezone(timezone.utc)
 
 
-class FerrymanScheduler:
+class ScheduleManager:
     """Bridge persisted schedules in SQLite to in-process APScheduler jobs."""
 
-    def __init__(self, kernel, settings: Settings) -> None:
-        self.kernel = kernel
+    def __init__(self, runtime, settings: Settings) -> None:
+        self.runtime = runtime
         self.settings = settings
         self._scheduler: Optional[AsyncIOScheduler] = None
 
@@ -113,13 +114,11 @@ class FerrymanScheduler:
         scheduler.add_listener(self._handle_job_missed, EVENT_JOB_MISSED)
         scheduler.start()
         self._scheduler = scheduler
-        self.kernel.schedule_manager = self
         await self.sync_all()
 
     async def shutdown(self) -> None:
         scheduler = self._scheduler
         self._scheduler = None
-        self.kernel.schedule_manager = None
         if scheduler:
             scheduler.shutdown(wait=False)
 
@@ -130,7 +129,7 @@ class FerrymanScheduler:
             try:
                 await self.sync_schedule(schedule.id)
             except Exception as exc:
-                logger.exception("Skipping invalid persisted schedule during scheduler sync: %s", schedule.id)
+                logger.exception(f"Skipping invalid persisted schedule during scheduler sync: {schedule.id}")
                 self._mark_schedule_invalid(schedule.id, exc)
 
     async def sync_schedule(self, schedule_id: str) -> None:
@@ -178,7 +177,7 @@ class FerrymanScheduler:
         self._remove_job_if_present(self._catchup_job_id(schedule_id))
 
     async def _run_schedule(self, schedule_id: str, trigger: str = "scheduled") -> None:
-        logger.info("Running scheduled task for schedule %s via %s", schedule_id, trigger)
+        logger.info(f"Running scheduled task for schedule {schedule_id} via {trigger}")
         with get_session() as session:
             schedule = session.get(Schedule, schedule_id)
             if not schedule or not schedule.enabled:
@@ -188,16 +187,22 @@ class FerrymanScheduler:
             schedule_name = schedule.name
 
         if not instruction:
-            logger.warning("Skipping schedule %s because instruction is empty", schedule_id)
+            logger.warning(f"Skipping schedule {schedule_id} because instruction is empty")
             self._mark_schedule_invalid(schedule_id, ValueError("instruction must not be empty."))
             return
 
         self._ensure_schedule_session(schedule_id, schedule_name)
-        last_run_result: dict[str, Any]
         started_at = datetime.now(timezone.utc)
+        finished_at = started_at
+        last_run_result = self._build_last_run_result_from_exception(
+            RuntimeError("Schedule run did not finish."),
+            trigger=trigger,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
 
         try:
-            result = await self.kernel.run_master_agent(instruction, session_id=schedule_id)
+            result = await self.runtime.run_master_agent(instruction, session_id=schedule_id)
             finished_at = datetime.now(timezone.utc)
             last_run_result = self._build_last_run_result(
                 result,
@@ -206,7 +211,7 @@ class FerrymanScheduler:
                 finished_at=finished_at,
             )
         except Exception as exc:
-            logger.exception("Scheduled run failed for schedule %s", schedule_id)
+            logger.exception(f"Scheduled run failed for schedule {schedule_id}")
             finished_at = datetime.now(timezone.utc)
             last_run_result = self._build_last_run_result_from_exception(
                 exc,
@@ -227,7 +232,8 @@ class FerrymanScheduler:
                 session.add(schedule)
                 session.commit()
 
-    def _ensure_schedule_session(self, schedule_id: str, schedule_name: str) -> None:
+    @staticmethod
+    def _ensure_schedule_session(schedule_id: str, schedule_name: str) -> None:
         with get_session() as session:
             session_obj = session.get(Session, schedule_id)
             if session_obj:
@@ -265,7 +271,8 @@ class FerrymanScheduler:
             return
         try:
             scheduler.remove_job(schedule_id)
-        except Exception:
+        except Exception as e:
+            logger.exception(f"Failed to remove job:schedule_id with exception:{e}")
             pass
 
     def _mark_schedule_invalid(self, schedule_id: str, exc: Exception) -> None:
@@ -297,8 +304,9 @@ class FerrymanScheduler:
     def _handle_job_missed(self, event) -> None:
         try:
             self._handle_job_missed_inner(event)
-        except Exception:
-            logger.exception("Failed to handle missed schedule job: %s", getattr(event, "job_id", None))
+        except Exception as e:
+            job_id = getattr(event, "job_id", None)
+            logger.exception(f"Failed to handle missed schedule job:{job_id} with exception:{e}")
 
     def _handle_job_missed_inner(self, event) -> None:
         schedule_id = getattr(event, "job_id", None)
@@ -323,7 +331,7 @@ class FerrymanScheduler:
             session.commit()
 
         now = datetime.now(timezone.utc)
-        logger.info("Handling missed schedule %s from %s", schedule_id, missed_run_at)
+        logger.info(f"Handling missed schedule {schedule_id} from {missed_run_at}")
         self._schedule_catchup_if_needed(
             schedule_id=schedule_id,
             missed_run_at=missed_run_at,
@@ -363,16 +371,14 @@ class FerrymanScheduler:
         time_until_next = next_regular_run_at - now
         if lateness > catchup_grace_time:
             logger.info(
-                "Skipping catch-up for schedule %s because missed run is outside grace time: %s",
-                schedule_id,
-                lateness,
+                f"Skipping catch-up for schedule {schedule_id} "
+                f"because missed run is outside grace time: {lateness}"
             )
             return
         if time_until_next <= catchup_skip_if_next_within:
             logger.info(
-                "Skipping catch-up for schedule %s because next regular run is too close: %s",
-                schedule_id,
-                time_until_next,
+                f"Skipping catch-up for schedule {schedule_id} "
+                f"because next regular run is too close: {time_until_next}"
             )
             return
 
@@ -385,7 +391,7 @@ class FerrymanScheduler:
             replace_existing=True,
             misfire_grace_time=self.settings.get("system.schedule.misfire_grace_time", 300),
         )
-        logger.info("Scheduled catch-up run for schedule %s missed at %s", schedule_id, missed_run_at)
+        logger.info(f"Scheduled catch-up run for schedule {schedule_id} missed at {missed_run_at}")
 
     @staticmethod
     def _catchup_job_id(schedule_id: str) -> str:
@@ -393,13 +399,13 @@ class FerrymanScheduler:
 
     @staticmethod
     def _build_last_run_result(
-            result: Any,
+            result: object,
             *,
             trigger: str,
             started_at: datetime,
             finished_at: datetime,
-    ) -> dict[str, Any]:
-        duration_ms = FerrymanScheduler._duration_ms(started_at, finished_at)
+    ) -> dict[str, object]:
+        duration_ms = ScheduleManager._duration_ms(started_at, finished_at)
         base_result = {
             "trigger": trigger,
             "started_at": started_at.isoformat(),
@@ -409,7 +415,7 @@ class FerrymanScheduler:
         if not isinstance(result, dict):
             return {
                 "status": "success",
-                "summary": FerrymanScheduler._truncate_summary(str(result)),
+                "summary": ScheduleManager._truncate_summary(str(result)),
                 "error": None,
                 "run_id": None,
                 **base_result,
@@ -419,14 +425,15 @@ class FerrymanScheduler:
         messages = payload.get("messages", []) if isinstance(payload.get("messages"), list) else []
         last_message = messages[-1] if messages and isinstance(messages[-1], dict) else {}
         message_content = str(last_message.get("content", "")).strip() or None
-        run_metadata = last_message.get("metadata", {}).get("run", {}) if isinstance(last_message.get("metadata"), dict) else {}
+        run_metadata = last_message.get("metadata", {}).get("run", {}) if isinstance(last_message.get("metadata"),
+                                                                                     dict) else {}
         status = run_metadata.get("status") if isinstance(run_metadata, dict) else None
         normalized_status = "failed" if status == "failed" else "success"
         error = run_metadata.get("error") if isinstance(run_metadata, dict) else None
 
         return {
             "status": normalized_status,
-            "summary": None if normalized_status == "failed" else FerrymanScheduler._truncate_summary(message_content),
+            "summary": None if normalized_status == "failed" else ScheduleManager._truncate_summary(message_content),
             "error": str(error).strip() if error else None,
             "run_id": payload.get("run_id"),
             **base_result,
@@ -439,16 +446,16 @@ class FerrymanScheduler:
             trigger: str,
             started_at: datetime,
             finished_at: datetime,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return {
             "status": "failed",
             "summary": None,
-            "error": FerrymanScheduler._truncate_summary(str(exc), limit=500),
+            "error": ScheduleManager._truncate_summary(str(exc), limit=500),
             "run_id": None,
             "trigger": trigger,
             "started_at": started_at.isoformat(),
             "finished_at": finished_at.isoformat(),
-            "duration_ms": FerrymanScheduler._duration_ms(started_at, finished_at),
+            "duration_ms": ScheduleManager._duration_ms(started_at, finished_at),
         }
 
     @staticmethod

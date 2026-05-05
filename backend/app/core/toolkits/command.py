@@ -2,13 +2,14 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, List
+from typing import Annotated
 
 from pydantic import BeforeValidator
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 
-from app.core.deps import AgentDeps
+from app.core.deps import AgentDeps, get_skill_manager, get_workspace
+from app.core.toolkits.base import Toolkit
 
 
 def _coerce_args(v: object) -> list[str] | None:
@@ -23,7 +24,7 @@ def _coerce_args(v: object) -> list[str] | None:
     return v
 
 
-class CommandToolkit:
+class CommandToolkit(Toolkit):
     """Run scripts from the current skill's scripts directory."""
 
     @staticmethod
@@ -37,7 +38,7 @@ class CommandToolkit:
         if not skill_name:
             raise ModelRetry("run_skill_script is only available inside a skill execution context.")
 
-        skill = ctx.deps.kernel.skills.get(skill_name)
+        skill = get_skill_manager(ctx.deps).skills.get(skill_name)
         if not skill:
             raise ModelRetry(f"Current skill '{skill_name}' is not registered.")
 
@@ -55,7 +56,7 @@ class CommandToolkit:
         return candidate
 
     @staticmethod
-    def _build_command(script_path: Path, args: List[str]) -> List[str]:
+    def _build_command(script_path: Path, args: list[str]) -> list[str]:
         """Build the subprocess command for a script based on its file type."""
         if script_path.suffix == ".py":
             if getattr(sys, "frozen", False):
@@ -69,7 +70,7 @@ class CommandToolkit:
     async def run_skill_script(
         ctx: RunContext[AgentDeps],
         script_name: str,
-        args: Annotated[List[str] | None, BeforeValidator(_coerce_args)] = None,
+        args: Annotated[list[str] | None, BeforeValidator(_coerce_args)] = None,
         timeout_ms: int = 10000,
     ) -> dict:
         """Run a script from the current skill's `scripts/` directory.
@@ -80,7 +81,7 @@ class CommandToolkit:
         """
         resolved_args = args or []
         script_path = CommandToolkit._resolve_script_path(ctx, script_name)
-        workspace_dir = ctx.deps.kernel.get_session_workspace(ctx.deps.session_id)
+        workspace_dir = get_workspace(ctx.deps)
         command = CommandToolkit._build_command(script_path, resolved_args)
 
         process = await asyncio.create_subprocess_exec(

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -42,7 +42,7 @@ class ToolActivityPayload(BaseModel):
     seq: Optional[int] = Field(None, description="同一 AgentDeps 生命周期内递增的工具事件序号")
     tool_name: str = Field(..., description="底层原生的工具名称，如 'navigate', 'get_distilled_dom'")
     phase: ToolPhase = Field(..., description="工具执行阶段")
-    input: Optional[Dict[str, Any]] = Field(None, description="工具的入参摘要（仅在 start/running 给定，限制大小）")
+    input: Optional[dict[str, object]] = Field(None, description="工具的入参摘要（仅在 start/running 给定，限制大小）")
     duration_ms: Optional[int] = Field(None, description="消耗时间毫秒（仅在 complete/error 时必定下发）")
 
 
@@ -62,8 +62,8 @@ class ChatFinalPayload(BaseModel):
     它不仅用于事件推送（可选），更用作前端同步阻塞调用的 `result` 的标准 Payload。
     """
     run_id: str = Field(..., description="关联当前的会话流")
-    messages: list[Dict[str, Any]] = Field(..., description="最新的一系列对话消息记录")
-    usage: Optional[Dict[str, Any]] = Field(None, description="本次请求消耗的 Tokens 等统计信息")
+    messages: list[dict[str, object]] = Field(..., description="最新的一系列对话消息记录")
+    usage: Optional[dict[str, object]] = Field(None, description="本次请求消耗的 Tokens 等统计信息")
 
 
 # ------------------------------------------
@@ -94,7 +94,7 @@ class RefreshPayload(BaseModel):
     entity: DataEntity = Field(..., description="变更的业务实体类型")
     action: EntityAction = Field(..., description="变更动作")
     entity_id: Optional[str] = Field(None, description="发生变更的实体 ID，如果是 bulk 刷新可为空")
-    delta: Optional[Dict[str, Any]] = Field(None, description="增量数据（可选提供，以便前端直接合并减少请求）")
+    delta: Optional[dict[str, object]] = Field(None, description="增量数据（可选提供，以便前端直接合并减少请求）")
 
 
 # ------------------------------------------
@@ -117,7 +117,7 @@ class SystemErrorPayload(BaseModel):
     code: str = Field(..., description="约定的后端内部错误码，如 'A_004', 'NET_TIMEOUT'")
     severity: ErrorSeverity = Field(..., description="错误严重级别")
     message: str = Field(..., description="面向用户的可读错误描述")
-    context: Optional[Dict[str, Any]] = Field(None, description="相关异常的现场信息，如抛错堆栈或 ID，供排错")
+    context: Optional[dict[str, object]] = Field(None, description="相关异常的现场信息，如抛错堆栈或 ID，供排错")
 
 
 # ------------------------------------------
@@ -135,7 +135,7 @@ class FerrymanEventEnvelope(BaseModel):
     ts: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="ISO8601 UTC 绝对时间戳")
     
     # 负载，使用 Union 允许根据情况赋不同模型（可根据业务通过 Pydantic 区分）
-    payload: Union[ToolActivityPayload, ChatDeltaPayload, ChatFinalPayload, RefreshPayload, SystemErrorPayload, Dict[str, Any]]
+    payload: Union[ToolActivityPayload, ChatDeltaPayload, ChatFinalPayload, RefreshPayload, SystemErrorPayload, dict[str, object]]
 
     model_config = {
         "json_schema_extra": {

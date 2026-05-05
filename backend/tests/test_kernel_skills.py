@@ -10,11 +10,12 @@ import pytest
 from pydantic_ai.exceptions import ModelRetry
 
 from app.core.config import Settings
-from app.core.deps import AgentDeps
-from app.core.kernel import FerrymanKernel
+from app.core.runtime import FerrymanRuntime
+from app.core.skill_manager import SkillManager
 from app.core.toolkits.command import CommandToolkit
 from app.core.toolkits.file import FileToolkit
 from app.core.toolkits.skill import SkillToolkit
+from app.models.schemas import SkillModel
 
 # Setup paths for tests
 TEST_ROOT = Path("/tmp/ferryman_skill_test")
@@ -107,13 +108,13 @@ def test_scan_skills_and_text_index():
     create_mock_skill("user_skill", "User skill desc", TEST_USER_SKILLS)
     create_mock_skill("internal_skill", "Internal skill desc", TEST_BUNDLED_SKILLS)
 
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
-    assert "user_skill" in kernel.skills
-    assert "internal_skill" in kernel.skills
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
+    assert "user_skill" in kernel.skill_manager.skills
+    assert "internal_skill" in kernel.skill_manager.skills
     
     # Test plain-text generation (OS Prompt formatting)
-    skill_index = kernel.get_skill_index_text()
+    skill_index = kernel.skill_manager.get_skill_index_text()
     assert "- user_skill: User skill desc" in skill_index
     assert "- internal_skill: Internal skill desc" in skill_index
 
@@ -121,33 +122,35 @@ def test_scan_skills_and_text_index():
 def test_skill_index_flattens_multiline_descriptions():
     create_mock_skill_with_multiline_description("multiline_skill", TEST_USER_SKILLS)
 
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
 
-    skill_index = kernel.get_skill_index_text()
+    skill_index = kernel.skill_manager.get_skill_index_text()
     assert "- multiline_skill: First line second line" in skill_index
 
 
 def test_read_skill_sop():
     create_mock_skill("target_skill", "Test", TEST_USER_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
     
-    sop = kernel.read_skill_sop("target_skill")
-    assert "Mock SOP" in sop
+    sop = kernel.skill_manager.read_skill_sop("target_skill")
+    assert sop == "# Mock SOP"
+    assert "name: target_skill" not in sop
+    assert "description:" not in sop
     
-    error_sop = kernel.read_skill_sop("non_existent")
+    error_sop = kernel.skill_manager.read_skill_sop("non_existent")
     assert "Error: Skill 'non_existent' not found" in error_sop
 
 
 @pytest.mark.asyncio
 async def test_skill_context_can_list_its_own_bundled_scripts():
     create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
-    skill = kernel.skills["bundled_skill"]
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
+    skill = kernel.skill_manager.skills["bundled_skill"]
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
 
     result = await FileToolkit.list_files(ctx, str(skill.path / "scripts"))
 
@@ -157,11 +160,11 @@ async def test_skill_context_can_list_its_own_bundled_scripts():
 @pytest.mark.asyncio
 async def test_skill_context_keeps_writes_inside_session_workspace():
     create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
-    skill = kernel.skills["bundled_skill"]
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
+    skill = kernel.skill_manager.skills["bundled_skill"]
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
 
     with pytest.raises(ModelRetry, match="Invalid path: use a relative path"):
         await FileToolkit.write_file(ctx, str(skill.path / "scripts" / "generated.txt"), "nope")
@@ -170,10 +173,10 @@ async def test_skill_context_keeps_writes_inside_session_workspace():
 @pytest.mark.asyncio
 async def test_skill_context_rejects_out_of_scope_read_with_model_retry():
     create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
     outside_path = str(TEST_ROOT / "outside.txt")
 
     with pytest.raises(ModelRetry, match="Invalid path: use a relative path"):
@@ -183,10 +186,10 @@ async def test_skill_context_rejects_out_of_scope_read_with_model_retry():
 @pytest.mark.asyncio
 async def test_skill_context_rejects_out_of_scope_list_with_model_retry():
     create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
     outside_dir = str(TEST_ROOT / "outside-dir")
 
     with pytest.raises(ModelRetry, match="Invalid path: use a relative path"):
@@ -195,8 +198,8 @@ async def test_skill_context_rejects_out_of_scope_list_with_model_retry():
 
 @pytest.mark.asyncio
 async def test_read_file_requests_retry_when_file_is_missing():
-    kernel = FerrymanKernel(create_test_settings())
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session"))
+    kernel = FerrymanRuntime(create_test_settings())
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session"))
 
     with pytest.raises(ModelRetry, match="File not found: missing.txt"):
         await FileToolkit.read_file(ctx, "missing.txt")
@@ -205,10 +208,10 @@ async def test_read_file_requests_retry_when_file_is_missing():
 @pytest.mark.asyncio
 async def test_run_skill_script_requests_retry_when_script_is_missing():
     create_mock_skill("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
 
     with pytest.raises(ModelRetry, match="Script not found: missing.py"):
         await CommandToolkit.run_skill_script(ctx, "missing.py")
@@ -217,13 +220,13 @@ async def test_run_skill_script_requests_retry_when_script_is_missing():
 # --- Publish Skill Tests ---
 @pytest.mark.asyncio
 async def test_publish_skill_copies_draft_and_registers_it():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     session_id = "publish-session"
     workspace = kernel.get_session_workspace(session_id)
     draft_dir = workspace / "draft-skill"
     create_draft_skill(draft_dir)
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id))
 
     payload = await SkillToolkit.publish_skill(ctx, "draft-skill")
 
@@ -233,17 +236,17 @@ async def test_publish_skill_copies_draft_and_registers_it():
     assert payload["registered"] is True
     assert published_dir.exists()
     assert draft_dir.exists()
-    assert "draft-skill" in kernel.skills
+    assert "draft-skill" in kernel.skill_manager.skills
 
 
 @pytest.mark.asyncio
 async def test_publish_skill_rejects_paths_outside_workspace():
-    kernel = FerrymanKernel(create_test_settings())
+    kernel = FerrymanRuntime(create_test_settings())
     session_id = "publish-session"
     outside_dir = TEST_ROOT / "outside-skill"
     create_draft_skill(outside_dir, name="outside-skill")
 
-    ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id))
 
     with pytest.raises(RuntimeError, match="inside the current session workspace"):
         await SkillToolkit.publish_skill(ctx, str(outside_dir))
@@ -252,12 +255,12 @@ async def test_publish_skill_rejects_paths_outside_workspace():
 @pytest.mark.asyncio
 async def test_skill_creator_draft_publish_lifecycle_stays_in_allowed_paths():
     shutil.copytree(REPO_ROOT / "skills" / "skill-creator", TEST_BUNDLED_SKILLS / "skill-creator")
-    kernel = FerrymanKernel(create_test_settings())
-    kernel.scan_skills()
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
 
     session_id = "creator-session"
     workspace = kernel.get_session_workspace(session_id)
-    creator_ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id, skill_name="skill-creator"))
+    creator_ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id, skill_name="skill-creator"))
 
     init_result = await CommandToolkit.run_skill_script(
         creator_ctx,
@@ -281,9 +284,9 @@ async def test_skill_creator_draft_publish_lifecycle_stays_in_allowed_paths():
     assert publish_result["ok"] is True
     assert draft_dir.exists()
     assert published_dir.exists()
-    assert kernel.skills["demo-skill"].path == published_dir
+    assert kernel.skill_manager.skills["demo-skill"].path == published_dir
 
-    published_ctx = SimpleNamespace(deps=AgentDeps(kernel=kernel, session_id=session_id, skill_name="demo-skill"))
+    published_ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id, skill_name="demo-skill"))
     assert "SKILL.md" in await FileToolkit.list_files(published_ctx, str(published_dir))
 
 
@@ -398,11 +401,7 @@ def test_run_skill_script_uses_frozen_sidecar_entrypoint_for_python(monkeypatch)
     ]
 
 
-# --- Skill Loading Utils Tests ---
-from app.core.utils import load_skill_from_directory
-from app.models.schemas import SkillModel
-
-def test_load_skill_from_directory_success(tmp_path):
+def test_skill_manager_loads_skill_from_directory(tmp_path):
     """Test loading a valid skill with YAML frontmatter."""
     skill_dir = tmp_path / "test_skill"
     skill_dir.mkdir()
@@ -412,28 +411,37 @@ name: Test Skill
 description: A mock skill for testing
 version: 1.0.0
 author: Antigravity
+created: 2026-04-14
+updated: "2026-04-15"
 ---
 # SOP
 Perform some test actions.
 """, encoding="utf-8")
 
-    skill = load_skill_from_directory(skill_dir)
+    manager = SkillManager(Settings(root_dir=tmp_path / "root"))
+    skill = manager.load_skill_from_directory(skill_dir)
     assert skill is not None
     assert isinstance(skill, SkillModel)
     assert skill.name == "Test Skill"
     assert skill.version == "1.0.0"
+    assert skill.created == date(2026, 4, 14)
+    assert skill.updated == date(2026, 4, 15)
     assert skill.path == skill_dir
 
-def test_load_skill_from_directory_no_md(tmp_path):
+
+def test_skill_manager_loads_no_md_as_none(tmp_path):
     """Verify it returns None if SKILL.md is missing."""
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
-    assert load_skill_from_directory(empty_dir) is None
+    manager = SkillManager(Settings(root_dir=tmp_path / "root"))
+    assert manager.load_skill_from_directory(empty_dir) is None
 
-def test_load_skill_from_directory_invalid_yaml(tmp_path):
+
+def test_skill_manager_loads_invalid_yaml_as_none(tmp_path):
     """Verify it handles invalid YAML gracefully."""
     bad_dir = tmp_path / "bad_skill"
     bad_dir.mkdir()
     (bad_dir / "SKILL.md").write_text("---\nname: [unclosed bracket\n---", encoding="utf-8")
-    
-    assert load_skill_from_directory(bad_dir) is None
+
+    manager = SkillManager(Settings(root_dir=tmp_path / "root"))
+    assert manager.load_skill_from_directory(bad_dir) is None

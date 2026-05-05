@@ -3,12 +3,20 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.browser import BrowserActionError
 from app.core.browser import BrowserController
+from app.core.tool_errors import RetryableToolError
 from app.core.toolkits.web import WebToolkit
 
 
-def make_ctx(kernel, session_id: str = "test-session"):
-    return SimpleNamespace(deps=SimpleNamespace(kernel=kernel, session_id=session_id))
+def make_ctx(browser_manager, session_id: str = "test-session"):
+    return SimpleNamespace(
+        deps=SimpleNamespace(
+            browser_manager=browser_manager,
+            workspace_dir=browser_manager.workspace,
+            session_id=session_id,
+        )
+    )
 
 
 class FakeBrowser:
@@ -28,7 +36,12 @@ class FakeBrowser:
         return "wait-ok"
 
 
-class FakeKernel:
+class FailingBrowser(FakeBrowser):
+    async def scroll(self, direction="down", selector=None):
+        raise BrowserActionError("Failed to scroll: boom")
+
+
+class FakeBrowserManager:
     def __init__(self, browser=None, workspace: Path | None = None):
         self.browser = browser or FakeBrowser()
         self.workspace = workspace or Path("/tmp/ferryman-test")
@@ -44,35 +57,60 @@ class FakeKernel:
 
 @pytest.mark.asyncio
 async def test_browser_scroll_forwards_direction_and_selector():
-    kernel = FakeKernel()
+    browser_manager = FakeBrowserManager()
 
-    result = await WebToolkit.browser_scroll(make_ctx(kernel), direction="up", selector="[3]")
+    result = await WebToolkit.browser_scroll(make_ctx(browser_manager), direction="up", selector="[3]")
 
     assert result == "scroll-ok"
-    assert kernel.calls == [("get_browser", "test-session", None)]
-    assert kernel.browser.calls == [("scroll", "up", "[3]")]
+    assert browser_manager.calls == [("get_browser", "test-session", None)]
+    assert browser_manager.browser.calls == [("scroll", "up", "[3]")]
+
+
+@pytest.mark.asyncio
+async def test_browser_toolkit_uses_browser_manager_when_provided():
+    browser_manager = FakeBrowserManager()
+
+    result = await WebToolkit.browser_scroll(
+        make_ctx(browser_manager),
+        direction="up",
+        selector="[3]",
+    )
+
+    assert result == "scroll-ok"
+    assert browser_manager.calls == [("get_browser", "test-session", None)]
 
 
 @pytest.mark.asyncio
 async def test_browser_console_forwards_clear_flag():
-    kernel = FakeKernel()
+    browser_manager = FakeBrowserManager()
 
-    result = await WebToolkit.browser_console(make_ctx(kernel), clear=True)
+    result = await WebToolkit.browser_console(make_ctx(browser_manager), clear=True)
 
     assert result == "console-ok"
-    assert kernel.calls == [("get_browser", "test-session", None)]
-    assert kernel.browser.calls == [("console", True)]
+    assert browser_manager.calls == [("get_browser", "test-session", None)]
+    assert browser_manager.browser.calls == [("console", True)]
 
 
 @pytest.mark.asyncio
 async def test_browser_wait_forwards_selector_and_timeout():
-    kernel = FakeKernel()
+    browser_manager = FakeBrowserManager()
 
-    result = await WebToolkit.browser_wait(make_ctx(kernel), timeout_ms=1234, selector="#ready")
+    result = await WebToolkit.browser_wait(make_ctx(browser_manager), timeout_ms=1234, selector="#ready")
 
     assert result == "wait-ok"
-    assert kernel.calls == [("get_browser", "test-session", None)]
-    assert kernel.browser.calls == [("wait", 1234, "#ready")]
+    assert browser_manager.calls == [("get_browser", "test-session", None)]
+    assert browser_manager.browser.calls == [("wait", 1234, "#ready")]
+
+
+@pytest.mark.asyncio
+async def test_web_toolkit_converts_browser_action_error_to_retryable_tool_error():
+    browser_manager = FakeBrowserManager(browser=FailingBrowser())
+
+    with pytest.raises(RetryableToolError) as exc_info:
+        await WebToolkit.browser_scroll(make_ctx(browser_manager), direction="down")
+
+    assert str(exc_info.value) == "Failed to scroll: boom"
+    assert exc_info.value.error_type == "browser_action_error"
 
 
 @pytest.mark.asyncio
@@ -128,8 +166,8 @@ async def test_web_toolkit_browser_e2e(tmp_path):
     workspace.mkdir()
     browser = BrowserController(headless=True, user_data_dir=str(workspace / ".browser"))
     await browser.__aenter__()
-    kernel = FakeKernel(browser=browser, workspace=workspace)
-    ctx = make_ctx(kernel, session_id="browser-e2e")
+    browser_manager = FakeBrowserManager(browser=browser, workspace=workspace)
+    ctx = make_ctx(browser_manager, session_id="browser-e2e")
 
     try:
         navigate_result = await WebToolkit.browser_navigate(ctx, page_path.as_uri())

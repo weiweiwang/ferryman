@@ -8,7 +8,12 @@ from sqlalchemy import text
 from sqlmodel import select
 
 from app.core.config import get_settings
-from app.core.scheduler import FerrymanScheduler
+from app.core.schedule_manager import (
+    ScheduleManager,
+    build_cron_trigger,
+    compute_next_run_at,
+    normalize_timezone_name,
+)
 from app.models.database import Schedule, Session
 
 
@@ -89,7 +94,7 @@ async def test_scheduler_sync_schedule_sets_timezone_and_next_run(session):
     session.add(schedule)
     session.commit()
 
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler = ScheduleManager(StubKernel(), get_settings())
     scheduler._scheduler = FakeScheduler()
 
     await scheduler.sync_schedule(schedule.id)
@@ -124,6 +129,40 @@ def test_schedule_datetime_columns_are_persisted_as_explicit_utc_strings(session
     assert row[2].endswith("Z")
 
 
+def test_schedule_cron_helpers_validate_inputs_and_compute_utc_next_run():
+    assert normalize_timezone_name(" Asia/Shanghai ") == "Asia/Shanghai"
+
+    next_run_at = compute_next_run_at(
+        "0 8 * * *",
+        "Asia/Shanghai",
+        now=datetime(2026, 4, 18, 23, 59),
+    )
+    assert next_run_at == datetime(2026, 4, 19, 0, 0, tzinfo=timezone.utc)
+
+    trigger = build_cron_trigger("0 8 * * *", "Asia/Shanghai")
+    assert trigger.get_next_fire_time(
+        previous_fire_time=None,
+        now=datetime(2026, 4, 18, 23, 59, tzinfo=timezone.utc),
+    ) == datetime(2026, 4, 19, 8, 0, tzinfo=trigger.timezone)
+
+
+@pytest.mark.parametrize(
+    ("cron_expression", "timezone_name", "expected_message"),
+    [
+        ("   ", "UTC", "cron_expression must not be empty."),
+        ("not-a-cron", "UTC", "Invalid cron expression:"),
+        ("0 8 * * *", "Mars/Base", "Invalid timezone: Mars/Base"),
+    ],
+)
+def test_schedule_cron_helpers_reject_invalid_inputs(
+        cron_expression,
+        timezone_name,
+        expected_message,
+):
+    with pytest.raises(ValueError, match=expected_message):
+        build_cron_trigger(cron_expression, timezone_name)
+
+
 @pytest.mark.asyncio
 async def test_scheduler_run_uses_schedule_id_as_session_and_updates_metrics(session):
     schedule = Schedule(
@@ -138,7 +177,7 @@ async def test_scheduler_run_uses_schedule_id_as_session_and_updates_metrics(ses
     session.commit()
 
     kernel = StubKernel()
-    scheduler = FerrymanScheduler(kernel, get_settings())
+    scheduler = ScheduleManager(kernel, get_settings())
     scheduler._scheduler = FakeScheduler()
     await scheduler.sync_schedule(schedule.id)
 
@@ -185,7 +224,7 @@ async def test_scheduler_run_updates_metrics_even_when_agent_execution_fails(ses
     session.commit()
 
     kernel = FailingKernel()
-    scheduler = FerrymanScheduler(kernel, get_settings())
+    scheduler = ScheduleManager(kernel, get_settings())
     scheduler._scheduler = FakeScheduler()
     await scheduler.sync_schedule(schedule.id)
 
@@ -228,7 +267,7 @@ async def test_scheduler_run_disables_schedule_when_instruction_is_missing(sessi
     session.commit()
 
     kernel = StubKernel()
-    scheduler = FerrymanScheduler(kernel, get_settings())
+    scheduler = ScheduleManager(kernel, get_settings())
     scheduler._scheduler = FakeScheduler()
     await scheduler.sync_schedule(schedule.id)
 
@@ -269,7 +308,7 @@ async def test_scheduler_sync_all_disables_invalid_persisted_schedule(session):
     session.add(invalid_schedule)
     session.commit()
 
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler = ScheduleManager(StubKernel(), get_settings())
     scheduler._scheduler = FakeScheduler()
 
     await scheduler.sync_all()
@@ -306,7 +345,10 @@ async def test_scheduler_sync_schedule_adds_catchup_job_for_recent_missed_run(se
     session.add(schedule)
     session.commit()
 
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    settings = SimpleNamespace(
+        get=lambda key, default=None: 0 if key == "system.schedule.catchup_skip_if_next_within" else default
+    )
+    scheduler = ScheduleManager(StubKernel(), settings)
     scheduler._scheduler = FakeScheduler()
 
     await scheduler.sync_schedule(schedule.id)
@@ -334,7 +376,7 @@ async def test_scheduler_sync_schedule_skips_catchup_outside_grace_time(session)
     session.add(schedule)
     session.commit()
 
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler = ScheduleManager(StubKernel(), get_settings())
     scheduler._scheduler = FakeScheduler()
 
     await scheduler.sync_schedule(schedule.id)
@@ -357,7 +399,7 @@ async def test_scheduler_sync_schedule_skips_catchup_when_next_regular_run_is_cl
     session.add(schedule)
     session.commit()
 
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler = ScheduleManager(StubKernel(), get_settings())
     scheduler._scheduler = FakeScheduler()
 
     await scheduler.sync_schedule(schedule.id)
@@ -381,7 +423,10 @@ async def test_scheduler_sync_schedule_replaces_only_existing_catchup_job(sessio
     session.commit()
 
     fake_scheduler = FakeScheduler()
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    settings = SimpleNamespace(
+        get=lambda key, default=None: 0 if key == "system.schedule.catchup_skip_if_next_within" else default
+    )
+    scheduler = ScheduleManager(StubKernel(), settings)
     scheduler._scheduler = fake_scheduler
 
     await scheduler.sync_schedule(schedule.id)
@@ -410,7 +455,7 @@ def test_scheduler_missed_event_adds_catchup_job_and_refreshes_next_run(session)
     session.commit()
 
     fake_scheduler = FakeScheduler()
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler = ScheduleManager(StubKernel(), get_settings())
     scheduler._scheduler = fake_scheduler
     next_regular_run_at = now + timedelta(hours=2)
     fake_scheduler.jobs[schedule.id] = SimpleNamespace(
@@ -450,7 +495,7 @@ def test_scheduler_missed_event_ignores_catchup_jobs(session):
     session.commit()
 
     fake_scheduler = FakeScheduler()
-    scheduler = FerrymanScheduler(StubKernel(), get_settings())
+    scheduler = ScheduleManager(StubKernel(), get_settings())
     scheduler._scheduler = fake_scheduler
 
     scheduler._handle_job_missed_inner(
@@ -477,7 +522,7 @@ async def test_scheduler_run_records_catchup_trigger_and_duration(session):
     session.commit()
 
     kernel = StubKernel()
-    scheduler = FerrymanScheduler(kernel, get_settings())
+    scheduler = ScheduleManager(kernel, get_settings())
     scheduler._scheduler = FakeScheduler()
     await scheduler.sync_schedule(schedule.id)
 

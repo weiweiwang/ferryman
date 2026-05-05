@@ -1,18 +1,31 @@
 from pydantic_ai.messages import BinaryImage
 from pydantic_ai.tools import RunContext
 from app.core.browser import BrowserActionError
-from app.core.deps import AgentDeps
+from app.core.deps import AgentDeps, get_browser_manager, get_workspace
+from app.core.tool_errors import RetryableToolError
+from app.core.toolkits.base import Toolkit
 from typing import Optional
 
-class WebToolkit:
+BROWSER_ACTION_ERROR_TYPE = "browser_action_error"
+
+
+async def _run_browser_action(action):
+    try:
+        return await action()
+    except BrowserActionError as e:
+        raise RetryableToolError(str(e), error_type=BROWSER_ACTION_ERROR_TYPE) from e
+
+
+class WebToolkit(Toolkit):
     """Browser tools for page navigation, inspection, interaction, and capture."""
 
     @staticmethod
     async def _get_browser(ctx: RunContext[AgentDeps], headless: Optional[bool] = None):
         try:
-            return await ctx.deps.kernel.get_browser(ctx.deps.session_id, headless=headless)
+            browser_manager = get_browser_manager(ctx.deps)
+            return await browser_manager.get_browser(ctx.deps.session_id, headless=headless)
         except RuntimeError as e:
-            raise BrowserActionError(str(e)) from e
+            raise RetryableToolError(str(e), error_type=BROWSER_ACTION_ERROR_TYPE) from e
 
     @staticmethod
     def get_tools():
@@ -35,7 +48,7 @@ class WebToolkit:
         Set `headless=False` when the browser should stay visible to the user.
         """
         browser = await WebToolkit._get_browser(ctx, headless=headless)
-        return await browser.navigate(url)
+        return await _run_browser_action(lambda: browser.navigate(url))
 
     @staticmethod
     async def browser_get_distilled_dom(ctx: RunContext[AgentDeps]) -> str:
@@ -44,7 +57,7 @@ class WebToolkit:
         Best for article or content reading, not precise interaction targeting.
         """
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.get_distilled_dom()
+        return await _run_browser_action(browser.get_distilled_dom)
 
     @staticmethod
     async def browser_click(ctx: RunContext[AgentDeps], selector: str) -> str:
@@ -54,7 +67,7 @@ class WebToolkit:
         for stability.
         """
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.click(selector)
+        return await _run_browser_action(lambda: browser.click(selector))
 
     @staticmethod
     async def browser_type(ctx: RunContext[AgentDeps], selector: str, text: str) -> str:
@@ -64,13 +77,13 @@ class WebToolkit:
         for stability.
         """
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.type(selector, text)
+        return await _run_browser_action(lambda: browser.type(selector, text))
 
     @staticmethod
     async def browser_aria_snapshot(ctx: RunContext[AgentDeps]) -> str:
         """Return an accessibility snapshot with stable IDs for later interactions."""
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.get_aria_snapshot()
+        return await _run_browser_action(browser.get_aria_snapshot)
 
     @staticmethod
     async def browser_scroll(
@@ -80,7 +93,7 @@ class WebToolkit:
     ) -> str:
         """Scroll the page up or down, or scroll an element into view."""
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.scroll(direction=direction, selector=selector)
+        return await _run_browser_action(lambda: browser.scroll(direction=direction, selector=selector))
 
     @staticmethod
     async def browser_wait(
@@ -90,13 +103,13 @@ class WebToolkit:
     ) -> str:
         """Wait for time to pass or for a selector to appear."""
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.wait(timeout_ms, selector=selector)
+        return await _run_browser_action(lambda: browser.wait(timeout_ms, selector=selector))
 
     @staticmethod
     async def browser_console(ctx: RunContext[AgentDeps], clear: bool = False) -> str:
         """Return recent browser console messages and page errors."""
         browser = await WebToolkit._get_browser(ctx)
-        return await browser.get_console_messages(clear=clear)
+        return await _run_browser_action(lambda: browser.get_console_messages(clear=clear))
 
     @staticmethod
     async def browser_screenshot(ctx: RunContext[AgentDeps], selector: Optional[str] = None) -> BinaryImage:
@@ -106,5 +119,5 @@ class WebToolkit:
         `BinaryImage`.
         """
         browser = await WebToolkit._get_browser(ctx)
-        screenshot_dir = ctx.deps.kernel.get_session_workspace(ctx.deps.session_id) / "screenshots"
-        return await browser.screenshot(selector, output_dir=screenshot_dir)
+        screenshot_dir = get_workspace(ctx.deps) / "screenshots"
+        return await _run_browser_action(lambda: browser.screenshot(selector, output_dir=screenshot_dir))

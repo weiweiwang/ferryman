@@ -1,7 +1,7 @@
 import json
 import time
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,9 +12,11 @@ from starlette.websockets import WebSocketDisconnect
 from sqlmodel import select
 
 from app.main import app
-import app.main as main_module
 from app.models.database import Message, Schedule, Session, Task
 from app.models.schemas import AgentRunResult, Usage
+from app.rpc.agent_runs import persist_canceled_chat_run
+from app.rpc.sessions import list_messages
+import app.rpc.websocket as websocket_rpc
 
 
 def websocket_path(token: str = "test-bearer-token") -> str:
@@ -71,7 +73,7 @@ def test_websocket_invalid_json_does_not_disconnect(client):
 
 
 def test_websocket_dispatch_exception_returns_error_and_keeps_connection(client, monkeypatch):
-    original_dispatch = main_module.async_dispatch
+    original_dispatch = websocket_rpc.async_dispatch
     fail_once = {"value": True}
 
     async def flaky_dispatch(*args, **kwargs):
@@ -80,7 +82,7 @@ def test_websocket_dispatch_exception_returns_error_and_keeps_connection(client,
             raise RuntimeError("dispatch failed")
         return await original_dispatch(*args, **kwargs)
 
-    monkeypatch.setattr(main_module, "async_dispatch", flaky_dispatch)
+    monkeypatch.setattr(websocket_rpc, "async_dispatch", flaky_dispatch)
 
     with client.websocket_connect(websocket_path()) as websocket:
         first = send_rpc(websocket, "ping", request_id=3)
@@ -101,6 +103,8 @@ def test_websocket_llm_and_model_config_flow(client):
     def fake_fetcher(provider: str, api_key: str, base_url: str, list_mode: str):
         if provider == "openai":
             return ["gpt-4o"]
+        if provider == "deepseek":
+            return ["deepseek-v4-pro", "deepseek-v4-flash"]
         if provider == "kimi":
             return ["kimi-k2.5"]
         if provider == "doubao":
@@ -131,11 +135,15 @@ def test_websocket_llm_and_model_config_flow(client):
 
             response = send_rpc(websocket, "get_llm_configs", request_id=3)
             openai_config = next((c for c in response["result"] if c["provider"] == "openai"), None)
+            deepseek_config = next((c for c in response["result"] if c["provider"] == "deepseek"), None)
             kimi_config = next((c for c in response["result"] if c["provider"] == "kimi"), None)
             doubao_config = next((c for c in response["result"] if c["provider"] == "doubao"), None)
             assert openai_config is not None
+            assert deepseek_config is not None
             assert kimi_config is not None
             assert doubao_config is not None
+            assert deepseek_config["metadata"]["label"] == "DeepSeek"
+            assert deepseek_config["metadata"]["placeholder_base_url"] == "https://api.deepseek.com"
             assert kimi_config["metadata"]["label"] == "Kimi"
             assert kimi_config["metadata"]["placeholder_base_url"] == "https://api.moonshot.cn/v1"
             assert doubao_config["metadata"]["label"] == "Doubao"
@@ -166,8 +174,23 @@ def test_websocket_llm_and_model_config_flow(client):
             assert "anthropic" not in response["result"]
             assert "gemini" not in response["result"]
             assert "qwen" not in response["result"]
+            assert "deepseek" not in response["result"]
             assert "kimi" not in response["result"]
             assert "doubao" not in response["result"]
+
+            response = send_rpc(
+                websocket,
+                "set_llm_config",
+                {
+                    "provider": "deepseek",
+                    "api_key": "sk-deepseek",
+                },
+                request_id=11,
+            )
+            assert response["result"] == {"status": "success"}
+
+            response = send_rpc(websocket, "get_available_models", request_id=12)
+            assert response["result"]["deepseek"] == ["deepseek-v4-pro", "deepseek-v4-flash"]
 
             response = send_rpc(
                 websocket,
@@ -235,21 +258,22 @@ def test_websocket_llm_and_model_config_flow(client):
 
 
 def test_websocket_list_skills(client, monkeypatch):
-    app.state.kernel.skills = {
+    app.state.runtime.skill_manager.skills.clear()
+    app.state.runtime.skill_manager.skills.update({
         "b-skill": SimpleNamespace(
             name="b-skill",
             description="Second skill",
             version="1.1.0",
             author="Ferryman",
-            updated="2026-04-14",
+            updated=date(2026, 4, 14),
         ),
         "a-skill": SimpleNamespace(
             name="a-skill",
             description="First skill",
             version="1.0.0",
             author="Tester",
-            created="2026-04-10",
-            updated="2026-04-11",
+            created=date(2026, 4, 10),
+            updated=date(2026, 4, 11),
         ),
         "legacy-skill": SimpleNamespace(
             name="legacy-skill",
@@ -257,7 +281,7 @@ def test_websocket_list_skills(client, monkeypatch):
             version="0.9.0",
             author="Legacy",
         ),
-    }
+    })
 
     with client.websocket_connect(websocket_path()) as websocket:
         response = send_rpc(websocket, "list_skills", request_id=7)
@@ -295,8 +319,8 @@ def test_websocket_backend_log_endpoints(client, monkeypatch):
         "sidecar": "/tmp/ferryman-sidecar.log",
     }
 
-    monkeypatch.setattr("app.main.get_backend_log_paths", lambda: fake_paths)
-    monkeypatch.setattr("app.main.tail_lines", lambda path, lines: f"{path.name}:{lines}")
+    monkeypatch.setattr("app.rpc.logs.get_backend_log_paths", lambda: fake_paths)
+    monkeypatch.setattr("app.rpc.logs.tail_lines", lambda path, lines: f"{path.name}:{lines}")
 
     with client.websocket_connect(websocket_path()) as websocket:
         response = send_rpc(websocket, "get_backend_log_info", request_id=8)
@@ -333,7 +357,7 @@ def test_websocket_execute_starts_background_run_and_emits_final_event(client, m
             }
         }
 
-    monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
+    monkeypatch.setattr(app.state.runtime, "run_master_agent", fake_run_master_agent)
 
     with client.websocket_connect(websocket_path()) as websocket:
         response, notifications = send_rpc_until_response(
@@ -365,7 +389,7 @@ def test_websocket_execute_emits_failed_terminal_event_on_unexpected_background_
     async def fake_run_master_agent(instruction: str, session_id: str, emit_event_cb=None):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
+    monkeypatch.setattr(app.state.runtime, "run_master_agent", fake_run_master_agent)
 
     with client.websocket_connect(websocket_path()) as websocket:
         response, notifications = send_rpc_until_response(
@@ -448,7 +472,7 @@ def test_persist_canceled_chat_run_updates_existing_run_metadata_only(session):
     )
     session.commit()
 
-    event = main_module.persist_canceled_chat_run("session-cancel-persist", "run-persist-1")
+    event = persist_canceled_chat_run("session-cancel-persist", "run-persist-1")
 
     session.expire_all()
     messages = session.exec(
@@ -552,7 +576,7 @@ def test_websocket_execute_can_be_canceled_while_socket_stays_responsive(client,
             }
         }
 
-    monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
+    monkeypatch.setattr(app.state.runtime, "run_master_agent", fake_run_master_agent)
 
     with client.websocket_connect(websocket_path()) as websocket:
         start_response, start_notifications = send_rpc_until_response(
@@ -624,7 +648,7 @@ def test_websocket_execute_returns_busy_when_session_already_has_active_run(clie
             },
         }
 
-    monkeypatch.setattr(app.state.kernel, "run_master_agent", fake_run_master_agent)
+    monkeypatch.setattr(app.state.runtime, "run_master_agent", fake_run_master_agent)
 
     with client.websocket_connect(websocket_path()) as websocket:
         start_response, _ = send_rpc_until_response(
@@ -1115,7 +1139,7 @@ async def test_list_messages_python_implementation_pages_in_memory_sqlite(sessio
     ])
     session.commit()
 
-    latest_page_response = await main_module.list_messages(
+    latest_page_response = await list_messages(
         None,
         session_id="session-message-python-pages",
         limit=20,
@@ -1127,7 +1151,7 @@ async def test_list_messages_python_implementation_pages_in_memory_sqlite(sessio
     ]
     assert latest_page["next_cursor"] is not None
 
-    older_page_response = await main_module.list_messages(
+    older_page_response = await list_messages(
         None,
         session_id="session-message-python-pages",
         limit=20,
@@ -1140,7 +1164,7 @@ async def test_list_messages_python_implementation_pages_in_memory_sqlite(sessio
     ]
     assert older_page["next_cursor"] is not None
 
-    oldest_page_response = await main_module.list_messages(
+    oldest_page_response = await list_messages(
         None,
         session_id="session-message-python-pages",
         limit=20,
@@ -1352,8 +1376,8 @@ def test_scheduler_runs_due_schedule_during_app_lifespan(session, monkeypatch):
     session.add(schedule)
     session.commit()
 
-    monkeypatch.setattr("app.core.scheduler.build_cron_trigger", fake_build_cron_trigger)
-    monkeypatch.setattr("app.core.kernel.FerrymanKernel.run_master_agent", fake_run_master_agent)
+    monkeypatch.setattr("app.core.schedule_manager.build_cron_trigger", fake_build_cron_trigger)
+    monkeypatch.setattr("app.core.runtime.FerrymanRuntime.run_master_agent", fake_run_master_agent)
 
     with TestClient(app):
         time.sleep(0.2)

@@ -18,10 +18,6 @@ from playwright_stealth import Stealth
 
 logger = logging.getLogger(__name__)
 
-# Modern Mac Desktop Chrome UA (Chrome 134)
-# Note: Using a Desktop UA with a mobile viewport (or vice versa) triggers bot detection.
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-
 SYSTEM_CHROME_CANDIDATES = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
@@ -99,9 +95,9 @@ class BrowserController:
                 raise RuntimeError(CHROME_REQUIRED_MESSAGE) from last_error
             raise RuntimeError(f"Unable to launch system Chrome: {last_error}") from last_error
 
-        # Apply Playwright-Stealth patch (v2.x API)
-        await Stealth().apply_stealth_async(self._page)
-        self._attach_page_observers(self._page)
+        # Apply Playwright-Stealth at context level so OAuth popups/new pages inherit it.
+        await Stealth().apply_stealth_async(self._browser_context)
+        self._attach_context_observers()
 
         if not self._headless:
             await self._setup_visual_overlay()
@@ -174,7 +170,6 @@ class BrowserController:
             # Persistent mode: browser and context are merged
             browser_context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=self._user_data_dir,
-                user_agent=DEFAULT_USER_AGENT,
                 viewport=ViewportSize(width=1280, height=800),
                 **launch_kwargs,
             )
@@ -187,7 +182,6 @@ class BrowserController:
         # Ephemeral mode
         browser = await self._playwright.chromium.launch(**launch_kwargs)
         browser_context = await browser.new_context(
-            user_agent=DEFAULT_USER_AGENT,
             viewport=ViewportSize(width=1280, height=800),
         )
         page = await browser_context.new_page()
@@ -223,6 +217,16 @@ class BrowserController:
         page.on("console", self._record_console_message)
         page.on("pageerror", self._record_page_error)
         page.on("requestfailed", self._record_request_failure)
+
+    def _attach_context_observers(self) -> None:
+        for page in self._browser_context.pages:
+            self._attach_page_observers(page)
+
+        def handle_new_page(page) -> None:
+            self._page = page
+            self._attach_page_observers(page)
+
+        self._browser_context.on("page", handle_new_page)
 
     def _record_console_message(self, message) -> None:
         try:

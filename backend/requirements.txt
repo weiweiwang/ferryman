@@ -17,6 +17,7 @@ resend==2.29.0
 
 # --- Database & Persistence ---
 PyYAML==6.0.3
+python-frontmatter==1.1.0
 aiofile==3.9.0
 
 # --- Utilities & Logging ---

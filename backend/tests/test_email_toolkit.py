@@ -11,24 +11,31 @@ from app.core.config import Settings
 from app.core.toolkits.email import EmailAttachment, EmailToolkit
 
 
-def make_ctx(*, kernel, session_id: str = "session-1"):
-    return SimpleNamespace(deps=SimpleNamespace(kernel=kernel, session_id=session_id, skill_name=None))
+def make_ctx(*, workspace_root, settings, session_id: str = "session-1"):
+    return SimpleNamespace(
+        deps=SimpleNamespace(
+            settings=settings,
+            workspace_dir=workspace_root / session_id,
+            session_id=session_id,
+            skill_name=None,
+        )
+    )
 
 
-class StubKernel:
-    def __init__(self, workspace, settings: Settings | None = None) -> None:
-        self.workspace = workspace
-        self._settings = settings or Settings()
-        self.settings = {
+class StubSettings:
+    resend_default_from = "noreply@ferryman.app"
+
+    def __init__(self) -> None:
+        self.values = {
             "email.resend.api_key": "test-api-key",
             "email.resend.default_from": "noreply@ferryman.app",
         }
 
     def get_setting(self, key, default=None):
-        return self.settings.get(key, default)
+        return self.values.get(key, default)
 
-    def get_session_workspace(self, session_id: str):
-        return self.workspace / session_id
+    def get(self, key, default=None):
+        return self.values.get(key, default)
 
 
 class FakeEmails:
@@ -54,7 +61,7 @@ async def test_send_email_supports_multiple_local_and_remote_attachments(tmp_pat
     (workspace / "report.txt").write_text("hello report", encoding="utf-8")
 
     result = await EmailToolkit.send_email(
-        make_ctx(kernel=StubKernel(tmp_path)),
+        make_ctx(workspace_root=tmp_path, settings=StubSettings()),
         to=[" support@ferryman.app "],
         subject=" Hello ",
         html="<p>Hi</p>",
@@ -81,12 +88,12 @@ async def test_send_email_supports_multiple_local_and_remote_attachments(tmp_pat
 
 @pytest.mark.asyncio
 async def test_send_email_rejects_missing_api_key(tmp_path):
-    kernel = StubKernel(tmp_path)
-    kernel.settings["email.resend.api_key"] = ""
+    settings = StubSettings()
+    settings.values["email.resend.api_key"] = ""
 
     with pytest.raises(ModelRetry, match="Resend API Key is not configured"):
         await EmailToolkit.send_email(
-            make_ctx(kernel=kernel),
+            make_ctx(workspace_root=tmp_path, settings=settings),
             to=["support@ferryman.app"],
             subject="Hello",
             text="Hi",
@@ -100,7 +107,7 @@ async def test_send_email_rejects_escaping_attachment_path(tmp_path):
 
     with pytest.raises(ModelRetry, match="Invalid attachment path"):
         await EmailToolkit.send_email(
-            make_ctx(kernel=StubKernel(tmp_path)),
+            make_ctx(workspace_root=tmp_path, settings=StubSettings()),
             to=["support@ferryman.app"],
             subject="Hello",
             text="Hi",
