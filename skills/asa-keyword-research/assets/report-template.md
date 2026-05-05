@@ -21,15 +21,25 @@ Adapt the headings and labels to match the user's requested language.
 - **Target Audience**: [User personas]
 - **Main Subscription Price**: [e.g., $9.99/Year]
 
-## 2. ROI & Target CPI/CPP Calculation
+## 2. ROI & Target CPA Forecast (Dual-Tier Commission)
 
-_Subscription trial funnel assumptions: tap-to-install CVR, install-to-trial-start CVR, trial-to-paid CVR, average paid renewals, Apple tax, and refund/churn buffer._
+_Payback analysis based on [Category] benchmarks for the **Monthly SKU**. We provide scenarios for both 15% (Small Business) and 30% (Standard) Apple commission._
 
-- **Net Revenue per Paid Subscriber**: [Price] × 0.85 = [Value]
-- **Paid Subscriber LTV**: [Net Revenue] × [Renewals] × [Buffer] = [Value]
-- **Target CPP**: [Break-even CPP] × 0.8 = **[Value]**
-- **Target CPI**: [Target CPP] × [Install-to-paid CVR] = **[Value]**
-- **Suggested Max CPT**: [Target CPI] × [Tap-to-install CVR] = **[Value]**
+### 🟢 Scenario A: Small Business Program (15% Fee)
+| Scenario | Total Payments | Install-to-Paid | Target CPA (Install) |
+| :--- | :--- | :--- | :--- |
+| **Conservative** | 2.5x | 5% | **$[Value]** |
+| **Realistic** | **4.5x** | **10%** | **$[Value]** |
+| **Optimistic** | 6.0x | 15% | **$[Value]** |
+
+### 🔵 Scenario B: Standard Program (30% Fee)
+| Scenario | Total Payments | Install-to-Paid | Target CPA (Install) |
+| :--- | :--- | :--- | :--- |
+| **Conservative** | 2.5x | 5% | **$[Value]** |
+| **Realistic** | **4.5x** | **10%** | **$[Value]** |
+| **Optimistic** | 6.0x | 15% | **$[Value]** |
+
+> **Strategic Insight**: Moving to the 15% tier increases your Target CPA ceiling by approximately **[X]%**, allowing for significantly more aggressive bidding on high-intent keywords.
 
 ## 3. Keyword Matrix
 
@@ -41,21 +51,21 @@ _Subscription trial funnel assumptions: tap-to-install CVR, install-to-trial-sta
 
 ### 🏆 Brand
 
-| Keyword   | Normalized Popularity | Raw Popularity | Source | Intent   | Suggested CPT | Target CPI | Target CPP |
-| :-------- | :-------------------- | :------------- | :----- | :------- | :------------ | :--------- | :--------- |
-| [keyword] | [0-100]               | [raw]          | [src]  | [intent] | [cpt]         | [cpi]      | [cpp]      |
+| Keyword   | Normalized Popularity | Raw Popularity | Source | Intent   | **Target CPA (Install)** |
+| :-------- | :-------------------- | :------------- | :----- | :------- | :----------------------- |
+| [keyword] | [0-100]               | [raw]          | [src]  | [intent] | **$[Value]**             |
 
 ### 🎯 Generic
 
-| Keyword   | Normalized Popularity | Raw Popularity | Source | Competition | Suggested CPT | Target CPI | Target CPP |
-| :-------- | :-------------------- | :------------- | :----- | :---------- | :------------ | :--------- | :--------- |
-| [keyword] | [0-100]               | [raw]          | [src]  | [comp]      | [cpt]         | [cpi]      | [cpp]      |
+| Keyword   | Normalized Popularity | Raw Popularity | Source | Competition | **Target CPA (Install)** |
+| :-------- | :-------------------- | :------------- | :----- | :---------- | :----------------------- |
+| [keyword] | [0-100]               | [raw]          | [src]  | [comp]      | **$[Value]**             |
 
 ### ⚔️ Competitor
 
-| Competitor Name | Tier | Keyword   | Normalized Popularity | Source | Suggested CPT | Target CPI | Target CPP |
-| :-------------- | :--- | :-------- | :-------------------- | :----- | :------------ | :--------- | :--------- |
-| [comp_name]     | [tier] | [keyword] | [0-100]               | [src]  | [cpt]         | [cpi]      | [cpp]      |
+| Competitor Name | Tier | Keyword   | Normalized Popularity | Source | **Target CPA (Install)** |
+| :-------------- | :--- | :-------- | :-------------------- | :----- | :----------------------- |
+| [comp_name]     | [tier] | [keyword] | [0-100]               | [src]  | **$[Value]**             |
 
 ## 4. Campaign Strategy
 
@@ -65,36 +75,37 @@ _Subscription trial funnel assumptions: tap-to-install CVR, install-to-trial-sta
 
 ### 📂 Campaign: [Brand - Defense]
 
-**Strategy**: Lock in 100% Share of Voice, bid high, protect brand assets.
+**Strategy**: Lock in 100% Share of Voice, bid to protect brand assets.
 
-| Ad Group      | Match Type | Search Match Enabled | Keywords                   | Suggested CPT | Target CPI | Target CPP |
-| :------------ | :--------- | :------------------- | :------------------------- | :------------ | :--------- | :--------- |
-| `Brand_Exact` | Exact      | false                | [[keyword_1], [keyword_2]] | [cpt]         | [cpi]      | [cpp]      |
+| Ad Group      | Match Type | Search Match Enabled | Keywords                   | **Target CPA (Install)** |
+| :------------ | :--------- | :------------------- | :------------------------- | :----------------------- |
+| `Brand_Exact` | Exact      | false                | [[keyword_1], [keyword_2]] | **$[Value]**             |
 
 ### 📂 Campaign: [Generic]
 
 **Strategy**: Group by semantic function (Cluster) to adjust bids per feature.
 
-| Ad Group (Cluster) | Match Type | Search Match Enabled | Keywords                   | Suggested CPT | Target CPI | Target CPP |
-| :----------------- | :--------- | :------------------- | :------------------------- | :------------ | :--------- | :--------- |
-| `[Cluster_Name_1]` | Exact      | false                | [[keyword_1], [keyword_2]] | [cpt]         | [cpi]      | [cpp]      |
-| `[Cluster_Name_2]` | Exact      | false                | [[keyword_3], [keyword_4]] | [cpt]         | [cpi]      | [cpp]      |
+| Ad Group (Cluster) | Match Type | Search Match Enabled | Keywords                   | **Target CPA (Install)** |
+| :----------------- | :--------- | :------------------- | :------------------------- | :----------------------- |
+| `[Cluster_Name_1]` | Exact      | false                | [[keyword_1], [keyword_2]] | **$[Value]**             |
+| `[Cluster_Name_2]` | Exact      | false                | [[keyword_3], [keyword_4]] | **$[Value]**             |
 
 ### 📂 Campaign: [Competitor - Conquesting]
 
 **Strategy**: Target direct competitors to siphon brand traffic, closely monitor CPA.
 
-| Ad Group            | Match Type | Search Match Enabled | Keywords                       | Suggested CPT | Target CPI | Target CPP |
-| :------------------ | :--------- | :------------------- | :----------------------------- | :------------ | :--------- | :--------- |
-| `[Competitor_Name]` | Exact      | false                | [[comp_word_1], [comp_word_2]] | [cpt]         | [cpi]      | [cpp]      |
+| Ad Group            | Match Type | Search Match Enabled | Keywords                       | **Target CPA (Install)** |
+| :------------------ | :--------- | :------------------- | :----------------------------- | :----------------------- |
+| `[Competitor_Name]` | Exact      | false                | [[comp_word_1], [comp_word_2]] | **$[Value]**             |
 
 ### 📂 Campaign: [Discovery]
 
 **Strategy**: **[Search Match disabled by default]**. Find long-tail commercial keywords via broad match on core seeds. Must be paired with strict negative keywords.
 
-| Ad Group          | Match Type | Search Match Enabled | Keywords                 | Suggested CPT | Target CPI | Target CPP |
-| :---------------- | :--------- | :------------------- | :----------------------- | :------------ | :--------- | :--------- |
-| `Discovery_Broad` | Broad      | false                | core_seed_1, core_seed_2 | [cpt]         | [cpi]      | [cpp]      |
+| Ad Group          | Match Type | Search Match Enabled | Keywords                 | **Target CPA (Install)** |
+| :---------------- | :--------- | :------------------- | :----------------------- | :----------------------- |
+| `Discovery_Broad` | Broad      | false                | core_seed_1, core_seed_2 | **$[Value]**             |
+
 
 ## 5. Negative Keyword Matrix
 
@@ -129,7 +140,7 @@ Prevents overlap between tight semantic clusters.
 
 `asa-keywords-*.csv` must include:
 
-`row_type`, `campaign_name`, `ad_group_name`, `keyword`, `match_type`, `negative_keyword`, `negative_match_type`, `negative_scope`, `search_match_enabled`, `country_or_region`, `normalized_popularity_0_100`, `popularity_source`, `raw_popularity`, `normalization_method`, `intent`, `competitor_tier`, `suggested_max_cpt`, `target_cpi`, `target_cpp`, `daily_budget`, `notes`
+`row_type`, `campaign_name`, `ad_group_name`, `keyword`, `match_type`, `negative_keyword`, `negative_match_type`, `negative_scope`, `search_match_enabled`, `country_or_region`, `normalized_popularity_0_100`, `popularity_source`, `raw_popularity`, `normalization_method`, `intent`, `competitor_tier`, `target_cpa`, `daily_budget`, `notes`
 
 ---
 
