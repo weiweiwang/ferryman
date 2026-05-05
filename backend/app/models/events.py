@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal, Optional, Union
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
+
 
 # ==========================================
 # Ferryman EDA (Event-Driven Architecture) Protocol

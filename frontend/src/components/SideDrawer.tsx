@@ -7,9 +7,10 @@ interface SideDrawerProps {
   subtitle?: string;
   onClose: () => void;
   children: ReactNode;
+  size?: 'default' | 'wide';
 }
 
-export function SideDrawer({ open, title, subtitle, onClose, children }: SideDrawerProps) {
+export function SideDrawer({ open, title, subtitle, onClose, children, size = 'default' }: SideDrawerProps) {
   useEffect(() => {
     if (!open) return;
 
@@ -28,7 +29,11 @@ export function SideDrawer({ open, title, subtitle, onClose, children }: SideDra
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/35 backdrop-blur-[2px]" onClick={onClose}>
       <aside
-        className="h-full w-full border-l border-white/10 bg-[#0b0b0b]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.5)] sm:min-w-[420px] sm:max-w-[min(560px,46vw)]"
+        className={
+          size === 'wide'
+            ? "h-full w-full border-l border-white/10 bg-[#0b0b0b]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.5)] sm:min-w-[560px] sm:max-w-[min(820px,68vw)]"
+            : "h-full w-full border-l border-white/10 bg-[#0b0b0b]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.5)] sm:min-w-[420px] sm:max-w-[min(560px,46vw)]"
+        }
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex h-full flex-col">

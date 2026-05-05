@@ -102,6 +102,29 @@
       "daily_dashboard_prompt": "Build me a daily planning tool with voice task input, reminders for the top 3 most important things, and simple stats."
     }
   },
+  "insights": {
+    "open": "View session insights",
+    "title": "Session Insights",
+    "subtitle": "Review token trends and memory state for the current session.",
+    "usage_title": "Token Usage",
+    "memory_title": "Session Memory",
+    "memory_subtitle": "Current memory snapshot and compaction summary.",
+    "load_failed": "Failed to load session insights.",
+    "no_usage": "No token records in this range",
+    "no_memory": "This session has no saved memory yet.",
+    "unattributed_prefix": "Unattributed system usage:",
+    "compaction_summary": "Compaction Summary",
+    "empty_summary": "No compaction summary yet.",
+    "cutoff": "Cutoff",
+    "updated_at": "Updated",
+    "ranges": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "last_7_days": "Last 7d",
+      "last_30_days": "Last 30d",
+      "last_90_days": "Last 90d"
+    }
+  },
   "settings": {
     "subtitle": "Manage model access and runtime settings in one place.",
     "tabs": {

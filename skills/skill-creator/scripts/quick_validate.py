@@ -6,11 +6,12 @@ import json
 import re
 from pathlib import Path
 
-import yaml
+import frontmatter
 
 
 NAME_RE = re.compile(r"^[a-z0-9-]{1,64}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 LOCAL_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 REQUIRED_FRONTMATTER_FIELDS = ("name", "description", "version", "author", "created", "updated")
 
@@ -21,16 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_frontmatter(content: str) -> dict:
-    if not content.startswith("---"):
-        raise ValueError("SKILL.md must start with YAML frontmatter.")
-    parts = content.split("---", 2)
-    if len(parts) < 3:
-        raise ValueError("SKILL.md frontmatter is incomplete.")
-    data = yaml.safe_load(parts[1]) or {}
-    if not isinstance(data, dict):
-        raise ValueError("SKILL.md frontmatter must parse to a mapping.")
-    return data
+def load_frontmatter(content: str) -> dict[str, object]:
+    data = frontmatter.loads(content).metadata
+    if not data:
+        raise ValueError("SKILL.md must contain YAML frontmatter.")
+    return {str(key): value for key, value in data.items()}
 
 
 def collect_local_link_errors(skill_dir: Path, content: str) -> list[str]:
@@ -45,13 +41,13 @@ def collect_local_link_errors(skill_dir: Path, content: str) -> list[str]:
     return errors
 
 
-def normalize_metadata_value(value) -> str:
+def normalize_metadata_value(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
 
 
-def is_iso_date(value) -> bool:
+def is_iso_date(value: object) -> bool:
     text = normalize_metadata_value(value)
     if not DATE_RE.fullmatch(text):
         return False
@@ -80,7 +76,7 @@ def main() -> int:
 
     skill_md = skill_dir / "SKILL.md"
     content = ""
-    metadata: dict = {}
+    metadata: dict[str, object] = {}
     if not errors:
         if not skill_md.exists():
             errors.append("Missing SKILL.md")
@@ -97,14 +93,14 @@ def main() -> int:
                 errors.append(f"Frontmatter field '{field}' is required.")
 
         name = str(metadata.get("name", "")).strip()
-        description = str(metadata.get("description", "")).strip()
         if name and not NAME_RE.fullmatch(name):
             errors.append("Frontmatter field 'name' must use lowercase letters, digits, and hyphens only.")
         elif skill_dir.name != name:
             errors.append(f"Directory name '{skill_dir.name}' must match skill name '{name}'.")
 
-        if metadata.get("version") != "0.1.0":
-            errors.append("Frontmatter field 'version' must be '0.1.0'.")
+        version = normalize_metadata_value(metadata.get("version"))
+        if version and not VERSION_RE.fullmatch(version):
+            errors.append("Frontmatter field 'version' must use semantic version format, e.g. 0.1.0.")
 
         if metadata.get("created") and not is_iso_date(metadata.get("created")):
             errors.append("Frontmatter field 'created' must use YYYY-MM-DD format.")

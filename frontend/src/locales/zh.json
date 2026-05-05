@@ -102,6 +102,29 @@
       "daily_dashboard_prompt": "帮我做一个今日计划工具，支持语音快速记任务，能突出显示今天最重要的3件事，再给我一点简单统计。"
     }
   },
+  "insights": {
+    "open": "查看会话洞察",
+    "title": "会话洞察",
+    "subtitle": "查看当前会话的Token用量与记忆状态。",
+    "usage_title": "Token用量",
+    "memory_title": "会话记忆",
+    "memory_subtitle": "当前保存的记忆快照与压缩摘要。",
+    "load_failed": "加载会话洞察失败。",
+    "no_usage": "当前范围暂无Token记录",
+    "no_memory": "当前会话还没有保存记忆。",
+    "unattributed_prefix": "有未归档到日期的系统用量：",
+    "compaction_summary": "压缩摘要",
+    "empty_summary": "暂无压缩摘要。",
+    "cutoff": "截断时间",
+    "updated_at": "更新时间",
+    "ranges": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "last_7_days": "近7天",
+      "last_30_days": "近30天",
+      "last_90_days": "近90天"
+    }
+  },
   "settings": {
     "subtitle": "在这里调整模型接入与系统运行相关配置。",
     "tabs": {

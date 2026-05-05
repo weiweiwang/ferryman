@@ -6,7 +6,7 @@ import logging
 import argparse
 from datetime import datetime,timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from collections.abc import Mapping
 
 import yfinance as yf
 import pandas as pd
@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def generate_dashboard(ticker: str, info: Dict, history: pd.DataFrame, output_path: str):
+def generate_dashboard(ticker: str, info: Mapping[str, object], history: pd.DataFrame, output_path: str) -> bool:
     """Generate a high-fidelity Plotly dashboard WebP."""
     try:
         name = info.get('longName', ticker)
@@ -35,12 +35,12 @@ def generate_dashboard(ticker: str, info: Dict, history: pd.DataFrame, output_pa
         eps = info.get('trailingEps', 0)
         growth = info.get('revenueGrowth', 0) * 100
 
-        def format_val(val, fmt=".2f", suffix=""):
-            if val is None or val == 0: return "--"
+        def format_val(val: object, fmt: str = ".2f", suffix: str = "") -> str:
+            if not isinstance(val, (int, float)) or val == 0: return "--"
             return f"{val:{fmt}}{suffix}"
 
-        def format_compact(n):
-            if not n: return "--"
+        def format_compact(n: object) -> str:
+            if not isinstance(n, (int, float)) or not n: return "--"
             if abs(n) >= 1e12: return f"{n/1e12:.1f}T"
             if abs(n) >= 1e9: return f"{n/1e9:.2f}B"
             if abs(n) >= 1e6: return f"{n/1e6:.1f}M"
@@ -113,7 +113,7 @@ def generate_dashboard(ticker: str, info: Dict, history: pd.DataFrame, output_pa
         logger.error(f"Chart generation failed: {e}")
         return False
 
-def get_5y_financials(stock: yf.Ticker):
+def get_5y_financials(stock: yf.Ticker) -> list[dict[str, object]]:
     """Fetch and process 5 years of financial statements."""
     try:
         financials = stock.financials
@@ -124,7 +124,7 @@ def get_5y_financials(stock: yf.Ticker):
             return []
 
         years = financials.columns[:5]
-        data = []
+        data: list[dict[str, object]] = []
         for year in years:
             year_str = year.strftime('%Y')
             row = {

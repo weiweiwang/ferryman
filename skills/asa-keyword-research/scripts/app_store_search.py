@@ -2,12 +2,10 @@ import argparse
 import json
 import logging
 import sys
-from typing import Any
 
 import requests
 
 from app_store_suggester import DEFAULT_USER_AGENT, AppStoreSuggester, SuggestionLookupError
-
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,7 +32,7 @@ class AppStoreSearchClient:
             "limit": max(1, min(limit, 50)),
         }
 
-    def search_apps(self, term: str, country_code: str = "US", limit: int = 20) -> dict[str, Any]:
+    def search_apps(self, term: str, country_code: str = "US", limit: int = 20) -> dict[str, object]:
         params = self.build_params(term, country_code, limit)
         language = self.suggester.get_language(country_code)
         headers = {

@@ -27,7 +27,8 @@ import {
   Link,
   TrendingUp,
   Gauge,
-  ExternalLink
+  ExternalLink,
+  BarChart3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
@@ -36,6 +37,7 @@ import { Markdown } from './components/Markdown';
 import { RefreshIconButton } from './components/RefreshIconButton';
 import { ScheduleManager } from './components/ScheduleManager';
 import { TaskManager } from './components/TaskManager';
+import { SessionInsightsDrawer } from './components/SessionInsightsDrawer';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -275,6 +277,7 @@ export default function App() {
   const [browserRuntimeStatus, setBrowserRuntimeStatus] = useState<BrowserRuntimeStatus | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
+  const [isInsightsOpen, setIsInsightsOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -793,6 +796,7 @@ export default function App() {
 
           <div className="flex items-center">
             {currentView === 'chat' && (
+              <div className="flex items-center gap-2">
                <div className="flex items-center gap-4 bg-white/[0.04] border border-white/10 rounded-full px-5 py-2 backdrop-blur-md shadow-sm">
                    <div className="flex items-center gap-2">
                      <span className="text-[9px] font-black text-white/40 uppercase tracking-widest leading-none">{t('tasks.token_in')}</span>
@@ -809,6 +813,16 @@ export default function App() {
                      <span className="text-white font-mono text-[11px] font-bold leading-none">{currentUsage.total_tokens.toLocaleString()}</span>
                    </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInsightsOpen(true)}
+                  className="group relative flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/45 shadow-sm backdrop-blur-md transition-colors hover:bg-white/10 hover:text-white"
+                  aria-label={t('insights.open')}
+                  title={t('insights.open')}
+                >
+                  <BarChart3 size={16} strokeWidth={2.2} />
+                </button>
+              </div>
             )}
           </div>
         </header>
@@ -1381,6 +1395,15 @@ export default function App() {
 	            </motion.div>
           )}
         </AnimatePresence>
+
+        <SessionInsightsDrawer
+          open={isInsightsOpen}
+          sessionId={currentSessionId}
+          isConnected={isConnected}
+          call={call}
+          onClose={() => setIsInsightsOpen(false)}
+          t={t}
+        />
       </main>
     </div>
   );

@@ -45,7 +45,7 @@ Do NOT hallucinate or guess popularity. Normalize all popularity signals into `n
 
 - **Global Tier 1**: Prioritize the **Apple Search Ads Dashboard** (`searchads.apple.com`). It is the most authoritative SP source. If authenticated, use a draft campaign's `Add Keywords` module to retrieve the exact popularity bar.
 - **Global Tier 2**: Use **AppFollow** or **MobileAction** when the ASA dashboard is blocked, too slow, or unavailable. Useful search patterns include `keyword popularity site:appfollow.io` and `site:mobileaction.co <keyword> search volume`.
-- **China (CN)**: Prioritize **QiMai.cn** for China search index data. Use **DianDian** or **ASO100** as backup references.
+- **China (CN)**: Prioritize **QiMai.cn** for China search index data. Use the automated script: `run_skill_script(script_name="qimai_keyword_detail.py", args=["--appid", "<track_id>", "--country", "cn"])` to fetch keywords and their search indices from a top competitor. Use **DianDian** or **ASO100** as backup references.
 - **Fallback**: Use App Store Search Hints from `run_skill_script(script_name="app_store_suggester.py", args=["--term", "<seed>", "--country", "<CC>"])`. If an autocomplete keyword ranks 1st and contains the core seed, estimate SP > 50. If it ranks 5th or lower with moderate relevance, estimate SP < 30.
 
 Popularity normalization rules:

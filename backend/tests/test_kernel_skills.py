@@ -355,6 +355,35 @@ updated: 2026-04-14
     assert payload["metadata"]["updated"] == "2026-04-14"
 
 
+def test_quick_validate_accepts_incremented_semantic_version(tmp_path):
+    draft_dir = tmp_path / "demo-skill"
+    draft_dir.mkdir()
+    (draft_dir / "SKILL.md").write_text(
+        """---
+name: demo-skill
+description: Demo trigger description
+version: 0.1.2
+author: Ferryman
+created: 2026-04-14
+updated: 2026-04-14
+---
+# Demo Skill
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(VALIDATE_SCRIPT), str(draft_dir)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["metadata"]["version"] == "0.1.2"
+
+
 def test_quick_validate_rejects_name_mismatch(tmp_path):
     draft_dir = tmp_path / "wrong-folder"
     draft_dir.mkdir()

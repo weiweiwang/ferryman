@@ -4,7 +4,6 @@ import plistlib
 import argparse
 import sys
 import requests
-from typing import Any, List
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ class AppStoreSuggester:
         term: str,
         country_code: str = "US",
         language: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         country_code = country_code.upper()
         if country_code not in self.countries:
             supported = ", ".join(sorted(self.countries))
