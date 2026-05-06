@@ -67,6 +67,47 @@ def test_wrap_browser_content_marks_output_as_untrusted():
     assert wrapped.endswith("hello")
 
 
+def test_browser_cleanup_removes_stale_process_singleton_files(tmp_path, monkeypatch):
+    profile_dir = tmp_path / ".browser"
+    profile_dir.mkdir()
+    (profile_dir / "SingletonLock").symlink_to("MacBook-Pro.local-12345")
+    (profile_dir / "SingletonCookie").write_text("cookie", encoding="utf-8")
+    (profile_dir / "SingletonSocket").symlink_to("/tmp/stale-socket")
+    (profile_dir / "MacBook-Pro.local-12345").write_text("lock", encoding="utf-8")
+    (profile_dir / "123456789012345").write_text("lock", encoding="utf-8")
+    keep_dir = profile_dir / "Default"
+    keep_dir.mkdir()
+
+    monkeypatch.setattr(BrowserController, "_pid_exists", staticmethod(lambda pid: False))
+
+    removed = BrowserController._cleanup_stale_process_singleton_files(profile_dir)
+
+    assert {path.name for path in removed} == {
+        "SingletonLock",
+        "SingletonCookie",
+        "SingletonSocket",
+        "MacBook-Pro.local-12345",
+        "123456789012345",
+    }
+    assert not (profile_dir / "SingletonLock").exists()
+    assert keep_dir.exists()
+
+
+def test_browser_cleanup_keeps_process_singleton_files_when_owner_is_alive(tmp_path, monkeypatch):
+    profile_dir = tmp_path / ".browser"
+    profile_dir.mkdir()
+    (profile_dir / "SingletonLock").symlink_to("MacBook-Pro.local-12345")
+    (profile_dir / "SingletonCookie").write_text("cookie", encoding="utf-8")
+
+    monkeypatch.setattr(BrowserController, "_pid_exists", staticmethod(lambda pid: True))
+
+    removed = BrowserController._cleanup_stale_process_singleton_files(profile_dir)
+
+    assert removed == []
+    assert (profile_dir / "SingletonLock").is_symlink()
+    assert (profile_dir / "SingletonCookie").exists()
+
+
 @pytest.mark.asyncio
 async def test_browser_persistent_context_uses_native_chrome_user_agent():
     class FakePage:
@@ -190,6 +231,64 @@ async def test_browser_stealth_is_applied_to_context_for_popups(monkeypatch):
     assert {"console", "pageerror", "requestfailed"}.issubset(
         set(controller._browser_context.pages[0].events)
     )
+
+
+@pytest.mark.asyncio
+async def test_browser_enter_retries_once_after_stale_process_singleton_cleanup(monkeypatch):
+    class FakePage:
+        def on(self, event, handler):
+            return None
+
+    class FakeContext:
+        def __init__(self):
+            self.pages = [FakePage()]
+
+        def on(self, event, handler):
+            return None
+
+        async def close(self):
+            return None
+
+    class FakePlaywright:
+        async def stop(self):
+            return None
+
+    class FakePlaywrightFactory:
+        async def start(self):
+            return FakePlaywright()
+
+    class FakeStealth:
+        async def apply_stealth_async(self, target):
+            return None
+
+    launch_calls = []
+
+    async def fake_launch_browser(plan, args):
+        launch_calls.append((plan, args))
+        if len(launch_calls) == 1:
+            raise PlaywrightError("Failed to create a ProcessSingleton for your profile directory: SingletonLock")
+        return FakeContext(), FakePage()
+
+    monkeypatch.setattr("app.core.browser.async_playwright", lambda: FakePlaywrightFactory())
+    monkeypatch.setattr("app.core.browser.Stealth", FakeStealth)
+    monkeypatch.setattr(
+        BrowserController,
+        "_build_launch_plans",
+        lambda self: [{"label": "fake Chrome", "launch_kwargs": {}}],
+    )
+    monkeypatch.setattr(
+        BrowserController,
+        "_cleanup_stale_process_singleton_files",
+        classmethod(lambda cls, profile_dir: [profile_dir / "SingletonLock"]),
+    )
+
+    controller = BrowserController(user_data_dir="/tmp/ferryman-browser-profile")
+    monkeypatch.setattr(controller, "_launch_browser", fake_launch_browser)
+
+    await controller.__aenter__()
+
+    assert len(launch_calls) == 2
+    assert controller._browser_runtime == "fake Chrome"
 
 
 @pytest.mark.asyncio
