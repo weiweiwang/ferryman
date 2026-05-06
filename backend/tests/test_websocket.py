@@ -824,23 +824,6 @@ def test_websocket_session_message_and_task_flows(client, session):
 
         response = send_rpc(
             websocket,
-            "get_session",
-            {"session_id": "session-1"},
-            request_id=121,
-        )
-        assert response["result"] == {
-            "status": "success",
-            "session": {
-                "id": "session-1",
-                "title": "Session One",
-                "updated_at": now.isoformat(),
-                "input_tokens": 11,
-                "output_tokens": 7,
-            },
-        }
-
-        response = send_rpc(
-            websocket,
             "update_session",
             {"session_id": "session-1", "title": "Renamed Session"},
             request_id=13,

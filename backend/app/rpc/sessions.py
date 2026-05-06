@@ -38,16 +38,6 @@ async def create_session(context, title: Optional[str] = None):
 
 
 @method
-async def get_session(context, session_id: str):
-    """Return one chat session by id."""
-    with get_db_session() as db_session:
-        session_obj = db_session.get(Session, session_id)
-        if not session_obj:
-            return Success({"status": "error", "message": "Session not found"})
-        return Success({"status": "success", "session": serialize_session(session_obj)})
-
-
-@method
 async def delete_session(context, session_id: str):
     """Delete a session and its associated messages/tasks."""
     logger.info(f"🗑️ Deleting session: {session_id}")

@@ -78,7 +78,7 @@ export function useSessions({
 }: UseSessionsArgs) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => localStorage.getItem('last_session_id') || '');
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [currentUsage, setCurrentUsage] = useState<Usage>({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -116,14 +116,6 @@ export function useSessions({
     isLoadingOlderMessagesRef.current = isLoadingOlderMessages;
   }, [isLoadingOlderMessages]);
 
-  useEffect(() => {
-    if (currentSessionId) {
-      localStorage.setItem('last_session_id', currentSessionId);
-    } else {
-      localStorage.removeItem('last_session_id');
-    }
-  }, [currentSessionId]);
-
   const refreshSessions = useCallback(async () => {
     try {
       const res: any = await call('list_sessions', { limit: 50 });
@@ -134,19 +126,6 @@ export function useSessions({
     } catch (error) {
       console.error('Failed to list sessions:', error);
       return [] as Session[];
-    }
-  }, [call]);
-
-  const getSessionById = useCallback(async (sessionId: string) => {
-    try {
-      const res: any = await call('get_session', { session_id: sessionId });
-      if (res?.status !== 'success' || !res?.session) {
-        return null;
-      }
-      return res.session as Session;
-    } catch (error) {
-      console.error('Failed to get session:', error);
-      return null;
     }
   }, [call]);
 
@@ -616,36 +595,6 @@ export function useSessions({
     let cancelled = false;
 
     const initializeSession = async () => {
-      const storedSessionId = localStorage.getItem('last_session_id') || currentSessionIdRef.current;
-      if (storedSessionId) {
-        const restoredSession = await getSessionById(storedSessionId);
-        if (cancelled) {
-          return;
-        }
-
-        if (restoredSession) {
-          const listedSessions = await refreshSessions();
-          if (cancelled) {
-            return;
-          }
-
-          const sourceSessions = listedSessions.length > 0 ? listedSessions : sessionsRef.current;
-          const nextSessions = sourceSessions.some((session) => session.id === restoredSession.id)
-            ? sourceSessions.map((session) => session.id === restoredSession.id ? restoredSession : session)
-            : [restoredSession, ...sourceSessions];
-          sessionsRef.current = nextSessions;
-          setSessions(nextSessions);
-          hasInitializedSessionRef.current = true;
-          await switchSession(restoredSession.id);
-          return;
-        }
-
-        if (currentSessionIdRef.current === storedSessionId) {
-          currentSessionIdRef.current = '';
-          setCurrentSessionId('');
-        }
-      }
-
       const listedSessions = await refreshSessions();
       if (cancelled) {
         return;
@@ -669,7 +618,7 @@ export function useSessions({
     return () => {
       cancelled = true;
     };
-  }, [createNewSession, getSessionById, isConnected, refreshSessions, switchSession]);
+  }, [createNewSession, isConnected, refreshSessions, switchSession]);
 
   const stopActiveRun = useCallback(async () => {
     const runToStop = activeRunRef.current;
