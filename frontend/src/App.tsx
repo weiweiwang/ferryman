@@ -938,7 +938,7 @@ export default function App() {
                         initial={{ opacity: 0, x: msg.role === 'user' ? 20 : -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         className={cn(
-                          "group/message relative max-w-[85%] pb-11",
+                          "group/message relative min-w-0 max-w-[85%] pb-11",
                           msg.role === 'user'
                             ? "ml-auto"
                             : "mr-auto"

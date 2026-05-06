@@ -66,7 +66,7 @@ export const Markdown = ({ content }: MarkdownProps) => {
   };
 
   return (
-    <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-[#0d0d0d] prose-pre:border prose-pre:border-white/5 prose-code:text-blue-300">
+    <div className="prose prose-invert max-w-none [overflow-wrap:anywhere] prose-p:leading-relaxed prose-pre:bg-[#0d0d0d] prose-pre:border prose-pre:border-white/5 prose-code:text-blue-300">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         urlTransform={(url) => {
@@ -109,7 +109,7 @@ export const Markdown = ({ content }: MarkdownProps) => {
 
           if (!inline) {
             return (
-              <div className="group/code relative my-4">
+              <div className="group/code relative my-4 [overflow-wrap:normal]">
                 <div className="absolute right-3 top-3 z-10 opacity-0 transition-opacity duration-150 group-hover/code:opacity-100 group-focus-within/code:opacity-100">
                   <CopyCodeButton text={text} t={t} />
                 </div>
@@ -150,7 +150,7 @@ export const Markdown = ({ content }: MarkdownProps) => {
             return (
               <a 
                 {...props}
-                className="text-blue-400 hover:text-blue-300 underline cursor-pointer transition-colors"
+                className="cursor-pointer break-words text-blue-400 underline transition-colors [overflow-wrap:anywhere] hover:text-blue-300"
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -163,7 +163,7 @@ export const Markdown = ({ content }: MarkdownProps) => {
               </a>
             );
           }
-          return <a className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noopener noreferrer" href={href} {...props}>{children}</a>;
+          return <a className="break-words text-blue-400 underline transition-colors [overflow-wrap:anywhere] hover:text-blue-300" target="_blank" rel="noopener noreferrer" href={href} {...props}>{children}</a>;
         }
 
       }}
