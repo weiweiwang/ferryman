@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "rand 0.8.5",
  "serde",
