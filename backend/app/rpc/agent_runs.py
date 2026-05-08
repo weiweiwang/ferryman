@@ -377,6 +377,8 @@ async def execute(context, instruction: str, session_id: Optional[str] = None):
             "task": task,
             "session_id": session_id,
             "instruction": instruction,
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
         }
         context.app_state.session_run_index[session_id] = run_id
         return Success({"status": "started", "run_id": run_id, "session_id": session_id})

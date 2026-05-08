@@ -33,12 +33,21 @@ export interface Message {
   metadata?: MessageMetadata;
 }
 
+export type SessionActiveRunStatus = 'running' | 'canceling';
+
+export interface SessionActiveRun {
+  run_id: string;
+  status: SessionActiveRunStatus;
+  started_at?: string;
+}
+
 export interface Session {
   id: string;
   title: string;
   updated_at: string;
   input_tokens: number;
   output_tokens: number;
+  active_run?: SessionActiveRun | null;
 }
 
 interface UseSessionsArgs {
@@ -49,11 +58,6 @@ interface UseSessionsArgs {
   lastEvent: FerrymanEvent | null;
   isConnected?: boolean;
 }
-
-type ActiveRun = {
-  runId: string;
-  sessionId: string;
-};
 
 type TerminalRunSnapshot = {
   status: MessageRunStatus;
@@ -80,14 +84,13 @@ export function useSessions({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [currentUsage, setCurrentUsage] = useState<Usage>({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
-  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [olderMessagesCursor, setOlderMessagesCursor] = useState<string | null>(null);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const currentSessionIdRef = useRef(currentSessionId);
   const sessionsRef = useRef(sessions);
-  const activeRunRef = useRef(activeRun);
   const messagesRef = useRef(messages);
+  const messagesSessionIdRef = useRef<string>('');
   const olderMessagesCursorRef = useRef<string | null>(olderMessagesCursor);
   const isLoadingOlderMessagesRef = useRef(isLoadingOlderMessages);
   const hasInitializedSessionRef = useRef(false);
@@ -101,10 +104,6 @@ export function useSessions({
   }, [sessions]);
 
   useEffect(() => {
-    activeRunRef.current = activeRun;
-  }, [activeRun]);
-
-  useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
@@ -115,6 +114,74 @@ export function useSessions({
   useEffect(() => {
     isLoadingOlderMessagesRef.current = isLoadingOlderMessages;
   }, [isLoadingOlderMessages]);
+
+  const replaceSession = useCallback((nextSession: Session) => {
+    const currentSessions = sessionsRef.current;
+    const existingIndex = currentSessions.findIndex((session) => session.id === nextSession.id);
+    const nextSessions = existingIndex >= 0
+      ? currentSessions.map((session) => (session.id === nextSession.id ? nextSession : session))
+      : [nextSession, ...currentSessions];
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+  }, []);
+
+  const patchSession = useCallback((sessionId: string, patch: Partial<Session>) => {
+    const currentSessions = sessionsRef.current;
+    const existingIndex = currentSessions.findIndex((session) => session.id === sessionId);
+    const nextSessions = existingIndex >= 0
+      ? currentSessions.map((session) => (
+        session.id === sessionId ? { ...session, ...patch } : session
+      ))
+      : [
+        {
+          id: sessionId,
+          title: '',
+          updated_at: new Date().toISOString(),
+          input_tokens: currentUsage.input_tokens,
+          output_tokens: currentUsage.output_tokens,
+          active_run: null,
+          ...patch,
+        },
+        ...currentSessions,
+      ];
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+  }, [currentUsage.input_tokens, currentUsage.output_tokens]);
+
+  const getSessionActiveRun = useCallback((sessionId: string): SessionActiveRun | null => {
+    return sessionsRef.current.find((session) => session.id === sessionId)?.active_run || null;
+  }, []);
+
+  const getTrackedRunId = useCallback((sessionId: string): string | null => {
+    const activeRun = getSessionActiveRun(sessionId);
+    if (activeRun?.run_id) {
+      return activeRun.run_id;
+    }
+
+    if (currentSessionIdRef.current !== sessionId || messagesSessionIdRef.current !== sessionId) {
+      return null;
+    }
+
+    const pendingMessage = [...messagesRef.current].reverse().find((message) =>
+      message.metadata?.run?.id && message.metadata.run.status === 'pending'
+    );
+    return pendingMessage?.metadata?.run?.id || null;
+  }, [getSessionActiveRun]);
+
+  const refreshSessionInfo = useCallback(async (sessionId: string): Promise<Session | null> => {
+    try {
+      const result: any = await call('get_session', { session_id: sessionId });
+      if (result?.status === 'error' || !result?.id) {
+        return null;
+      }
+      const nextSession = result as Session;
+      replaceSession(nextSession);
+      return nextSession;
+    } catch (error) {
+      console.error('Failed to get session:', error);
+      return null;
+    }
+  }, [call, replaceSession]);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -150,17 +217,18 @@ export function useSessions({
   }, []);
 
   const reconcileActiveRunFromMessages = useCallback((candidateMessages: Message[], sessionId: string) => {
-    const currentActiveRun = activeRunRef.current;
-    if (!currentActiveRun || sessionId !== currentActiveRun.sessionId) {
+    const trackedRunId = getTrackedRunId(sessionId);
+    if (!trackedRunId) {
       return false;
     }
 
-    const snapshot = getTerminalRunSnapshot(candidateMessages, currentActiveRun.runId);
+    const snapshot = getTerminalRunSnapshot(candidateMessages, trackedRunId);
     if (!snapshot) {
       return false;
     }
 
     if (currentSessionIdRef.current === sessionId) {
+      messagesRef.current = candidateMessages;
       setMessages(candidateMessages);
       setCurrentUsage((prev) => ({
         input_tokens: prev.input_tokens + (snapshot.usage.input_tokens || 0),
@@ -169,28 +237,27 @@ export function useSessions({
       }));
     }
 
-    activeRunRef.current = null;
-    setActiveRun(null);
+    patchSession(sessionId, { active_run: null });
     clearToolActivities();
     refreshSessions().catch((error) => {
       console.error('Failed to refresh sessions after run reconciliation:', error);
     });
     return true;
-  }, [clearToolActivities, getTerminalRunSnapshot, refreshSessions]);
+  }, [clearToolActivities, getTerminalRunSnapshot, getTrackedRunId, patchSession, refreshSessions]);
 
   const mergePendingAssistantPlaceholder = useCallback((candidateMessages: Message[], sessionId: string): Message[] => {
-    const currentActiveRun = activeRunRef.current;
-    if (!currentActiveRun || sessionId !== currentActiveRun.sessionId) {
+    const trackedRunId = getTrackedRunId(sessionId);
+    if (!trackedRunId) {
       return candidateMessages;
     }
 
-    if (getTerminalRunSnapshot(candidateMessages, currentActiveRun.runId)) {
+    if (getTerminalRunSnapshot(candidateMessages, trackedRunId)) {
       return candidateMessages;
     }
 
     const hasPendingAssistant = candidateMessages.some((message) =>
       message.role === 'assistant' &&
-      message.metadata?.run?.id === currentActiveRun.runId &&
+      message.metadata?.run?.id === trackedRunId &&
       message.metadata?.run?.status === 'pending'
     );
     if (hasPendingAssistant) {
@@ -199,7 +266,7 @@ export function useSessions({
 
     const existingPlaceholder = messagesRef.current.find((message) =>
       message.role === 'assistant' &&
-      message.metadata?.run?.id === currentActiveRun.runId &&
+      message.metadata?.run?.id === trackedRunId &&
       message.metadata?.run?.status === 'pending'
     );
 
@@ -210,7 +277,7 @@ export function useSessions({
         created_at: new Date().toISOString(),
         metadata: {
           run: {
-            id: currentActiveRun.runId,
+            id: trackedRunId,
             status: 'pending',
             scope: 'master',
           },
@@ -224,29 +291,38 @@ export function useSessions({
     }
 
     return [...candidateMessages, existingPlaceholder];
-  }, [getTerminalRunSnapshot]);
+  }, [getTerminalRunSnapshot, getTrackedRunId]);
 
   const switchSession = useCallback(async (sessionId: string) => {
     setCurrentSessionId(sessionId);
     currentSessionIdRef.current = sessionId;
     setOlderMessagesCursor(null);
     try {
+      const sessionInfo = await refreshSessionInfo(sessionId);
+      if (currentSessionIdRef.current !== sessionId) {
+        return;
+      }
+
       const res: any = await call('list_messages', { session_id: sessionId, limit: MESSAGE_PAGE_SIZE });
       if (currentSessionIdRef.current !== sessionId) {
         return;
       }
 
       const nextMessages = mergePendingAssistantPlaceholder(res.messages || [], sessionId);
+      messagesSessionIdRef.current = sessionId;
       setMessages(nextMessages);
       setOlderMessagesCursor(res.next_cursor || null);
       const reconciledActiveRun = reconcileActiveRunFromMessages(nextMessages, sessionId);
+      if (!reconciledActiveRun) {
+        messagesRef.current = nextMessages;
+      }
 
-      const sessionInfo = sessionsRef.current.find((session) => session.id === sessionId);
-      if (sessionInfo) {
+      const usageSessionInfo = sessionInfo || sessionsRef.current.find((session) => session.id === sessionId);
+      if (usageSessionInfo) {
         setCurrentUsage({
-          input_tokens: sessionInfo.input_tokens,
-          output_tokens: sessionInfo.output_tokens,
-          total_tokens: sessionInfo.input_tokens + sessionInfo.output_tokens,
+          input_tokens: usageSessionInfo.input_tokens,
+          output_tokens: usageSessionInfo.output_tokens,
+          total_tokens: usageSessionInfo.input_tokens + usageSessionInfo.output_tokens,
         });
       } else if (!reconciledActiveRun) {
         setCurrentUsage({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
@@ -254,7 +330,7 @@ export function useSessions({
     } catch (error) {
       console.error('Failed to load session messages:', error);
     }
-  }, [call, mergePendingAssistantPlaceholder, reconcileActiveRunFromMessages]);
+  }, [call, mergePendingAssistantPlaceholder, reconcileActiveRunFromMessages, refreshSessionInfo]);
 
   const refreshCurrentSession = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
@@ -263,12 +339,18 @@ export function useSessions({
     }
 
     try {
+      const sessionInfo = await refreshSessionInfo(sessionId);
+      if (currentSessionIdRef.current !== sessionId) {
+        return;
+      }
+
       const res: any = await call('list_messages', { session_id: sessionId, limit: MESSAGE_PAGE_SIZE });
       if (currentSessionIdRef.current !== sessionId) {
         return;
       }
 
       const nextMessages = mergePendingAssistantPlaceholder(res.messages || [], sessionId);
+      messagesSessionIdRef.current = sessionId;
       setMessages(nextMessages);
       setOlderMessagesCursor(res.next_cursor || null);
 
@@ -276,19 +358,20 @@ export function useSessions({
       if (reconciledActiveRun) {
         return;
       }
+      messagesRef.current = nextMessages;
 
-      const sessionInfo = sessionsRef.current.find((session) => session.id === sessionId);
-      if (sessionInfo) {
+      const usageSessionInfo = sessionInfo || sessionsRef.current.find((session) => session.id === sessionId);
+      if (usageSessionInfo) {
         setCurrentUsage({
-          input_tokens: sessionInfo.input_tokens,
-          output_tokens: sessionInfo.output_tokens,
-          total_tokens: sessionInfo.input_tokens + sessionInfo.output_tokens,
+          input_tokens: usageSessionInfo.input_tokens,
+          output_tokens: usageSessionInfo.output_tokens,
+          total_tokens: usageSessionInfo.input_tokens + usageSessionInfo.output_tokens,
         });
       }
     } catch (error) {
       console.error('Failed to refresh current session messages:', error);
     }
-  }, [call, mergePendingAssistantPlaceholder, reconcileActiveRunFromMessages]);
+  }, [call, mergePendingAssistantPlaceholder, reconcileActiveRunFromMessages, refreshSessionInfo]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -348,18 +431,25 @@ export function useSessions({
       return;
     }
 
+    const refreshedSessionId = lastEvent.session_id || payload.entity_id;
+    if (refreshedSessionId && getTrackedRunId(refreshedSessionId)) {
+      return;
+    }
+
     refreshSessions().catch((error) => {
       console.error('Failed to refresh sessions after session event:', error);
     });
-  }, [lastEvent, refreshSessions]);
+  }, [getTrackedRunId, lastEvent, refreshSessions]);
 
   useEffect(() => {
-    if (!lastEvent || lastEvent.namespace !== 'agent' || lastEvent.event !== 'chat_final' || !activeRun) {
+    if (!lastEvent || lastEvent.namespace !== 'agent' || lastEvent.event !== 'chat_final') {
       return;
     }
 
     const payload = lastEvent.payload as any;
-    if (payload?.run_id !== activeRun.runId || lastEvent.session_id !== activeRun.sessionId) {
+    const eventSessionId = lastEvent.session_id || '';
+    const activeRun = eventSessionId ? getSessionActiveRun(eventSessionId) : null;
+    if (!eventSessionId || !activeRun || payload?.run_id !== activeRun.run_id) {
       return;
     }
 
@@ -370,12 +460,12 @@ export function useSessions({
     const runMetadata = latestAssistantMessage?.metadata?.run || {};
     const runStatus: MessageRunStatus = runMetadata.status || (latestAssistantResponse.startsWith('Run failed:') ? 'failed' : 'success');
     const nextRunMetadata: MessageRunMetadata = {
-      id: runMetadata.id || activeRun.runId,
+      id: runMetadata.id || activeRun.run_id,
       status: runStatus,
       scope: runMetadata.scope || 'master',
       ...(runMetadata.error ? { error: runMetadata.error } : {}),
     };
-    const isVisibleRunSession = currentSessionId === activeRun.sessionId;
+    const isVisibleRunSession = currentSessionId === eventSessionId;
 
     if (isVisibleRunSession) {
       setMessages((prev) => {
@@ -383,11 +473,11 @@ export function useSessions({
           return prev
             .filter((message) => !(
               message.role === 'assistant' &&
-              message.metadata?.run?.id === activeRun.runId &&
+              message.metadata?.run?.id === activeRun.run_id &&
               message.metadata?.run?.status === 'pending'
             ))
             .map((message) => (
-              message.role === 'user' && message.metadata?.run?.id === activeRun.runId
+              message.role === 'user' && message.metadata?.run?.id === activeRun.run_id
                 ? {
                     ...message,
                     metadata: {
@@ -409,7 +499,7 @@ export function useSessions({
         }
 
         return prev.map((message) => {
-          if (message.role === 'user' && message.metadata?.run?.id === activeRun.runId) {
+          if (message.role === 'user' && message.metadata?.run?.id === activeRun.run_id) {
             return {
               ...message,
               metadata: {
@@ -421,7 +511,7 @@ export function useSessions({
 
           if (
             message.role === 'assistant' &&
-            message.metadata?.run?.id === activeRun.runId &&
+            message.metadata?.run?.id === activeRun.run_id &&
             message.metadata?.run?.status === 'pending'
           ) {
             return {
@@ -442,35 +532,35 @@ export function useSessions({
       }));
     }
 
-    setActiveRun(null);
+    patchSession(eventSessionId, { active_run: null });
     clearToolActivities();
     refreshSessions().catch((error) => {
       console.error('Failed to refresh sessions after chat final event:', error);
     });
-  }, [activeRun, clearToolActivities, currentSessionId, lastEvent, refreshSessions]);
+  }, [clearToolActivities, currentSessionId, getSessionActiveRun, lastEvent, patchSession, refreshSessions]);
 
   useEffect(() => {
-    if (!activeRun || !lastEvent || lastEvent.namespace !== 'data' || lastEvent.event !== 'refresh') {
+    if (!lastEvent || lastEvent.namespace !== 'data' || lastEvent.event !== 'refresh') {
       return;
     }
 
     const payload = lastEvent.payload as RefreshPayload;
     const refreshedSessionId = lastEvent.session_id || payload.entity_id;
-    if (payload.entity !== 'session' || refreshedSessionId !== activeRun.sessionId) {
+    if (payload.entity !== 'session' || !refreshedSessionId || !getTrackedRunId(refreshedSessionId)) {
       return;
     }
 
     let cancelled = false;
 
-    call('list_messages', { session_id: activeRun.sessionId, limit: MESSAGE_PAGE_SIZE })
+    call('list_messages', { session_id: refreshedSessionId, limit: MESSAGE_PAGE_SIZE })
       .then((res: any) => {
         if (cancelled) {
           return;
         }
 
         reconcileActiveRunFromMessages(
-          mergePendingAssistantPlaceholder(res.messages || [], activeRun.sessionId),
-          activeRun.sessionId
+          mergePendingAssistantPlaceholder(res.messages || [], refreshedSessionId),
+          refreshedSessionId
         );
       })
       .catch((error) => {
@@ -480,7 +570,7 @@ export function useSessions({
     return () => {
       cancelled = true;
     };
-  }, [activeRun, call, lastEvent, mergePendingAssistantPlaceholder, reconcileActiveRunFromMessages]);
+  }, [call, getTrackedRunId, lastEvent, mergePendingAssistantPlaceholder, reconcileActiveRunFromMessages]);
 
   const createNewSession = useCallback(async () => {
     try {
@@ -491,6 +581,7 @@ export function useSessions({
       }
       setCurrentSessionId(newId);
       currentSessionIdRef.current = newId;
+      messagesSessionIdRef.current = newId;
       setMessages([]);
       setOlderMessagesCursor(null);
       setCurrentUsage({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
@@ -524,15 +615,15 @@ export function useSessions({
     if (!trimmedInstruction) {
       return { status: 'error', message: translateStatic('chat.run_failed') };
     }
-    if (activeRun || isSubmitting) {
-      return { status: 'busy', message: translateStatic('chat.session_busy') };
-    }
-
     const targetSessionId = currentSessionId;
     if (!targetSessionId) {
       return { status: 'error', message: translateStatic('chat.run_failed') };
     }
+    if (getSessionActiveRun(targetSessionId) || isSubmitting) {
+      return { status: 'busy', message: translateStatic('chat.session_busy') };
+    }
     setIsSubmitting(true);
+    messagesSessionIdRef.current = targetSessionId;
 
     try {
       const result = await executeInstruction(trimmedInstruction, targetSessionId);
@@ -554,8 +645,9 @@ export function useSessions({
       const nowIso = new Date().toISOString();
 
       clearToolActivities();
-      setMessages((prev) => [
-        ...prev,
+      messagesSessionIdRef.current = targetSessionId;
+      const localPendingMessages: Message[] = [
+        ...messagesRef.current,
         {
           role: 'user',
           content: trimmedInstruction,
@@ -574,10 +666,16 @@ export function useSessions({
           created_at: nowIso,
           metadata: { run: { id: runId, status: 'pending', scope: 'master' } },
         },
-      ]);
-      const nextActiveRun = { runId, sessionId: targetSessionId };
-      activeRunRef.current = nextActiveRun;
-      setActiveRun(nextActiveRun);
+      ];
+      messagesRef.current = localPendingMessages;
+      setMessages(localPendingMessages);
+      patchSession(targetSessionId, {
+        active_run: {
+          run_id: runId,
+          status: 'running',
+          started_at: nowIso,
+        },
+      });
       return { status: 'started', runId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -585,7 +683,7 @@ export function useSessions({
     } finally {
       setIsSubmitting(false);
     }
-  }, [activeRun, clearToolActivities, currentSessionId, executeInstruction, isSubmitting]);
+  }, [clearToolActivities, currentSessionId, executeInstruction, getSessionActiveRun, isSubmitting, patchSession]);
 
   useEffect(() => {
     if (!isConnected || hasInitializedSessionRef.current) {
@@ -621,44 +719,42 @@ export function useSessions({
   }, [createNewSession, isConnected, refreshSessions, switchSession]);
 
   const stopActiveRun = useCallback(async () => {
-    const runToStop = activeRunRef.current;
+    const sessionId = currentSessionIdRef.current;
+    const runToStop = sessionId ? getSessionActiveRun(sessionId) : null;
     if (!runToStop) return;
 
-    if (currentSessionIdRef.current === runToStop.sessionId) {
-      setMessages((prev) => prev
-        .filter((message) => !(
-          message.role === 'assistant' &&
-          message.metadata?.run?.id === runToStop.runId &&
-          message.metadata?.run?.status === 'pending'
-        ))
-        .map((message) => (
-          message.role === 'user' && message.metadata?.run?.id === runToStop.runId
-            ? {
-                ...message,
-                metadata: {
-                  ...(message.metadata || {}),
-                  run: {
-                    ...(message.metadata?.run || {}),
-                    id: runToStop.runId,
-                    status: 'canceled',
-                    scope: message.metadata?.run?.scope || 'master',
-                  },
+    setMessages((prev) => prev
+      .filter((message) => !(
+        message.role === 'assistant' &&
+        message.metadata?.run?.id === runToStop.run_id &&
+        message.metadata?.run?.status === 'pending'
+      ))
+      .map((message) => (
+        message.role === 'user' && message.metadata?.run?.id === runToStop.run_id
+          ? {
+              ...message,
+              metadata: {
+                ...(message.metadata || {}),
+                run: {
+                  ...(message.metadata?.run || {}),
+                  id: runToStop.run_id,
+                  status: 'canceled',
+                  scope: message.metadata?.run?.scope || 'master',
                 },
-              }
-            : message
-        )));
-    }
+              },
+            }
+          : message
+      )));
 
-    activeRunRef.current = null;
-    setActiveRun(null);
+    patchSession(sessionId, { active_run: null });
     clearToolActivities();
 
     try {
-      await cancelRun(runToStop.runId, runToStop.sessionId);
+      await cancelRun(runToStop.run_id, sessionId);
     } catch (error) {
       console.error('Failed to cancel active run:', error);
     }
-  }, [cancelRun, clearToolActivities]);
+  }, [cancelRun, clearToolActivities, getSessionActiveRun, patchSession]);
 
   const loadOlderMessages = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
@@ -709,6 +805,7 @@ export function useSessions({
     currentSessionId,
     currentUsage,
     refreshSessions,
+    refreshCurrentSession,
     switchSession,
     createNewSession,
     deleteSession,
@@ -718,6 +815,6 @@ export function useSessions({
     hasOlderMessages: olderMessagesCursor !== null,
     isLoadingOlderMessages,
     isSubmitting,
-    isExecuting: activeRun !== null,
+    isExecuting: Boolean(getSessionActiveRun(currentSessionId)),
   };
 }

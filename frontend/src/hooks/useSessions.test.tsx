@@ -297,6 +297,68 @@ describe('useSessions', () => {
     expect(clearToolActivities).not.toHaveBeenCalled();
   });
 
+  it('allows a second session to submit while another session is running', async () => {
+    const call = vi.fn(async (method: string, params?: any) => {
+      if (method === 'get_session') {
+        return {
+          id: params.session_id,
+          title: params.session_id,
+          updated_at: '2026-04-15T14:00:00Z',
+          input_tokens: 0,
+          output_tokens: 0,
+          active_run: null,
+        };
+      }
+      if (method === 'list_messages') {
+        return { messages: [] };
+      }
+      if (method === 'list_sessions') {
+        return { sessions: [] };
+      }
+      return {};
+    });
+    const executeInstruction = vi.fn()
+      .mockResolvedValueOnce({ status: 'started', run_id: 'run-session-a' })
+      .mockResolvedValueOnce({ status: 'started', run_id: 'run-session-b' });
+    const cancelRun = vi.fn();
+    const clearToolActivities = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions({
+        call,
+        executeInstruction,
+        cancelRun,
+        clearToolActivities,
+        lastEvent: null,
+      })
+    );
+
+    await act(async () => {
+      await result.current.switchSession('session-a');
+    });
+
+    await act(async () => {
+      await result.current.execute('Run in session A');
+    });
+
+    expect(result.current.isExecuting).toBe(true);
+
+    await act(async () => {
+      await result.current.switchSession('session-b');
+    });
+
+    expect(result.current.isExecuting).toBe(false);
+
+    await act(async () => {
+      await result.current.execute('Run in session B');
+    });
+
+    expect(executeInstruction).toHaveBeenNthCalledWith(1, 'Run in session A', 'session-a');
+    expect(executeInstruction).toHaveBeenNthCalledWith(2, 'Run in session B', 'session-b');
+    expect(cancelRun).not.toHaveBeenCalled();
+    expect(result.current.isExecuting).toBe(true);
+  });
+
   it('reconciles a finished run from persisted messages when the final event is missed', async () => {
     const persistedMessages = [
       {
@@ -332,7 +394,17 @@ describe('useSessions', () => {
       },
     ];
     let listMessagesCount = 0;
-    const call = vi.fn(async (method: string) => {
+    const call = vi.fn(async (method: string, params?: any) => {
+      if (method === 'get_session') {
+        return {
+          id: params.session_id,
+          title: 'Session 1',
+          updated_at: '2026-04-15T14:41:00Z',
+          input_tokens: 0,
+          output_tokens: 0,
+          active_run: null,
+        };
+      }
       if (method === 'list_sessions') {
         return { sessions: [] };
       }
@@ -429,7 +501,18 @@ describe('useSessions', () => {
       },
     ];
     let listMessagesCount = 0;
-    const call = vi.fn(async (method: string) => {
+    let finalRunPersisted = false;
+    const call = vi.fn(async (method: string, params?: any) => {
+      if (method === 'get_session') {
+        return {
+          id: params.session_id,
+          title: 'Session 1',
+          updated_at: '2026-04-15T14:50:00Z',
+          input_tokens: finalRunPersisted ? 4 : 0,
+          output_tokens: finalRunPersisted ? 11 : 0,
+          active_run: null,
+        };
+      }
       if (method === 'list_sessions') {
         return {
           sessions: [{
@@ -474,8 +557,9 @@ describe('useSessions', () => {
     expect(result.current.isExecuting).toBe(true);
     expect(result.current.messages).toHaveLength(2);
 
-    await act(async () => {
-      window.dispatchEvent(new Event('focus'));
+    finalRunPersisted = true;
+    act(() => {
+      result.current.refreshCurrentSession();
     });
 
     await waitFor(() => {
@@ -508,7 +592,22 @@ describe('useSessions', () => {
       },
     ];
     let listMessagesCount = 0;
-    const call = vi.fn(async (method: string) => {
+    let hasStartedPendingRun = false;
+    const call = vi.fn(async (method: string, params?: any) => {
+      if (method === 'get_session') {
+        return {
+          id: params.session_id,
+          title: 'Session 1',
+          updated_at: '2026-04-15T14:55:00Z',
+          input_tokens: 0,
+          output_tokens: 0,
+          active_run: hasStartedPendingRun ? {
+            run_id: 'run-focus-pending-1',
+            status: 'running',
+            started_at: '2026-04-15T14:56:00Z',
+          } : null,
+        };
+      }
       if (method === 'list_sessions') {
         return {
           sessions: [{
@@ -549,6 +648,7 @@ describe('useSessions', () => {
     await act(async () => {
       await result.current.execute('Keep thinking after focus');
     });
+    hasStartedPendingRun = true;
 
     expect(result.current.isExecuting).toBe(true);
     expect(result.current.messages).toHaveLength(2);

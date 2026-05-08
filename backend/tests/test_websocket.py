@@ -570,6 +570,52 @@ def test_websocket_cancel_run_recovers_persisted_pending_run_after_restart(clien
     }
 
 
+def test_websocket_list_messages_finalizes_stale_pending_run(client, session):
+    session.add(Session(id="session-stale-pending", title="Stale Pending"))
+    session.add(
+        Message(
+            session_id="session-stale-pending",
+            role="user",
+            content="这个run在sidecar重启前丢失了",
+            type="text",
+            metadata_={
+                "run": {
+                    "id": "run-stale-pending-1",
+                    "status": "pending",
+                    "scope": "master",
+                }
+            },
+        )
+    )
+    session.commit()
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "list_messages",
+            {"session_id": "session-stale-pending", "limit": 10},
+            request_id=24,
+        )
+
+    messages = response["result"]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[0]["metadata"]["run"] == {
+        "id": "run-stale-pending-1",
+        "status": "failed",
+        "scope": "master",
+        "error": "Run interrupted before completion.",
+    }
+    assert messages[1]["content"] == "Run failed: Run interrupted before completion."
+
+    session.expire_all()
+    persisted_messages = session.exec(
+        select(Message)
+        .where(Message.session_id == "session-stale-pending")
+        .order_by(Message.created_at)
+    ).all()
+    assert [message.metadata_["run"]["status"] for message in persisted_messages] == ["failed", "failed"]
+
+
 def test_websocket_execute_can_be_canceled_while_socket_stays_responsive(client, monkeypatch, session):
     persist_session(session, "session-cancel")
     blocker = asyncio.Event()
@@ -691,6 +737,16 @@ def test_websocket_execute_returns_busy_when_session_already_has_active_run(clie
             "session_id": "session-busy",
             "message": "Current session already has an active run.",
         }
+
+        session_response = send_rpc(
+            websocket,
+            "get_session",
+            {"session_id": "session-busy"},
+            request_id=35,
+        )
+        assert session_response["result"]["active_run"]["run_id"] == run_id
+        assert session_response["result"]["active_run"]["status"] == "running"
+        assert datetime.fromisoformat(session_response["result"]["active_run"]["started_at"]).tzinfo is not None
 
         cancel_response, _ = send_rpc_until_response(
             websocket,
@@ -820,7 +876,18 @@ def test_websocket_session_message_and_task_flows(client, session):
         response = send_rpc(websocket, "list_sessions", {"limit": 10}, request_id=12)
         sessions = response["result"]["sessions"]
         assert [item["id"] for item in sessions][:2] == [created_session_id, "session-1"]
+        assert sessions[0]["active_run"] is None
+        assert sessions[1]["active_run"] is None
         assert response["result"]["next_cursor"] is None
+
+        response = send_rpc(
+            websocket,
+            "get_session",
+            {"session_id": "session-1"},
+            request_id=19,
+        )
+        assert response["result"]["id"] == "session-1"
+        assert response["result"]["active_run"] is None
 
         response = send_rpc(
             websocket,
