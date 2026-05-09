@@ -12,10 +12,11 @@ from starlette.websockets import WebSocketDisconnect
 from sqlmodel import select
 
 from app.main import app
+from app.core.run_registry import RunAlreadyActiveError
 from app.models.database import Message, Schedule, Session, Task
 from app.models.schemas import AgentRunResult, Usage
 from app.rpc.agent_runs import persist_canceled_chat_run
-from app.rpc.sessions import list_messages
+from app.rpc.sessions import list_messages, reconcile_stale_pending_runs_on_startup
 import app.rpc.websocket as websocket_rpc
 
 
@@ -431,7 +432,6 @@ def test_websocket_execute_emits_failed_terminal_event_on_unexpected_background_
                         "run": {
                             "id": run_id,
                             "status": "failed",
-                            "scope": "master",
                             "error": "boom",
                         }
                     },
@@ -452,7 +452,6 @@ def test_websocket_execute_emits_failed_terminal_event_on_unexpected_background_
     assert persisted_messages[0].metadata_["run"] == {
         "id": run_id,
         "status": "failed",
-        "scope": "master",
         "error": "boom",
     }
     assert persisted_messages[1].content == "Run failed: boom"
@@ -476,7 +475,6 @@ def test_persist_canceled_chat_run_updates_existing_run_metadata_only(session):
                 "run": {
                     "id": "run-persist-1",
                     "status": "pending",
-                    "scope": "master",
                 }
             },
         )
@@ -497,7 +495,6 @@ def test_persist_canceled_chat_run_updates_existing_run_metadata_only(session):
     assert messages[0].metadata_["run"] == {
         "id": "run-persist-1",
         "status": "canceled",
-        "scope": "master",
     }
     assert event.model_dump(mode="json")["payload"] == {
         "run_id": "run-persist-1",
@@ -509,7 +506,6 @@ def test_persist_canceled_chat_run_updates_existing_run_metadata_only(session):
                     "run": {
                         "id": "run-persist-1",
                         "status": "canceled",
-                        "scope": "master",
                     }
                 },
             }
@@ -530,7 +526,6 @@ def test_websocket_cancel_run_recovers_persisted_pending_run_after_restart(clien
                 "run": {
                     "id": "run-stale-1",
                     "status": "pending",
-                    "scope": "master",
                 }
             },
         )
@@ -566,11 +561,10 @@ def test_websocket_cancel_run_recovers_persisted_pending_run_after_restart(clien
     assert message.metadata_["run"] == {
         "id": "run-stale-1",
         "status": "canceled",
-        "scope": "master",
     }
 
 
-def test_websocket_list_messages_finalizes_stale_pending_run(client, session):
+def test_startup_reconcile_finalizes_stale_pending_run(session):
     session.add(Session(id="session-stale-pending", title="Stale Pending"))
     session.add(
         Message(
@@ -582,7 +576,41 @@ def test_websocket_list_messages_finalizes_stale_pending_run(client, session):
                 "run": {
                     "id": "run-stale-pending-1",
                     "status": "pending",
-                    "scope": "master",
+                }
+            },
+        )
+    )
+    session.commit()
+
+    reconcile_stale_pending_runs_on_startup()
+
+    session.expire_all()
+    persisted_messages = session.exec(
+        select(Message)
+        .where(Message.session_id == "session-stale-pending")
+        .order_by(Message.created_at)
+    ).all()
+    assert [message.metadata_["run"]["status"] for message in persisted_messages] == ["failed", "failed"]
+    assert persisted_messages[0].metadata_["run"] == {
+        "id": "run-stale-pending-1",
+        "status": "failed",
+        "error": "Run interrupted before completion.",
+    }
+    assert persisted_messages[1].content == "Run failed: Run interrupted before completion."
+
+
+def test_websocket_list_messages_does_not_finalize_stale_pending_run(client, session):
+    session.add(Session(id="session-stale-pending-read", title="Stale Pending Read"))
+    session.add(
+        Message(
+            session_id="session-stale-pending-read",
+            role="user",
+            content="读消息不能修改run状态",
+            type="text",
+            metadata_={
+                "run": {
+                    "id": "run-stale-pending-read-1",
+                    "status": "pending",
                 }
             },
         )
@@ -593,27 +621,68 @@ def test_websocket_list_messages_finalizes_stale_pending_run(client, session):
         response = send_rpc(
             websocket,
             "list_messages",
-            {"session_id": "session-stale-pending", "limit": 10},
+            {"session_id": "session-stale-pending-read", "limit": 10},
             request_id=24,
         )
 
     messages = response["result"]["messages"]
-    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert [message["role"] for message in messages] == ["user"]
     assert messages[0]["metadata"]["run"] == {
-        "id": "run-stale-pending-1",
-        "status": "failed",
-        "scope": "master",
-        "error": "Run interrupted before completion.",
+        "id": "run-stale-pending-read-1",
+        "status": "pending",
     }
-    assert messages[1]["content"] == "Run failed: Run interrupted before completion."
 
     session.expire_all()
     persisted_messages = session.exec(
         select(Message)
-        .where(Message.session_id == "session-stale-pending")
+        .where(Message.session_id == "session-stale-pending-read")
         .order_by(Message.created_at)
     ).all()
-    assert [message.metadata_["run"]["status"] for message in persisted_messages] == ["failed", "failed"]
+    assert len(persisted_messages) == 1
+    assert persisted_messages[0].metadata_["run"]["status"] == "pending"
+
+
+def test_websocket_list_messages_keeps_schedule_pending_run(client, session):
+    session.add(
+        Session(
+            id="schedule-active-pending",
+            title="Active Schedule",
+            metadata_={"kind": "schedule", "schedule_id": "schedule-active-pending"},
+        )
+    )
+    session.add(
+        Message(
+            session_id="schedule-active-pending",
+            role="user",
+            content="这个定时任务还在运行",
+            type="text",
+            metadata_={
+                "run": {
+                    "id": "run-active-schedule-1",
+                    "status": "pending",
+                }
+            },
+        )
+    )
+    session.commit()
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "list_messages",
+            {"session_id": "schedule-active-pending", "limit": 10},
+            request_id=25,
+        )
+
+    messages = response["result"]["messages"]
+    assert [message["role"] for message in messages] == ["user"]
+    assert messages[0]["metadata"]["run"]["status"] == "pending"
+
+    session.expire_all()
+    persisted_message = session.exec(
+        select(Message).where(Message.session_id == "schedule-active-pending")
+    ).one()
+    assert persisted_message.metadata_["run"]["status"] == "pending"
 
 
 def test_websocket_execute_can_be_canceled_while_socket_stays_responsive(client, monkeypatch, session):
@@ -681,7 +750,6 @@ def test_websocket_execute_can_be_canceled_while_socket_stays_responsive(client,
                         "run": {
                             "id": run_id,
                             "status": "canceled",
-                            "scope": "master",
                         }
                     },
                 }
@@ -759,6 +827,30 @@ def test_websocket_execute_returns_busy_when_session_already_has_active_run(clie
             "run_id": run_id,
             "session_id": "session-busy",
         }
+
+
+def test_websocket_execute_returns_busy_when_registry_detects_race(client, monkeypatch, session):
+    persist_session(session, "session-busy-race")
+
+    def raise_busy(*args, **kwargs):
+        raise RunAlreadyActiveError(session_id="session-busy-race", run_id="run-existing-race")
+
+    monkeypatch.setattr(app.state.runtime.run_registry, "start_run", raise_busy)
+
+    with client.websocket_connect(websocket_path()) as websocket:
+        response = send_rpc(
+            websocket,
+            "execute",
+            {"instruction": "second run", "session_id": "session-busy-race"},
+            request_id=36,
+        )
+
+    assert response["result"] == {
+        "status": "busy",
+        "run_id": "run-existing-race",
+        "session_id": "session-busy-race",
+        "message": "Current session already has an active run.",
+    }
 
 
 def test_websocket_execute_requires_existing_session(client):

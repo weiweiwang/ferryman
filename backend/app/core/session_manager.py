@@ -5,6 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sqlalchemy import func
 from sqlmodel import Session as DBSession, select
 
 from app.core.db import get_session
@@ -70,7 +71,6 @@ class SessionManager:
             content: str,
             run_id: str,
             token_estimate: int,
-            scope: str = "master",
     ) -> Message:
         with get_session() as db_session:
             message = Message(
@@ -83,7 +83,6 @@ class SessionManager:
                     "run": {
                         "id": run_id,
                         "status": "pending",
-                        "scope": scope,
                     }
                 },
             )
@@ -103,14 +102,12 @@ class SessionManager:
             parts: Optional[list[dict[str, object]]] = None,
             usage: Optional[dict[str, int]] = None,
             model: Optional[dict[str, object]] = None,
-            scope: str = "master",
     ) -> Message:
         usage_data = usage or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         model_data = model or {"name": None, "provider": None}
         run_metadata = {
             "id": run_id,
             "status": "success",
-            "scope": scope,
         }
 
         with get_session() as db_session:
@@ -155,12 +152,10 @@ class SessionManager:
             session_id: str,
             run_id: str,
             error_message: str,
-            scope: str = "master",
     ) -> Message:
         run_metadata = {
             "id": run_id,
             "status": "failed",
-            "scope": scope,
             "error": error_message,
         }
 
@@ -190,6 +185,41 @@ class SessionManager:
             db_session.commit()
             db_session.refresh(failure_msg)
             return failure_msg
+
+    @staticmethod
+    def record_agent_run_canceled(
+            *,
+            session_id: str,
+            run_id: str,
+    ) -> bool:
+        run_metadata = {
+            "id": run_id,
+            "status": "canceled",
+        }
+
+        with get_session() as db_session:
+            user_msg = db_session.exec(
+                select(Message).where(
+                    Message.session_id == session_id,
+                    Message.role == "user",
+                    func.json_extract(Message.metadata_, "$.run.id") == run_id,
+                )
+            ).first()
+            if not user_msg:
+                return False
+
+            user_meta = dict(user_msg.metadata_ or {})
+            user_meta["run"] = run_metadata
+            user_msg.metadata_ = user_meta
+            db_session.add(user_msg)
+
+            session_obj = db_session.get(Session, session_id)
+            if session_obj:
+                session_obj.updated_at = datetime.now(timezone.utc)
+                db_session.add(session_obj)
+
+            db_session.commit()
+            return True
 
     @staticmethod
     def update_session_usage(session_id: str, input_tokens: int, output_tokens: int) -> None:

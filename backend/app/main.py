@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.runtime import FerrymanRuntime
 from app.rpc.registry import register_rpc_methods
+from app.rpc.sessions import reconcile_stale_pending_runs_on_startup
 from app.rpc.websocket import register_websocket
 
 logger = logging.getLogger(__name__)
@@ -98,9 +99,8 @@ async def lifespan(fastapi_app: FastAPI):
 
     fastapi_app.state.runtime = FerrymanRuntime(get_settings())
     fastapi_app.state.bearer_token = os.environ.get("FERRYMAN_BEARER_TOKEN") or DEFAULT_FERRYMAN_BEARER_TOKEN
-    fastapi_app.state.execute_runs = {}
-    fastapi_app.state.session_run_index = {}
 
+    reconcile_stale_pending_runs_on_startup()
     fastapi_app.state.runtime.skill_manager.scan_skills()
     fastapi_app.state.schedule_manager = fastapi_app.state.runtime.schedule_manager
     await fastapi_app.state.schedule_manager.start()

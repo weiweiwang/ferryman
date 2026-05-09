@@ -31,6 +31,7 @@ class FerrymanRuntime:
         from app.core.context_manager import ContextManager
         from app.core.model_manager import ModelManager
         from app.core.prompt_builder import PromptBuilder
+        from app.core.run_registry import RunRegistry
         from app.core.schedule_manager import ScheduleManager
         from app.core.session_manager import SessionManager
         from app.core.skill_manager import SkillManager
@@ -63,6 +64,7 @@ class FerrymanRuntime:
             session_manager=self.session_manager,
             context_manager=self.context_manager,
         )
+        self.run_registry = RunRegistry(self)
 
     @staticmethod
     def _init_directories(settings: Settings) -> None:

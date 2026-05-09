@@ -18,40 +18,17 @@ STALE_PENDING_RUN_ERROR = "Run interrupted before completion."
 
 def get_active_run_payload(context, session_id: str) -> dict[str, object] | None:
     """Return the in-memory active run for a session, if one is still running."""
-    app_state = getattr(context, "app_state", None)
-    if app_state is None:
+    runtime = getattr(context, "runtime", None)
+    run_registry = getattr(runtime, "run_registry", None)
+    get_active_run = getattr(run_registry, "get_active_run_payload", None)
+    if get_active_run is None:
         return None
-
-    run_id = getattr(app_state, "session_run_index", {}).get(session_id)
-    if not run_id:
-        return None
-
-    entry = getattr(app_state, "execute_runs", {}).get(run_id)
-    if not entry:
-        return None
-
-    task = entry.get("task")
-    if task is None or task.done():
-        getattr(app_state, "execute_runs", {}).pop(run_id, None)
-        if getattr(app_state, "session_run_index", {}).get(session_id) == run_id:
-            getattr(app_state, "session_run_index", {}).pop(session_id, None)
-        return None
-
-    payload: dict[str, object] = {
-        "run_id": run_id,
-        "status": entry.get("status", "running"),
-    }
-    started_at = entry.get("started_at")
-    if started_at:
-        payload["started_at"] = started_at
-    return payload
+    payload = get_active_run(session_id)
+    return dict(payload) if payload else None
 
 
-def finalize_stale_pending_runs(context, db_session, session_id: str) -> None:
-    """Mark DB-pending runs as failed when no runtime task owns the session."""
-    if get_active_run_payload(context, session_id) is not None:
-        return
-
+def finalize_stale_pending_runs(db_session, session_id: str) -> None:
+    """Mark orphaned DB-pending runs as failed during startup reconciliation."""
     pending_user_messages = list(db_session.exec(
         select(Message)
         .where(
@@ -75,7 +52,6 @@ def finalize_stale_pending_runs(context, db_session, session_id: str) -> None:
         failed_run_metadata = {
             "id": run_id,
             "status": "failed",
-            "scope": run_data.get("scope") or "master",
             "error": STALE_PENDING_RUN_ERROR,
         }
 
@@ -118,6 +94,21 @@ def finalize_stale_pending_runs(context, db_session, session_id: str) -> None:
         session_obj.updated_at = datetime.now(timezone.utc)
         db_session.add(session_obj)
     db_session.commit()
+
+
+def reconcile_stale_pending_runs_on_startup() -> None:
+    """Fail orphaned pending runs left behind by a previous sidecar process."""
+    with get_db_session() as db_session:
+        session_ids = list(db_session.exec(
+            select(Message.session_id)
+            .where(
+                Message.role == "user",
+                func.json_extract(Message.metadata_, "$.run.status") == "pending",
+            )
+            .distinct()
+        ).all())
+        for session_id in session_ids:
+            finalize_stale_pending_runs(db_session, session_id)
 
 
 def serialize_session(session: Session, context=None) -> dict[str, object]:
@@ -208,8 +199,6 @@ async def get_session(context, session_id: str):
         session_obj = db_session.get(Session, session_id)
         if not session_obj:
             return Success({"status": "error", "message": "Session not found"})
-        finalize_stale_pending_runs(context, db_session, session_id)
-        db_session.refresh(session_obj)
         return Success(serialize_session(session_obj, context))
 
 
@@ -219,7 +208,6 @@ async def list_messages(context, session_id: str, cursor: Optional[str] = None, 
     logger.debug(f"Fetching messages for session: {session_id} (cursor: {cursor})")
 
     with get_db_session() as db_session:
-        finalize_stale_pending_runs(context, db_session, session_id)
         messages_list, next_cursor = fetch_datetime_cursor_page(
             db_session,
             select(Message).where(Message.session_id == session_id, Message.role.in_(("user", "assistant"))),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,6 +15,7 @@ from sqlmodel import select
 
 from app.core.config import Settings
 from app.core.db import get_session
+from app.core.run_registry import RunAlreadyActiveError
 from app.models.database import Schedule, Session
 
 logger = logging.getLogger(__name__)
@@ -201,16 +203,43 @@ class ScheduleManager:
             started_at=started_at,
             finished_at=finished_at,
         )
+        run_id = shortuuid.uuid()
+        should_count_run = True
 
         try:
-            result = await self.runtime.run_master_agent(
-                instruction,
+            runner_task = self.runtime.run_registry.start_run(
                 session_id=schedule_id,
-                run_id=shortuuid.uuid(),
+                instruction=instruction,
+                run_id=run_id,
+                source="schedule",
             )
+            result = await runner_task
             finished_at = datetime.now(timezone.utc)
             last_run_result = self._build_last_run_result(
                 result,
+                trigger=trigger,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        except RunAlreadyActiveError as exc:
+            logger.info(f"Skipping schedule {schedule_id} because it already has an active run")
+            finished_at = datetime.now(timezone.utc)
+            should_count_run = False
+            last_run_result = self._build_last_run_result_from_busy(
+                active_run_id=exc.run_id,
+                trigger=trigger,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        except asyncio.CancelledError:
+            logger.info(f"Scheduled run canceled for schedule {schedule_id}")
+            finished_at = datetime.now(timezone.utc)
+            self.runtime.session_manager.record_agent_run_canceled(
+                session_id=schedule_id,
+                run_id=run_id,
+            )
+            last_run_result = self._build_last_run_result_from_cancel(
+                run_id=run_id,
                 trigger=trigger,
                 started_at=started_at,
                 finished_at=finished_at,
@@ -230,7 +259,8 @@ class ScheduleManager:
                 if not schedule:
                     return
                 schedule.last_run_at = finished_at
-                schedule.total_run_count += 1
+                if should_count_run:
+                    schedule.total_run_count += 1
                 schedule.last_run_result = last_run_result
                 job = self._get_job(schedule_id)
                 schedule.next_run_at = self._normalize_utc(job.next_run_time if job else None)
@@ -457,6 +487,44 @@ class ScheduleManager:
             "summary": None,
             "error": ScheduleManager._truncate_summary(str(exc), limit=500),
             "run_id": None,
+            "trigger": trigger,
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "duration_ms": ScheduleManager._duration_ms(started_at, finished_at),
+        }
+
+    @staticmethod
+    def _build_last_run_result_from_busy(
+            *,
+            active_run_id: str,
+            trigger: str,
+            started_at: datetime,
+            finished_at: datetime,
+    ) -> dict[str, object]:
+        return {
+            "status": "busy",
+            "summary": "Skipped because this schedule already has an active run.",
+            "error": None,
+            "run_id": active_run_id,
+            "trigger": trigger,
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "duration_ms": ScheduleManager._duration_ms(started_at, finished_at),
+        }
+
+    @staticmethod
+    def _build_last_run_result_from_cancel(
+            *,
+            run_id: str,
+            trigger: str,
+            started_at: datetime,
+            finished_at: datetime,
+    ) -> dict[str, object]:
+        return {
+            "status": "canceled",
+            "summary": "Schedule run canceled.",
+            "error": None,
+            "run_id": run_id,
             "trigger": trigger,
             "started_at": started_at.isoformat(),
             "finished_at": finished_at.isoformat(),

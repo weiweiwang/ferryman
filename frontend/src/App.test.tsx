@@ -220,7 +220,7 @@ describe('App chat interactions', () => {
     const baseTime = new Date().toISOString();
     mockedMessages = [
       { id: 'user-1', role: 'user', content: 'Run this task.', created_at: baseTime },
-      { id: 'assistant-1', role: 'assistant', content: '', created_at: baseTime, metadata: { run: { status: 'pending', scope: 'master' } } },
+      { id: 'assistant-1', role: 'assistant', content: '', created_at: baseTime, metadata: { run: { status: 'pending' } } },
     ];
 
     const { rerender } = render(<App />);
@@ -232,7 +232,7 @@ describe('App chat interactions', () => {
     scrollIntoView.mockClear();
     mockedMessages = [
       { id: 'user-1', role: 'user', content: 'Run this task.', created_at: baseTime },
-      { id: 'assistant-1', role: 'assistant', content: 'Partial output arrived.', created_at: baseTime, metadata: { run: { status: 'pending', scope: 'master' } } },
+      { id: 'assistant-1', role: 'assistant', content: 'Partial output arrived.', created_at: baseTime, metadata: { run: { status: 'pending' } } },
     ];
     rerender(<App />);
 
@@ -312,7 +312,7 @@ describe('App chat interactions', () => {
         role: 'user',
         content: 'Use the seo-backlink-research skill.',
         created_at: new Date().toISOString(),
-        metadata: { run: { status: 'pending', scope: 'master' } },
+        metadata: { run: { status: 'pending' } },
       },
     ];
     mockedToolActivities = [
@@ -340,7 +340,7 @@ describe('App chat interactions', () => {
         role: 'assistant',
         content: '',
         created_at: new Date().toISOString(),
-        metadata: { run: { status: 'pending', scope: 'master' } },
+        metadata: { run: { status: 'pending' } },
       },
     ];
     mockedToolActivities = [
@@ -365,7 +365,7 @@ describe('App chat interactions', () => {
     const stopActiveRun = vi.fn();
     mockedMessages = [
       { id: 'user-1', role: 'user', content: 'Run this task.', created_at: new Date().toISOString() },
-      { id: 'assistant-1', role: 'assistant', content: '', created_at: new Date().toISOString(), metadata: { run: { status: 'pending', scope: 'master' } } },
+      { id: 'assistant-1', role: 'assistant', content: '', created_at: new Date().toISOString(), metadata: { run: { status: 'pending' } } },
     ];
 
     mockedUseSessions.mockImplementation(() => ({
@@ -410,7 +410,7 @@ describe('App chat interactions', () => {
         role: 'user',
         content: 'Please stop this run.',
         created_at: new Date().toISOString(),
-        metadata: { run: { status: 'canceled', scope: 'master' } },
+        metadata: { run: { status: 'canceled' } },
       },
     ];
 

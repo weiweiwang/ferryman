@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -14,7 +15,9 @@ from app.core.schedule_manager import (
     compute_next_run_at,
     normalize_timezone_name,
 )
-from app.models.database import Schedule, Session
+from app.core.run_registry import RunRegistry
+from app.core.session_manager import SessionManager
+from app.models.database import Message, Schedule, Session
 
 
 class FakeScheduler:
@@ -56,8 +59,10 @@ class StubKernel:
     def __init__(self) -> None:
         self.calls: list[dict[str, str]] = []
         self.schedule_manager = None
+        self.session_manager = SessionManager()
+        self.run_registry = RunRegistry(self)
 
-    async def run_master_agent(self, instruction: str, session_id: str, *, run_id: str):
+    async def run_master_agent(self, instruction: str, session_id: str, *, run_id: str, emit_event_cb=None):
         self.calls.append({"instruction": instruction, "session_id": session_id})
         return {
             "namespace": "agent",
@@ -76,9 +81,56 @@ class StubKernel:
 
 
 class FailingKernel(StubKernel):
-    async def run_master_agent(self, instruction: str, session_id: str, *, run_id: str):
+    async def run_master_agent(self, instruction: str, session_id: str, *, run_id: str, emit_event_cb=None):
         self.calls.append({"instruction": instruction, "session_id": session_id})
         raise RuntimeError("scheduler failure")
+
+
+class BlockingKernel(StubKernel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.run_id: str | None = None
+
+    async def run_master_agent(self, instruction: str, session_id: str, *, run_id: str, emit_event_cb=None):
+        self.calls.append({"instruction": instruction, "session_id": session_id})
+        self.run_id = run_id
+        self.started.set()
+        await self.release.wait()
+        return {
+            "namespace": "agent",
+            "event": "chat_final",
+            "session_id": session_id,
+            "payload": {
+                "run_id": run_id,
+                "messages": [{"role": "assistant", "content": "done"}],
+            },
+        }
+
+
+class PersistentBlockingKernel(BlockingKernel):
+    async def run_master_agent(self, instruction: str, session_id: str, *, run_id: str, emit_event_cb=None):
+        self.calls.append({"instruction": instruction, "session_id": session_id})
+        self.run_id = run_id
+        self.session_manager.ensure_session(session_id)
+        self.session_manager.append_user_message(
+            session_id=session_id,
+            content=instruction,
+            run_id=run_id,
+            token_estimate=1,
+        )
+        self.started.set()
+        await self.release.wait()
+        return {
+            "namespace": "agent",
+            "event": "chat_final",
+            "session_id": session_id,
+            "payload": {
+                "run_id": run_id,
+                "messages": [{"role": "assistant", "content": "done"}],
+            },
+        }
 
 
 @pytest.mark.asyncio
@@ -208,6 +260,140 @@ async def test_scheduler_run_uses_schedule_id_as_session_and_updates_metrics(ses
     assert persisted_session is not None
     assert persisted_session.title == "Nightly digest"
     assert persisted_session.metadata_ == {"kind": "schedule", "schedule_id": schedule.id}
+
+
+@pytest.mark.asyncio
+async def test_scheduler_exposes_active_run_while_schedule_is_running(session):
+    schedule = Schedule(
+        id="schedule-active-run",
+        name="Active run",
+        cron_expression="0 1 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Stay active until released."},
+    )
+    session.add(schedule)
+    session.commit()
+
+    kernel = BlockingKernel()
+    scheduler = ScheduleManager(kernel, get_settings())
+    scheduler._scheduler = FakeScheduler()
+    await scheduler.sync_schedule(schedule.id)
+
+    task = asyncio.create_task(scheduler._run_schedule(schedule.id))
+    await kernel.started.wait()
+
+    active_run = kernel.run_registry.get_active_run_payload(schedule.id)
+    assert active_run is not None
+    assert active_run["run_id"] == kernel.run_id
+    assert active_run["status"] == "running"
+    assert datetime.fromisoformat(active_run["started_at"]).tzinfo is not None
+
+    kernel.release.set()
+    await task
+    assert kernel.run_registry.get_active_run_payload(schedule.id) is None
+
+
+@pytest.mark.asyncio
+async def test_scheduler_skips_duplicate_trigger_while_run_is_active(session):
+    schedule = Schedule(
+        id="schedule-busy-run",
+        name="Busy run",
+        cron_expression="0 1 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Do not run twice."},
+    )
+    session.add(schedule)
+    session.commit()
+
+    kernel = BlockingKernel()
+    scheduler = ScheduleManager(kernel, get_settings())
+    scheduler._scheduler = FakeScheduler()
+    await scheduler.sync_schedule(schedule.id)
+
+    first_task = asyncio.create_task(scheduler._run_schedule(schedule.id, "scheduled"))
+    await kernel.started.wait()
+
+    await scheduler._run_schedule(schedule.id, "catch_up")
+
+    session.expire_all()
+    refreshed = session.exec(select(Schedule).where(Schedule.id == schedule.id)).one()
+    assert kernel.calls == [{
+        "instruction": "Do not run twice.",
+        "session_id": schedule.id,
+    }]
+    assert refreshed.total_run_count == 0
+    assert refreshed.last_run_result == {
+        "status": "busy",
+        "summary": "Skipped because this schedule already has an active run.",
+        "error": None,
+        "run_id": kernel.run_id,
+        "trigger": "catch_up",
+        "started_at": refreshed.last_run_result["started_at"],
+        "finished_at": refreshed.last_run_result["finished_at"],
+        "duration_ms": refreshed.last_run_result["duration_ms"],
+    }
+
+    kernel.release.set()
+    await first_task
+
+
+@pytest.mark.asyncio
+async def test_scheduler_cancel_marks_active_run_canceled(session):
+    schedule = Schedule(
+        id="schedule-cancel-run",
+        name="Cancel run",
+        cron_expression="0 1 * * *",
+        timezone="UTC",
+        enabled=True,
+        args={"instruction": "Cancel this schedule run."},
+    )
+    session.add(schedule)
+    session.commit()
+
+    kernel = PersistentBlockingKernel()
+    scheduler = ScheduleManager(kernel, get_settings())
+    scheduler._scheduler = FakeScheduler()
+    await scheduler.sync_schedule(schedule.id)
+
+    task = asyncio.create_task(scheduler._run_schedule(schedule.id))
+    await kernel.started.wait()
+    assert kernel.run_id is not None
+
+    cancel_result = kernel.run_registry.cancel_run(kernel.run_id, session_id=schedule.id)
+    assert cancel_result == {
+        "status": "canceling",
+        "run_id": kernel.run_id,
+        "session_id": schedule.id,
+    }
+    await task
+
+    session.expire_all()
+    refreshed = session.exec(select(Schedule).where(Schedule.id == schedule.id)).one()
+    assert kernel.run_registry.get_active_run_payload(schedule.id) is None
+    assert refreshed.total_run_count == 1
+    assert refreshed.last_run_result == {
+        "status": "canceled",
+        "summary": "Schedule run canceled.",
+        "error": None,
+        "run_id": kernel.run_id,
+        "trigger": "scheduled",
+        "started_at": refreshed.last_run_result["started_at"],
+        "finished_at": refreshed.last_run_result["finished_at"],
+        "duration_ms": refreshed.last_run_result["duration_ms"],
+    }
+
+    user_message = session.exec(
+        select(Message).where(
+            Message.session_id == schedule.id,
+            Message.role == "user",
+        )
+    ).one()
+    assert user_message.metadata_["run"] == {
+        "id": kernel.run_id,
+        "status": "canceled",
+    }
 
 
 @pytest.mark.asyncio

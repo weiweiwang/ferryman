@@ -75,7 +75,6 @@ describe('useSessions', () => {
         run: {
           id: 'run-optimistic-cancel-1',
           status: 'canceled',
-          scope: 'master',
         },
       },
     });
@@ -112,7 +111,6 @@ describe('useSessions', () => {
     expect(result.current.messages[0].metadata?.run).toMatchObject({
       id: 'run-cancel-1',
       status: 'pending',
-      scope: 'master',
     });
     expect(result.current.messages[1].role).toBe('assistant');
     expect(result.current.messages[1].metadata?.run?.status).toBe('pending');
@@ -132,7 +130,6 @@ describe('useSessions', () => {
               run: {
                 id: 'run-cancel-1',
                 status: 'canceled',
-                scope: 'master',
               },
             },
           },
@@ -154,7 +151,6 @@ describe('useSessions', () => {
         run: {
           id: 'run-cancel-1',
           status: 'canceled',
-          scope: 'master',
         },
       },
     });
@@ -205,7 +201,6 @@ describe('useSessions', () => {
               run: {
                 id: 'run-success-1',
                 status: 'success',
-                scope: 'master',
               },
               model: {
                 name: 'test-model',
@@ -227,7 +222,6 @@ describe('useSessions', () => {
     expect(result.current.messages[0].metadata?.run).toMatchObject({
       id: 'run-success-1',
       status: 'success',
-      scope: 'master',
     });
     expect(result.current.messages[1]).toMatchObject({
       role: 'assistant',
@@ -236,7 +230,6 @@ describe('useSessions', () => {
         run: {
           id: 'run-success-1',
           status: 'success',
-          scope: 'master',
         },
         usage: {
           input_tokens: 12,
@@ -370,7 +363,6 @@ describe('useSessions', () => {
           run: {
             id: 'run-reconcile-1',
             status: 'success' as const,
-            scope: 'master',
           },
         },
       },
@@ -383,7 +375,6 @@ describe('useSessions', () => {
           run: {
             id: 'run-reconcile-1',
             status: 'success' as const,
-            scope: 'master',
           },
           usage: {
             input_tokens: 9,
@@ -477,7 +468,6 @@ describe('useSessions', () => {
           run: {
             id: 'run-focus-reconcile-1',
             status: 'success' as const,
-            scope: 'master',
           },
         },
       },
@@ -490,7 +480,6 @@ describe('useSessions', () => {
           run: {
             id: 'run-focus-reconcile-1',
             status: 'success' as const,
-            scope: 'master',
           },
           usage: {
             input_tokens: 4,
@@ -586,7 +575,6 @@ describe('useSessions', () => {
           run: {
             id: 'run-focus-pending-1',
             status: 'pending' as const,
-            scope: 'master',
           },
         },
       },
@@ -658,7 +646,6 @@ describe('useSessions', () => {
         run: {
           id: 'run-focus-pending-1',
           status: 'pending',
-          scope: 'master',
         },
       },
     });
@@ -679,7 +666,6 @@ describe('useSessions', () => {
         run: {
           id: 'run-focus-pending-1',
           status: 'pending',
-          scope: 'master',
         },
       },
     });
@@ -766,7 +752,6 @@ describe('useSessions', () => {
               run: {
                 id: 'run-cross-session-1',
                 status: 'success',
-                scope: 'master',
               },
             },
           },

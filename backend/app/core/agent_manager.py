@@ -212,7 +212,6 @@ class AgentManager:
         run_metadata = {
             "id": run_id,
             "status": status,
-            "scope": "master",
         }
         if error is not None:
             run_metadata["error"] = error

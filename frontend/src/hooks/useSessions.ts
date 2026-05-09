@@ -9,7 +9,6 @@ export type MessageRunStatus = 'pending' | 'success' | 'failed' | 'canceled';
 export interface MessageRunMetadata {
   id?: string;
   status?: MessageRunStatus;
-  scope?: string;
   error?: string;
   [key: string]: any;
 }
@@ -279,7 +278,6 @@ export function useSessions({
           run: {
             id: trackedRunId,
             status: 'pending',
-            scope: 'master',
           },
         },
       };
@@ -462,7 +460,6 @@ export function useSessions({
     const nextRunMetadata: MessageRunMetadata = {
       id: runMetadata.id || activeRun.run_id,
       status: runStatus,
-      scope: runMetadata.scope || 'master',
       ...(runMetadata.error ? { error: runMetadata.error } : {}),
     };
     const isVisibleRunSession = currentSessionId === eventSessionId;
@@ -656,7 +653,6 @@ export function useSessions({
             run: {
               id: runId,
               status: 'pending',
-              scope: 'master',
             },
           },
         },
@@ -664,7 +660,7 @@ export function useSessions({
           role: 'assistant',
           content: '',
           created_at: nowIso,
-          metadata: { run: { id: runId, status: 'pending', scope: 'master' } },
+          metadata: { run: { id: runId, status: 'pending' } },
         },
       ];
       messagesRef.current = localPendingMessages;
@@ -739,7 +735,6 @@ export function useSessions({
                   ...(message.metadata?.run || {}),
                   id: runToStop.run_id,
                   status: 'canceled',
-                  scope: message.metadata?.run?.scope || 'master',
                 },
               },
             }

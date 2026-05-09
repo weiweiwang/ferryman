@@ -11,6 +11,7 @@ from sqlalchemy import func
 from sqlmodel import desc, select
 
 from app.core.db import get_session
+from app.core.run_registry import RunAlreadyActiveError
 from app.models.database import Message, Session
 from app.models.events import FerrymanEventEnvelope
 from app.rpc.events import build_emit_ws_event, emit_refresh_event
@@ -68,7 +69,6 @@ def persist_failed_chat_run(
         "run": {
             "id": run_id,
             "status": "failed",
-            "scope": "master",
             "error": error_message,
         }
     }
@@ -161,7 +161,6 @@ def persist_canceled_chat_run(session_id: str, run_id: str) -> FerrymanEventEnve
             "run": {
                 "id": run_id,
                 "status": "canceled",
-                "scope": "master",
             }
         },
     }
@@ -187,7 +186,6 @@ def persist_canceled_chat_run(session_id: str, run_id: str) -> FerrymanEventEnve
             user_meta["run"] = {
                 "id": run_id,
                 "status": "canceled",
-                "scope": "master",
             }
             user_message.metadata_ = user_meta
             db_session.add(user_message)
@@ -266,17 +264,12 @@ async def background_execute_run(
     instruction: str,
     session_id: str,
     run_id: str,
+    runner_task: asyncio.Task[dict[str, object]],
     emit_event_cb,
 ) -> None:
-    app_state = context.app_state
     try:
         try:
-            result = await context.runtime.run_master_agent(
-                instruction=instruction,
-                session_id=session_id,
-                run_id=run_id,
-                emit_event_cb=emit_event_cb,
-            )
+            result = await runner_task
         except Exception as exc:
             logger.exception(f"Background execute run failed for session {session_id}")
             failed_event = persist_failed_chat_run(
@@ -320,9 +313,6 @@ async def background_execute_run(
         await emit_event_cb(canceled_event)
         raise
     finally:
-        app_state.execute_runs.pop(run_id, None)
-        if app_state.session_run_index.get(session_id) == run_id:
-            app_state.session_run_index.pop(session_id, None)
         try:
             await emit_refresh_event(
                 emit_event_cb,
@@ -346,16 +336,14 @@ async def execute(context, instruction: str, session_id: Optional[str] = None):
             return Success({"status": "error", "message": "Session not found"})
 
         session_id = normalized_session_id
-        active_run_id = context.app_state.session_run_index.get(session_id)
-        if active_run_id:
-            active_entry = context.app_state.execute_runs.get(active_run_id)
-            if active_entry and not active_entry["task"].done():
-                return Success({
-                    "status": "busy",
-                    "run_id": active_run_id,
-                    "session_id": session_id,
-                    "message": "Current session already has an active run.",
-                })
+        active_run = context.runtime.run_registry.get_active_run_payload(session_id)
+        if active_run is not None:
+            return Success({
+                "status": "busy",
+                "run_id": active_run["run_id"],
+                "session_id": session_id,
+                "message": "Current session already has an active run.",
+            })
 
         websocket = getattr(context, "request_ws", None)
         send_lock = getattr(context, "send_lock", None)
@@ -364,23 +352,31 @@ async def execute(context, instruction: str, session_id: Optional[str] = None):
 
         run_id = shortuuid.uuid()
         emit_ws_event = build_emit_ws_event(websocket, send_lock)
-        task = asyncio.create_task(
+        try:
+            runner_task = context.runtime.run_registry.start_run(
+                session_id=session_id,
+                instruction=instruction,
+                run_id=run_id,
+                source="manual",
+                emit_event_cb=emit_ws_event,
+            )
+        except RunAlreadyActiveError as exc:
+            return Success({
+                "status": "busy",
+                "run_id": exc.run_id,
+                "session_id": exc.session_id,
+                "message": "Current session already has an active run.",
+            })
+        asyncio.create_task(
             background_execute_run(
                 context=context,
                 instruction=instruction,
                 session_id=session_id,
                 run_id=run_id,
+                runner_task=runner_task,
                 emit_event_cb=emit_ws_event,
             )
         )
-        context.app_state.execute_runs[run_id] = {
-            "task": task,
-            "session_id": session_id,
-            "instruction": instruction,
-            "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
-        context.app_state.session_run_index[session_id] = run_id
         return Success({"status": "started", "run_id": run_id, "session_id": session_id})
 
     return Success({"status": "error", "message": "Runtime not initialized"})
@@ -392,8 +388,8 @@ async def cancel_run(context, run_id: str, session_id: Optional[str] = None):
     if not context:
         return Success({"status": "error", "message": "Context unavailable"})
 
-    entry = context.app_state.execute_runs.get(run_id)
-    if not entry:
+    cancel_result = context.runtime.run_registry.cancel_run(run_id, session_id=session_id)
+    if cancel_result["status"] == "not_found":
         if session_id and has_persisted_pending_chat_run(session_id, run_id):
             logger.warning(
                 f"Canceling persisted pending run {run_id} for session {session_id} "
@@ -418,21 +414,4 @@ async def cancel_run(context, run_id: str, session_id: Optional[str] = None):
             )
             return Success({"status": "canceled", "run_id": run_id, "session_id": session_id})
         return Success({"status": "not_found", "run_id": run_id})
-
-    if session_id and entry["session_id"] != session_id:
-        return Success({
-            "status": "error",
-            "message": "run_id does not match session_id",
-            "run_id": run_id,
-        })
-
-    task = entry["task"]
-    if task.done():
-        return Success({
-            "status": "already_finished",
-            "run_id": run_id,
-            "session_id": entry["session_id"],
-        })
-
-    task.cancel()
-    return Success({"status": "canceling", "run_id": run_id, "session_id": entry["session_id"]})
+    return Success(cancel_result)

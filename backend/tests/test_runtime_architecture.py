@@ -88,3 +88,20 @@ def test_agent_manager_does_not_depend_on_runtime_or_protocol():
     assert "Protocol" not in text
     assert "def build_system_prompt" not in text
     assert "def build_runtime_augmented_instruction" not in text
+
+
+def test_agent_runs_start_only_through_run_registry():
+    offenders = []
+    allowed_paths = {
+        Path("backend/app/core/run_registry.py"),
+        Path("backend/app/core/runtime.py"),
+    }
+
+    for path in Path("backend/app").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if ".run_master_agent(" not in text:
+            continue
+        if path not in allowed_paths:
+            offenders.append(str(path))
+
+    assert offenders == []
