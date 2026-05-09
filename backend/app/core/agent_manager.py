@@ -7,6 +7,7 @@ from pydantic_ai.agent import Agent
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse
 from pydantic_ai.usage import UsageLimits
 
+from app.core.agent_event_stream import build_agent_event_stream_handler
 from app.core.deps import AgentDeps
 
 if TYPE_CHECKING:
@@ -121,6 +122,7 @@ class AgentManager:
                 deps=deps,
                 message_history=history,
                 usage_limits=UsageLimits(request_limit=request_limit),
+                event_stream_handler=build_agent_event_stream_handler(deps),
             )
             result_data = result.output
             response_messages = [msg for msg in result.new_messages() if isinstance(msg, ModelResponse)]

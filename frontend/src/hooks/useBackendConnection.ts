@@ -22,6 +22,7 @@ export interface ToolActivityPayload {
   phase: 'start' | 'running' | 'complete' | 'error';
   input?: Record<string, any>;
   duration_ms?: number;
+  output?: string;
 }
 
 export interface RefreshPayload {
@@ -37,6 +38,38 @@ export interface FerrymanEvent {
   session_id?: string;
   ts: string;
   payload: ToolActivityPayload | RefreshPayload | any;
+}
+
+export function mergeToolActivity(
+  previous: ToolActivityPayload[],
+  payload: ToolActivityPayload,
+): ToolActivityPayload[] {
+  if (payload.phase === 'start') {
+    return [...previous, payload];
+  }
+
+  const idx = previous
+    .slice()
+    .reverse()
+    .findIndex((activity) => (
+      activity.run_id === payload.run_id &&
+      activity.tool_name === payload.tool_name &&
+      activity.phase === 'start'
+    ));
+
+  if (idx === -1) {
+    return [...previous, payload];
+  }
+
+  const realIdx = previous.length - 1 - idx;
+  const next = [...previous];
+  next[realIdx] = {
+    ...next[realIdx],
+    phase: payload.phase,
+    duration_ms: payload.duration_ms,
+    output: payload.output,
+  };
+  return next;
 }
 
 export function useBackendConnection(url: string | null) {
@@ -92,25 +125,7 @@ export function useBackendConnection(url: string | null) {
               toolName: evt.payload.tool_name,
               phase: evt.payload.phase,
             });
-            setToolActivities((prev) => {
-               // Update phase manually for the same tool + run? 
-               // Wait, phase complete/error usually follows a start. Let's just append sequentially to simulate a streaming log.
-               // Actually we can keep a flat log of tool phases. But replacing the start with complete is better for a nice checklist UI.
-               const isStart = evt.payload.phase === 'start';
-               if (isStart) {
-                   return [...prev, evt.payload];
-               } else {
-                   // Replace the last matching start event
-                   const idx = prev.slice().reverse().findIndex(p => p.run_id === evt.payload.run_id && p.tool_name === evt.payload.tool_name && p.phase === 'start');
-                   if (idx !== -1) {
-                       const realIdx = prev.length - 1 - idx;
-                       const newArr = [...prev];
-                       newArr[realIdx] = { ...newArr[realIdx], phase: evt.payload.phase, duration_ms: evt.payload.duration_ms };
-                       return newArr;
-                   }
-                   return [...prev, evt.payload];
-               }
-            });
+            setToolActivities((prev) => mergeToolActivity(prev, evt.payload));
           }
           return;
         }

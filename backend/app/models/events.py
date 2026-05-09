@@ -45,6 +45,7 @@ class ToolActivityPayload(BaseModel):
     phase: ToolPhase = Field(..., description="工具执行阶段")
     input: Optional[dict[str, object]] = Field(None, description="工具的入参摘要（仅在 start/running 给定，限制大小）")
     duration_ms: Optional[int] = Field(None, description="消耗时间毫秒（仅在 complete/error 时必定下发）")
+    output: Optional[str] = Field(None, description="工具执行结果或错误详情的摘要文本")
 
 
 class ChatDeltaPayload(BaseModel):

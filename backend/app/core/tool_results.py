@@ -9,6 +9,9 @@ from pydantic_ai.messages import BinaryImage, ToolReturn
 
 TOOL_RESULT_KEYS = frozenset({"tool_name", "status", "summary", "data", "error"})
 ERROR_STATUSES = frozenset({"error", "failed", "failure"})
+SCRIPT_STDOUT_LIMIT = 4000
+SCRIPT_STDERR_SUCCESS_LIMIT = 800
+SCRIPT_STDERR_ERROR_LIMIT = 4000
 
 
 class ToolErrorPayload(BaseModel):
@@ -148,7 +151,7 @@ def build_tool_success_result(tool_name: str, raw_result: object) -> str | ToolR
             metadata=envelope.model_dump(mode="json"),
         )
 
-    normalized = _normalize_data(raw_result)
+    normalized = _compact_tool_data_for_model(tool_name, _normalize_data(raw_result))
     if is_tool_result_envelope(normalized):
         envelope = ToolResultEnvelope.model_validate(normalized)
     else:
@@ -194,3 +197,40 @@ def _build_normalized_envelope(tool_name: str, normalized: object) -> ToolResult
         )
 
     return build_tool_result_envelope(tool_name, status="success", data=normalized)
+
+
+def _compact_tool_data_for_model(tool_name: str, normalized: object) -> object:
+    if tool_name != "run_skill_script" or not isinstance(normalized, dict):
+        return normalized
+
+    stdout = str(normalized.get("stdout") or "")
+    stderr = str(normalized.get("stderr") or "")
+    ok = normalized.get("ok") is True
+
+    compact: dict[str, object] = {
+        "ok": normalized.get("ok"),
+        "script_name": normalized.get("script_name"),
+        "exit_code": normalized.get("exit_code"),
+        "timed_out": normalized.get("timed_out"),
+        "stdout": _truncate_text(stdout, SCRIPT_STDOUT_LIMIT),
+        "stdout_chars": len(stdout),
+        "stdout_truncated": len(stdout) > SCRIPT_STDOUT_LIMIT,
+        "stderr": _truncate_text(
+            stderr,
+            SCRIPT_STDERR_SUCCESS_LIMIT if ok else SCRIPT_STDERR_ERROR_LIMIT,
+        ),
+        "stderr_chars": len(stderr),
+        "stderr_truncated": len(stderr) > (SCRIPT_STDERR_SUCCESS_LIMIT if ok else SCRIPT_STDERR_ERROR_LIMIT),
+    }
+
+    cwd = normalized.get("cwd")
+    if cwd:
+        compact["cwd"] = cwd
+
+    return compact
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."

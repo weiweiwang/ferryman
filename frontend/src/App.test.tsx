@@ -101,6 +101,8 @@ describe('App chat interactions', () => {
             'chat.stop': 'Stop current run',
             'chat.status_canceled': 'Canceled',
             'chat.session_busy': 'This session is still running.',
+            'chat.tool_output_result': 'Execution Result',
+            'chat.tool_output_error': 'Failure Reason',
             'common.copy': 'Copy',
             'common.copied': 'Copied',
             'nav.recent_sessions': 'Recent Sessions',
@@ -359,6 +361,49 @@ describe('App chat interactions', () => {
     await waitFor(() => {
       expect(mockedOpenUrl).toHaveBeenCalledWith(url);
     });
+  });
+
+  it('expands tool activity output inline for complete and failed tools', async () => {
+    mockedMessages = [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString(),
+        metadata: { run: { status: 'pending' } },
+      },
+    ];
+    mockedToolActivities = [
+      {
+        run_id: 'run-1',
+        event_id: 'event-complete',
+        tool_name: 'run_skill_script',
+        phase: 'complete',
+        duration_ms: 25,
+        output: 'stdout: generated report.csv',
+      },
+      {
+        run_id: 'run-1',
+        event_id: 'event-error',
+        tool_name: 'write_file',
+        phase: 'error',
+        duration_ms: 8,
+        output: 'Permission denied: report.csv',
+      },
+    ];
+
+    render(<App />);
+
+    expect(screen.queryByText('Execution Result')).not.toBeInTheDocument();
+    expect(screen.queryByText('Failure Reason')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('run_skill_script'));
+    expect(screen.getByText('Execution Result')).toBeInTheDocument();
+    expect(screen.getByText('stdout: generated report.csv')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('write_file'));
+    expect(screen.getByText('Failure Reason')).toBeInTheDocument();
+    expect(screen.getByText('Permission denied: report.csv')).toBeInTheDocument();
   });
 
   it('uses the send button as stop while a run is active', async () => {

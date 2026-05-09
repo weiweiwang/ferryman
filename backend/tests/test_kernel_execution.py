@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.messages import (
     BinaryImage,
     ModelRequest,
@@ -73,6 +73,25 @@ def setup_test_environment(monkeypatch):
 
 def create_test_settings() -> Settings:
     return Settings(root_dir=TEST_ROOT)
+
+
+def streaming_function_model(model_logic):
+    async def stream_logic(messages, info):
+        response = await model_logic(messages, info)
+        for index, part in enumerate(response.parts):
+            if isinstance(part, ToolCallPart):
+                args = part.args if isinstance(part.args, str) else json.dumps(part.args)
+                yield {
+                    index: DeltaToolCall(
+                        name=part.tool_name,
+                        json_args=args,
+                        tool_call_id=part.tool_call_id,
+                    )
+                }
+            elif isinstance(part, TextPart):
+                yield part.content
+
+    return FunctionModel(stream_function=stream_logic)
 
 
 def create_mock_skill(name: str, desc: str, directory: Path):
@@ -360,7 +379,7 @@ async def test_agent_execution_closure(monkeypatch):
                 TextPart(content="I see the following files: mock_file.txt. Execution completed successfully. OK.")
             ])
 
-    mock_model = FunctionModel(mock_agent_logic)
+    mock_model = streaming_function_model(mock_agent_logic)
     
     def mock_get_master_agent(session_id: str):
         return Agent(model=mock_model, system_prompt="You are a test agent.")
@@ -431,7 +450,7 @@ async def test_master_agent_can_recover_from_soft_failed_run_skill(monkeypatch):
             TextPart(content="Delegated skill failed cleanly, switching strategy.")
         ])
 
-    mock_model = FunctionModel(mock_agent_logic)
+    mock_model = streaming_function_model(mock_agent_logic)
     monkeypatch.setattr(kernel.model_manager, "create_active_model", lambda: mock_model)
 
     result = await kernel.run_master_agent(
@@ -469,7 +488,7 @@ async def test_run_master_agent_mocked(monkeypatch, caplog):
             return [ModelResponse(parts=[TextPart(content=self.data)])]
 
     class MockAgent:
-        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None, **kwargs):
             return MockResult("Master Agent executed: " + instruction)
 
     def mock_get_master_agent(session_id: str):
@@ -518,7 +537,7 @@ async def test_run_master_agent_history_keeps_system_prompt_and_token_estimates(
             return [ModelResponse(parts=[TextPart(content="done")])]
 
     class MockAgent:
-        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None, **kwargs):
             captured["instruction"] = instruction
             captured["message_history"] = message_history
             return MockResult()
@@ -737,7 +756,7 @@ async def test_run_master_agent_compacts_after_current_turn(monkeypatch):
             return [ModelResponse(parts=[TextPart(content="post-compaction reply")])]
 
     class MasterAgent:
-        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None, **kwargs):
             captured["message_history"] = message_history
             return MasterResult()
 
@@ -833,7 +852,7 @@ async def test_run_master_agent_skips_failed_compaction_and_sets_guard(monkeypat
             return [ModelResponse(parts=[TextPart(content="normal reply")])]
 
     class MasterAgent:
-        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None, **kwargs):
             captured["message_history"] = message_history
             return MasterResult()
 
@@ -931,7 +950,7 @@ async def test_run_master_agent_backfills_legacy_zero_token_estimates_for_compac
             return [ModelResponse(parts=[TextPart(content="ok")])]
 
     class MasterAgent:
-        async def run(self, instruction, deps=None, message_history=None, usage_limits=None):
+        async def run(self, instruction, deps=None, message_history=None, usage_limits=None, **kwargs):
             return MasterResult()
 
     class CompactionUsage:
@@ -1289,7 +1308,11 @@ async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
 
     shared_usage = RunUsage()
     ctx = SimpleNamespace(
-        deps=kernel.create_agent_deps(session_id="test-session", emit_event_cb=AsyncMock()),
+        deps=kernel.create_agent_deps(
+            session_id="test-session",
+            run_id="run-skill-shared-usage",
+            emit_event_cb=AsyncMock(),
+        ),
         usage=shared_usage,
     )
 
@@ -1307,7 +1330,11 @@ async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
 async def test_skill_run_missing_skill_requests_retry():
     kernel = FerrymanRuntime(create_test_settings())
     ctx = SimpleNamespace(
-        deps=kernel.create_agent_deps(session_id="test-session", emit_event_cb=AsyncMock()),
+        deps=kernel.create_agent_deps(
+            session_id="test-session",
+            run_id="run-skill-missing",
+            emit_event_cb=AsyncMock(),
+        ),
         usage=RunUsage(),
     )
 
@@ -1328,7 +1355,11 @@ async def test_skill_run_returns_soft_failure_payload_when_delegate_fails(monkey
     monkeypatch.setattr(kernel.agent_manager, "build_skill_agent", lambda skill_name: MockSkillAgent())
 
     ctx = SimpleNamespace(
-        deps=kernel.create_agent_deps(session_id="test-session", emit_event_cb=AsyncMock()),
+        deps=kernel.create_agent_deps(
+            session_id="test-session",
+            run_id="run-skill-soft-failure",
+            emit_event_cb=AsyncMock(),
+        ),
         usage=RunUsage(),
     )
 
@@ -1346,7 +1377,11 @@ async def test_skill_run_returns_soft_failure_payload_when_delegate_fails(monkey
 async def test_agent_deps_emit_tool_event():
     mock_cb = AsyncMock()
     runtime = FerrymanRuntime(create_test_settings())
-    deps = runtime.create_agent_deps(session_id="test-session", emit_event_cb=mock_cb)
+    deps = runtime.create_agent_deps(
+        session_id="test-session",
+        run_id="run-agent-event",
+        emit_event_cb=mock_cb,
+    )
 
     await deps.emit_tool_event(
         run_id="xyz",
@@ -1375,7 +1410,11 @@ async def test_agent_deps_emit_tool_event():
 async def test_agent_deps_emit_tool_event_increments_seq():
     mock_cb = AsyncMock()
     runtime = FerrymanRuntime(create_test_settings())
-    deps = runtime.create_agent_deps(session_id="test-session", emit_event_cb=mock_cb)
+    deps = runtime.create_agent_deps(
+        session_id="test-session",
+        run_id="run-agent-event-seq",
+        emit_event_cb=mock_cb,
+    )
 
     await deps.emit_tool_event(run_id="xyz", tool_name="first_tool", phase="start")
     await deps.emit_tool_event(run_id="xyz", tool_name="second_tool", phase="complete")
@@ -1468,7 +1507,11 @@ async def test_kernel_register_toolkit_wrapper():
     registered_tool = agent.tool.call_args[0][0]
     
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-toolkit-wrapper",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1478,15 +1521,7 @@ async def test_kernel_register_toolkit_wrapper():
     
     res = await registered_tool(ctx, arg1="ok")
     assert_success_tool_payload(res, "dummy_tool", "Processed ok")
-    
-    assert mock_emit.call_count == 2
-    evt_start = mock_emit.call_args_list[0][0][0]
-    assert evt_start.payload.phase == ToolPhase.START
-    assert evt_start.payload.input == {"arg1": "ok"}
-    
-    evt_end = mock_emit.call_args_list[1][0][0]
-    assert evt_end.payload.phase == ToolPhase.COMPLETE
-    assert evt_end.payload.duration_ms is not None
+    mock_emit.assert_not_awaited()
     
     mock_emit.reset_mock()
     error_res = await registered_tool(ctx, arg1="fail")
@@ -1496,9 +1531,7 @@ async def test_kernel_register_toolkit_wrapper():
         error_type="ValueError",
         message="Intentional error",
     )
-
-    assert mock_emit.call_count == 2
-    assert mock_emit.call_args_list[1][0][0].payload.phase == ToolPhase.ERROR
+    mock_emit.assert_not_awaited()
 
     json_text_res = await registered_tool(ctx, arg1="json-text")
     assert_success_tool_payload(json_text_res, "dummy_tool", '{"alpha": 1}')
@@ -1519,7 +1552,10 @@ async def test_kernel_register_toolkit_preserves_each_tool_binding():
 
     class MockContext:
         def __init__(self):
-            self.deps = kernel.create_agent_deps(session_id="sess")
+            self.deps = kernel.create_agent_deps(
+                session_id="sess",
+                run_id="run-multi-tool-binding",
+            )
 
     ctx = MockContext()
 
@@ -1541,7 +1577,11 @@ async def test_kernel_register_toolkit_preserves_file_path_when_input_is_large()
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-large-file-input",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1552,10 +1592,7 @@ async def test_kernel_register_toolkit_preserves_file_path_when_input_is_large()
     long_content = "A" * 5000
     res = await registered_tool(ctx, "reports/output.md", long_content)
     assert_success_tool_payload(res, "write_file", "Wrote reports/output.md (5000)")
-    evt_start = mock_emit.call_args_list[0][0][0]
-    assert evt_start.payload.phase == ToolPhase.START
-    assert evt_start.payload.input["path"].endswith("/workspaces/sess/reports/output.md")
-    assert evt_start.payload.input["content"] == {"_summary": "omitted", "length": 5000}
+    mock_emit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1570,7 +1607,11 @@ async def test_kernel_register_toolkit_retries_browser_action_error_before_last_
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-browser-retry",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1581,8 +1622,7 @@ async def test_kernel_register_toolkit_retries_browser_action_error_before_last_
 
     with pytest.raises(ModelRetry, match="Failed to navigate: boom"):
         await registered_tool(ctx)
-
-    assert mock_emit.call_args_list[1][0][0].payload.phase == ToolPhase.ERROR
+    mock_emit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1597,7 +1637,11 @@ async def test_kernel_register_toolkit_soft_fails_browser_action_error_on_last_a
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-browser-soft-fail",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1614,7 +1658,7 @@ async def test_kernel_register_toolkit_soft_fails_browser_action_error_on_last_a
         error_type="browser_action_error",
         message="Failed to navigate: boom",
     )
-    assert mock_emit.call_args_list[1][0][0].payload.phase == ToolPhase.ERROR
+    mock_emit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1629,7 +1673,11 @@ async def test_kernel_register_toolkit_soft_fails_browser_screenshot_on_last_att
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-screenshot-soft-fail",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1664,7 +1712,11 @@ async def test_kernel_register_toolkit_soft_fails_when_browser_boot_fails(monkey
     monkeypatch.setattr(kernel.browser_manager, "get_browser", mock_get_browser)
 
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-browser-boot-fail",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1695,7 +1747,11 @@ async def test_kernel_register_toolkit_soft_fails_model_retry_on_last_attempt():
     registered_tool = agent.tool.call_args[0][0]
 
     mock_emit = AsyncMock()
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=mock_emit)
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-model-retry-soft-fail",
+        emit_event_cb=mock_emit,
+    )
 
     class MockContext:
         def __init__(self, d):
@@ -1722,7 +1778,11 @@ async def test_kernel_register_toolkit_wraps_binary_image_with_json_payload():
     kernel.tool_manager.register_toolkit(agent, ImageDummyToolkit)
     registered_tool = agent.tool.call_args[0][0]
 
-    deps = kernel.create_agent_deps(session_id="sess", emit_event_cb=AsyncMock())
+    deps = kernel.create_agent_deps(
+        session_id="sess",
+        run_id="run-binary-image-wrapper",
+        emit_event_cb=AsyncMock(),
+    )
 
     class MockContext:
         def __init__(self, d):

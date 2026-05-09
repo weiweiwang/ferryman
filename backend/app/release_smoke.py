@@ -219,7 +219,10 @@ async def run_bundle_smoke_test() -> dict[str, object]:
     runtime = FerrymanRuntime(settings)
     session_id = "bundle-smoke"
     workspace = runtime.get_session_workspace(session_id)
-    base_ctx = SimpleNamespace(deps=runtime.create_agent_deps(session_id=session_id), usage=Usage())
+    base_ctx = SimpleNamespace(
+        deps=runtime.create_agent_deps(session_id=session_id, run_id="run-release-smoke-base"),
+        usage=Usage(),
+    )
     report: dict[str, object] = {"root_dir": str(settings.root_dir), "checks": []}
     scheduler_started = False
 
@@ -271,7 +274,11 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         report["checks"].append({"name": "task_tools"})
 
         bundled_skill_ctx = SimpleNamespace(
-            deps=runtime.create_agent_deps(session_id=session_id, skill_name="bundle-smoke-skill"),
+            deps=runtime.create_agent_deps(
+                session_id=session_id,
+                run_id="run-release-smoke-skill",
+                skill_name="bundle-smoke-skill",
+            ),
             usage=Usage(),
         )
         bundled_assets = await FileToolkit.list_files(bundled_skill_ctx, "assets")
@@ -305,7 +312,11 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         _require("bundle-smoke-draft-skill" in runtime.skill_manager.skills, "Published smoke skill was not registered.")
 
         skill_ctx = SimpleNamespace(
-            deps=runtime.create_agent_deps(session_id=session_id, skill_name="bundle-smoke-draft-skill"),
+            deps=runtime.create_agent_deps(
+                session_id=session_id,
+                run_id="run-release-smoke-draft-skill",
+                skill_name="bundle-smoke-draft-skill",
+            ),
             usage=Usage(),
         )
         skill_files = await FileToolkit.list_files(skill_ctx, str(runtime.skill_manager.skills["bundle-smoke-draft-skill"].path))

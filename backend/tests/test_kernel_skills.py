@@ -150,7 +150,11 @@ async def test_skill_context_can_list_its_own_bundled_scripts():
     kernel.skill_manager.scan_skills()
     skill = kernel.skill_manager.skills["bundled_skill"]
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-skill-list-scripts",
+        skill_name="bundled_skill",
+    ))
 
     result = await FileToolkit.list_files(ctx, str(skill.path / "scripts"))
 
@@ -164,7 +168,11 @@ async def test_skill_context_keeps_writes_inside_session_workspace():
     kernel.skill_manager.scan_skills()
     skill = kernel.skill_manager.skills["bundled_skill"]
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-skill-write-scope",
+        skill_name="bundled_skill",
+    ))
 
     with pytest.raises(ModelRetry, match="Invalid path: use a relative path"):
         await FileToolkit.write_file(ctx, str(skill.path / "scripts" / "generated.txt"), "nope")
@@ -176,7 +184,11 @@ async def test_skill_context_rejects_out_of_scope_read_with_model_retry():
     kernel = FerrymanRuntime(create_test_settings())
     kernel.skill_manager.scan_skills()
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-skill-read-scope",
+        skill_name="bundled_skill",
+    ))
     outside_path = str(TEST_ROOT / "outside.txt")
 
     with pytest.raises(ModelRetry, match="Invalid path: use a relative path"):
@@ -189,7 +201,11 @@ async def test_skill_context_rejects_out_of_scope_list_with_model_retry():
     kernel = FerrymanRuntime(create_test_settings())
     kernel.skill_manager.scan_skills()
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-skill-list-scope",
+        skill_name="bundled_skill",
+    ))
     outside_dir = str(TEST_ROOT / "outside-dir")
 
     with pytest.raises(ModelRetry, match="Invalid path: use a relative path"):
@@ -199,7 +215,10 @@ async def test_skill_context_rejects_out_of_scope_list_with_model_retry():
 @pytest.mark.asyncio
 async def test_read_file_requests_retry_when_file_is_missing():
     kernel = FerrymanRuntime(create_test_settings())
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-read-missing-file",
+    ))
 
     with pytest.raises(ModelRetry, match="File not found: missing.txt"):
         await FileToolkit.read_file(ctx, "missing.txt")
@@ -211,7 +230,11 @@ async def test_run_skill_script_requests_retry_when_script_is_missing():
     kernel = FerrymanRuntime(create_test_settings())
     kernel.skill_manager.scan_skills()
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id="skill-session", skill_name="bundled_skill"))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-missing-skill-script",
+        skill_name="bundled_skill",
+    ))
 
     with pytest.raises(ModelRetry, match="Script not found: missing.py"):
         await CommandToolkit.run_skill_script(ctx, "missing.py")
@@ -226,7 +249,10 @@ async def test_publish_skill_copies_draft_and_registers_it():
     draft_dir = workspace / "draft-skill"
     create_draft_skill(draft_dir)
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id=session_id,
+        run_id="run-publish-skill",
+    ))
 
     payload = await SkillToolkit.publish_skill(ctx, "draft-skill")
 
@@ -246,7 +272,10 @@ async def test_publish_skill_rejects_paths_outside_workspace():
     outside_dir = TEST_ROOT / "outside-skill"
     create_draft_skill(outside_dir, name="outside-skill")
 
-    ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id))
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id=session_id,
+        run_id="run-publish-skill-reject",
+    ))
 
     with pytest.raises(RuntimeError, match="inside the current session workspace"):
         await SkillToolkit.publish_skill(ctx, str(outside_dir))
@@ -260,7 +289,11 @@ async def test_skill_creator_draft_publish_lifecycle_stays_in_allowed_paths():
 
     session_id = "creator-session"
     workspace = kernel.get_session_workspace(session_id)
-    creator_ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id, skill_name="skill-creator"))
+    creator_ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id=session_id,
+        run_id="run-skill-creator-lifecycle",
+        skill_name="skill-creator",
+    ))
 
     init_result = await CommandToolkit.run_skill_script(
         creator_ctx,
@@ -286,7 +319,11 @@ async def test_skill_creator_draft_publish_lifecycle_stays_in_allowed_paths():
     assert published_dir.exists()
     assert kernel.skill_manager.skills["demo-skill"].path == published_dir
 
-    published_ctx = SimpleNamespace(deps=kernel.create_agent_deps(session_id=session_id, skill_name="demo-skill"))
+    published_ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id=session_id,
+        run_id="run-skill-creator-lifecycle",
+        skill_name="demo-skill",
+    ))
     assert "SKILL.md" in await FileToolkit.list_files(published_ctx, str(published_dir))
 
 

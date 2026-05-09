@@ -1,13 +1,16 @@
+import json
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import DeltaToolCall
 from pydantic_ai.models.function import FunctionModel
 from sqlmodel import select
 
 from app.core.config import Settings
 from app.core.runtime import FerrymanRuntime
 from app.models.database import Message, Session
+from app.models.events import ToolPhase
 from app.models.schemas import Usage
 
 
@@ -43,6 +46,25 @@ class FailingAgent:
         raise error from cause
 
 
+def streaming_function_model(model_logic):
+    async def stream_logic(messages, info):
+        response = await model_logic(messages, info)
+        for index, part in enumerate(response.parts):
+            if isinstance(part, ToolCallPart):
+                args = part.args if isinstance(part.args, str) else json.dumps(part.args)
+                yield {
+                    index: DeltaToolCall(
+                        name=part.tool_name,
+                        json_args=args,
+                        tool_call_id=part.tool_call_id,
+                    )
+                }
+            elif isinstance(part, TextPart):
+                yield part.content
+
+    return FunctionModel(stream_function=stream_logic)
+
+
 def test_prompt_builder_builds_runtime_augmented_instruction(tmp_path):
     runtime = FerrymanRuntime(Settings(root_dir=tmp_path))
 
@@ -64,7 +86,7 @@ async def test_agent_manager_run_master_agent_persists_success(session, tmp_path
         "hello",
         "s1",
         run_id="run-agent-success-1",
-        deps=runtime.create_agent_deps(session_id="s1"),
+        deps=runtime.create_agent_deps(session_id="s1", run_id="run-agent-success-1"),
     )
 
     assert response["payload"]["messages"][0]["content"] == "agent-ok"
@@ -102,7 +124,7 @@ async def test_agent_manager_run_master_agent_includes_exception_cause(session, 
         "send the report",
         "s-cause",
         run_id="run-agent-fail-1",
-        deps=runtime.create_agent_deps(session_id="s-cause"),
+        deps=runtime.create_agent_deps(session_id="s-cause", run_id="run-agent-fail-1"),
     )
 
     assistant_message = response["payload"]["messages"][0]
@@ -152,14 +174,14 @@ async def test_agent_manager_continues_after_tool_argument_validation_error(
     monkeypatch.setattr(
         runtime.model_manager,
         "create_active_model",
-        lambda: FunctionModel(model_logic),
+        lambda: streaming_function_model(model_logic),
     )
 
     response = await runtime.agent_manager.run_master_agent(
         "send the report",
         "s-validation",
         run_id="run-agent-validation-1",
-        deps=runtime.create_agent_deps(session_id="s-validation"),
+        deps=runtime.create_agent_deps(session_id="s-validation", run_id="run-agent-validation-1"),
     )
 
     assistant_message = response["payload"]["messages"][0]
@@ -172,3 +194,122 @@ async def test_agent_manager_continues_after_tool_argument_validation_error(
     ).all()
     assert messages[-1].metadata_["run"]["status"] == "success"
     assert not messages[-1].content.startswith("Run failed:")
+
+
+@pytest.mark.asyncio
+async def test_agent_manager_emits_tool_activity_from_pydantic_event_stream(
+    session,
+    tmp_path,
+    monkeypatch,
+):
+    runtime = FerrymanRuntime(Settings(root_dir=tmp_path))
+    call_count = 0
+    mock_emit = AsyncMock()
+
+    async def model_logic(messages, info):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return ModelResponse(parts=[
+                ToolCallPart(
+                    tool_name="list_files",
+                    args={"directory": "."},
+                    tool_call_id="call_001",
+                )
+            ])
+        return ModelResponse(parts=[TextPart(content="Listed files.")])
+
+    monkeypatch.setattr(
+        runtime.model_manager,
+        "create_active_model",
+        lambda: streaming_function_model(model_logic),
+    )
+
+    response = await runtime.agent_manager.run_master_agent(
+        "list files",
+        "s-events",
+        run_id="run-agent-events-1",
+        deps=runtime.create_agent_deps(
+            session_id="s-events",
+            run_id="run-agent-events-1",
+            emit_event_cb=mock_emit,
+        ),
+    )
+
+    assert response["payload"]["messages"][0]["content"] == "Listed files."
+    assert call_count == 2
+    assert mock_emit.await_count == 2
+
+    start_event = mock_emit.await_args_list[0].args[0]
+    complete_event = mock_emit.await_args_list[1].args[0]
+    assert start_event.payload.run_id == "run-agent-events-1"
+    assert start_event.payload.tool_name == "list_files"
+    assert start_event.payload.phase == ToolPhase.START
+    assert start_event.payload.input["path"].endswith("/workspaces/s-events")
+    assert complete_event.payload.run_id == "run-agent-events-1"
+    assert complete_event.payload.tool_name == "list_files"
+    assert complete_event.payload.phase == ToolPhase.COMPLETE
+    assert complete_event.payload.duration_ms is not None
+    assert complete_event.payload.output
+    assert "list_files" in complete_event.payload.output
+
+
+@pytest.mark.asyncio
+async def test_agent_manager_emits_tool_error_from_pydantic_event_stream(
+    session,
+    tmp_path,
+    monkeypatch,
+):
+    runtime = FerrymanRuntime(Settings(root_dir=tmp_path))
+    call_count = 0
+    mock_emit = AsyncMock()
+
+    async def model_logic(messages, info):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return ModelResponse(parts=[
+                ToolCallPart(
+                    tool_name="send_email",
+                    args={
+                        "to": ["user@example.com"],
+                        "subject": "Report",
+                        "text": "See attached.",
+                        "attachments": "not-json",
+                    },
+                    tool_call_id="call_001",
+                )
+            ])
+        return ModelResponse(parts=[
+            TextPart(content="The email was not sent.")
+        ])
+
+    monkeypatch.setattr(
+        runtime.model_manager,
+        "create_active_model",
+        lambda: streaming_function_model(model_logic),
+    )
+
+    response = await runtime.agent_manager.run_master_agent(
+        "send email",
+        "s-event-error",
+        run_id="run-agent-events-error-1",
+        deps=runtime.create_agent_deps(
+            session_id="s-event-error",
+            run_id="run-agent-events-error-1",
+            emit_event_cb=mock_emit,
+        ),
+    )
+
+    assert response["payload"]["messages"][0]["content"] == "The email was not sent."
+    assert mock_emit.await_count == 2
+
+    start_event = mock_emit.await_args_list[0].args[0]
+    error_event = mock_emit.await_args_list[1].args[0]
+    assert start_event.payload.phase == ToolPhase.START
+    assert start_event.payload.input["text"] == {"_summary": "omitted", "length": 13}
+    assert error_event.payload.run_id == "run-agent-events-error-1"
+    assert error_event.payload.tool_name == "send_email"
+    assert error_event.payload.phase == ToolPhase.ERROR
+    assert "attachments" in error_event.payload.output
+    assert "valid" in error_event.payload.output

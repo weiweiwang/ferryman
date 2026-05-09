@@ -91,6 +91,7 @@ class FerrymanRuntime:
         self,
         session_id: str,
         *,
+        run_id: str,
         skill_name: Optional[str] = None,
         emit_event_cb: Optional[Callable[["FerrymanEventEnvelope"], Awaitable[None]]] = None,
     ) -> "AgentDeps":
@@ -106,6 +107,7 @@ class FerrymanRuntime:
             skill_manager=self.skill_manager,
             task_manager=self.task_manager,
             skill_name=skill_name,
+            run_id=run_id,
             emit_event_cb=emit_event_cb,
             schedule_manager=self.schedule_manager,
         )
@@ -118,7 +120,11 @@ class FerrymanRuntime:
         run_id: str,
         emit_event_cb: Optional[Callable[["FerrymanEventEnvelope"], Awaitable[None]]] = None,
     ) -> dict[str, object]:
-        deps = self.create_agent_deps(session_id=session_id, emit_event_cb=emit_event_cb)
+        deps = self.create_agent_deps(
+            session_id=session_id,
+            run_id=run_id,
+            emit_event_cb=emit_event_cb,
+        )
         return await self.agent_manager.run_master_agent(
             instruction=instruction,
             session_id=session_id,

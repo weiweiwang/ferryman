@@ -30,6 +30,7 @@ class AgentDeps:
     prompt_builder: "PromptBuilder"
     skill_manager: "SkillManager"
     task_manager: "TaskManager"
+    run_id: str
     skill_name: Optional[str] = None
     emit_event_cb: Optional[Callable[["FerrymanEventEnvelope"], Awaitable[None]]] = None
     schedule_manager: "ScheduleManager | None" = None

@@ -62,6 +62,8 @@
     "stop": "停止当前执行",
     "status_canceled": "已取消",
     "session_busy": "当前会话仍在执行中",
+    "tool_output_result": "执行结果",
+    "tool_output_error": "失败原因",
     "untitled": "新对话",
     "schedules_drawer_title": "定时任务列表",
     "tools": {

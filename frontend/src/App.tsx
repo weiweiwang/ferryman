@@ -163,8 +163,19 @@ function buildToolActivityCopyLine(activity: ToolActivityPayload, t: (key: strin
   if (activity.duration_ms !== undefined) {
     segments.push(`${activity.duration_ms}ms`);
   }
+  if (activity.output) {
+    segments.push(activity.output);
+  }
 
   return segments.join(' ');
+}
+
+function getToolActivityKey(activity: ToolActivityPayload, idx: number) {
+  return activity.event_id || `${activity.run_id}-${activity.tool_name}-${idx}`;
+}
+
+function getToolActivityOutputTitle(activity: ToolActivityPayload, t: (key: string) => string) {
+  return activity.phase === 'error' ? t('chat.tool_output_error') : t('chat.tool_output_result');
 }
 
 function getMessageCopyText(
@@ -278,6 +289,7 @@ export default function App() {
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
   const [isInsightsOpen, setIsInsightsOpen] = useState(false);
+  const [expandedToolActivityKeys, setExpandedToolActivityKeys] = useState<Set<string>>(() => new Set());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -290,6 +302,18 @@ export default function App() {
   const shouldStickToBottomRef = useRef(true);
   const autoScrollSessionRef = useRef(currentSessionId);
   const sendShortcutHint = sendMode === 'enter' ? t('chat.send_shortcut_enter_hint') : t('chat.send_shortcut_mod_enter_hint');
+
+  const toggleToolActivityOutput = useCallback((key: string) => {
+    setExpandedToolActivityKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   const scrollChatToBottom = useCallback(() => {
     const scrollContainer = chatScrollRef.current;
@@ -948,52 +972,88 @@ export default function App() {
                           {isAssistantPendingMessage(msg) ? (
                             <div className="space-y-4">
                               <ThinkingIndicator />
-                              {toolActivities.map((activity, idx) => (
-                                <div key={`${activity.run_id}-${activity.tool_name}-${idx}`} className="flex items-center gap-2 text-[12px] font-mono text-white/50 bg-white/5 px-4 py-2 rounded-xl">
-                                  {(() => {
-                                    const activityUrl = getHttpUrl(activity.input?.url);
+                              {toolActivities.map((activity, idx) => {
+                                const activityKey = getToolActivityKey(activity, idx);
+                                const activityUrl = getHttpUrl(activity.input?.url);
+                                const canExpandOutput = Boolean(
+                                  activity.output && (activity.phase === 'complete' || activity.phase === 'error')
+                                );
+                                const isOutputExpanded = expandedToolActivityKeys.has(activityKey);
 
-                                    return (
-                                      <>
-                                        {activity.phase === 'start' || activity.phase === 'running'
-                                        ? <RefreshCw size={12} className="animate-spin text-white/40 shrink-0" />
-                                        : activity.phase === 'error'
-                                            ? <X size={12} className="text-red-400 shrink-0" />
-                                            : <Check size={12} className="text-green-400 shrink-0" />
+                                return (
+                                  <div key={activityKey} className="rounded-xl bg-white/5 text-[12px] font-mono text-white/50">
+                                    <div
+                                      role={canExpandOutput ? 'button' : undefined}
+                                      tabIndex={canExpandOutput ? 0 : undefined}
+                                      onClick={canExpandOutput ? () => toggleToolActivityOutput(activityKey) : undefined}
+                                      onKeyDown={canExpandOutput ? (event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                          event.preventDefault();
+                                          toggleToolActivityOutput(activityKey);
                                         }
-                                        <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-                                          <span className="shrink-0">{getToolActivityDisplayName(activity.tool_name, t)}</span>
-                                          {activityUrl && (
-                                            <button
-                                              type="button"
-                                              onClick={() => handleOpenExternalUrl(activityUrl)}
-                                              className="inline-flex min-w-0 items-center gap-1 truncate text-left font-normal text-sky-300/75 transition-colors hover:text-sky-200"
-                                              title={activityUrl}
-                                              aria-label={`Open ${activityUrl}`}
-                                            >
-                                              <span className="truncate">{activityUrl}</span>
-                                              <ExternalLink size={11} className="shrink-0" />
-                                            </button>
-                                          )}
-                                          {activity.input && activity.input.url && !activityUrl && <span className="truncate font-normal text-white/30">{activity.input.url}</span>}
-                                          {activity.input && activity.input.skill_name && <span className="truncate font-bold text-blue-400">[{activity.input.skill_name}]</span>}
-                                          {activity.input && activity.input.command && <span className="truncate font-normal text-orange-400">`{activity.input.command}`</span>}
-                                          {activity.input && activity.input.path && (
-                                            <span
-                                              className="truncate font-normal text-green-400"
-                                              title={String(activity.input.path)}
-                                            >
-                                              {String(activity.input.path)}
-                                            </span>
-                                          )}
-                                          {activity.input && activity.input.title && <span className="truncate text-white/40 italic">"{activity.input.title}"</span>}
-                                        </span>
-                                        {activity.duration_ms !== undefined && <span className="text-white/20 shrink-0">{activity.duration_ms}ms</span>}
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-                              ))}
+                                      } : undefined}
+                                      className={cn(
+                                        "flex items-center gap-2 px-4 py-2",
+                                        canExpandOutput && "cursor-pointer transition-colors hover:bg-white/[0.04]"
+                                      )}
+                                      aria-expanded={canExpandOutput ? isOutputExpanded : undefined}
+                                    >
+                                      {activity.phase === 'start' || activity.phase === 'running'
+                                      ? <RefreshCw size={12} className="animate-spin text-white/40 shrink-0" />
+                                      : activity.phase === 'error'
+                                          ? <X size={12} className="text-red-400 shrink-0" />
+                                          : <Check size={12} className="text-green-400 shrink-0" />
+                                      }
+                                      <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                                        <span className="shrink-0">{getToolActivityDisplayName(activity.tool_name, t)}</span>
+                                        {activityUrl && (
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              handleOpenExternalUrl(activityUrl);
+                                            }}
+                                            className="inline-flex min-w-0 items-center gap-1 truncate text-left font-normal text-sky-300/75 transition-colors hover:text-sky-200"
+                                            title={activityUrl}
+                                            aria-label={`Open ${activityUrl}`}
+                                          >
+                                            <span className="truncate">{activityUrl}</span>
+                                            <ExternalLink size={11} className="shrink-0" />
+                                          </button>
+                                        )}
+                                        {activity.input && activity.input.url && !activityUrl && <span className="truncate font-normal text-white/30">{activity.input.url}</span>}
+                                        {activity.input && activity.input.skill_name && <span className="truncate font-bold text-blue-400">[{activity.input.skill_name}]</span>}
+                                        {activity.input && activity.input.command && <span className="truncate font-normal text-orange-400">`{activity.input.command}`</span>}
+                                        {activity.input && activity.input.path && (
+                                          <span
+                                            className="truncate font-normal text-green-400"
+                                            title={String(activity.input.path)}
+                                          >
+                                            {String(activity.input.path)}
+                                          </span>
+                                        )}
+                                        {activity.input && activity.input.title && <span className="truncate text-white/40 italic">"{activity.input.title}"</span>}
+                                      </span>
+                                      {activity.duration_ms !== undefined && <span className="text-white/20 shrink-0">{activity.duration_ms}ms</span>}
+                                      {canExpandOutput && (
+                                        isOutputExpanded
+                                          ? <ChevronDown size={13} className="shrink-0 text-white/30" />
+                                          : <ChevronRight size={13} className="shrink-0 text-white/30" />
+                                      )}
+                                    </div>
+                                    {canExpandOutput && isOutputExpanded && (
+                                      <div className="border-t border-white/5 px-4 pb-3 pt-2">
+                                        <div className="mb-1 text-[11px] font-medium text-white/35">
+                                          {getToolActivityOutputTitle(activity, t)}
+                                        </div>
+                                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-black/20 p-2 text-[11px] leading-relaxed text-white/65">
+                                          {activity.output}
+                                        </pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           ) : (
                             <Markdown content={msg.content} />

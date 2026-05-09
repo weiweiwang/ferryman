@@ -7,6 +7,7 @@ from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import UsageLimits
 
+from app.core.agent_event_stream import build_agent_event_stream_handler
 from app.core.deps import (
     AgentDeps,
     get_agent_manager,
@@ -85,6 +86,7 @@ class SkillToolkit(Toolkit):
                 deps=skill_deps,
                 usage=ctx.usage,
                 usage_limits=UsageLimits(request_limit=request_limit),
+                event_stream_handler=build_agent_event_stream_handler(skill_deps),
             )
             usage = result.usage()
             usage_data = {
