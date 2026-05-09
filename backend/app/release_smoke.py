@@ -335,10 +335,11 @@ async def run_bundle_smoke_test() -> dict[str, object]:
                 return RequestUsage(input_tokens=1, output_tokens=1)
 
         class FakeSkillAgent:
-            async def run(self, instruction, deps, usage, usage_limits):
+            async def run(self, instruction, deps, usage, usage_limits, event_stream_handler=None):
                 _require("Runtime Context:" in instruction, "Skill instruction was not runtime-augmented.")
                 _require(deps.skill_name == "bundle-smoke-skill", "Skill deps did not carry the active skill name.")
                 _require(usage is base_ctx.usage, "Skill usage object was not forwarded.")
+                _require(event_stream_handler is not None, "Skill event stream handler was not forwarded.")
                 return FakeSkillResult()
 
         runtime.agent_manager.build_skill_agent = MethodType(lambda self, skill_name: FakeSkillAgent(), runtime.agent_manager)
