@@ -58,10 +58,24 @@ class SessionCompactionMemory(ValidatorBaseModel):
         summary = value.strip()
         return summary or None
 
-    @field_validator("cutoff_created_at", "updated_at", "guard_until")
+    @field_validator("cutoff_created_at", "updated_at", "guard_until", mode="before")
     @classmethod
-    def validate_datetime(cls, value: Optional[datetime]):
-        return cls.utc_datetime(value)
+    def validate_datetime(cls, value: object) -> Optional[datetime]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return cls.utc_datetime(value)
+        if isinstance(value, date):
+            return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return None
+            try:
+                return cls.utc_datetime(datetime.fromisoformat(normalized.replace("Z", "+00:00")))
+            except ValueError:
+                return None
+        return None
 
 
 class SessionMemory(BaseModel):
