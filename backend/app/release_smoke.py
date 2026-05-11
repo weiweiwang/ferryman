@@ -356,7 +356,13 @@ async def run_bundle_smoke_test() -> dict[str, object]:
                 _require(event_stream_handler is not None, "Skill event stream handler was not forwarded.")
                 return FakeSkillResult()
 
-        runtime.agent_manager.build_skill_agent = MethodType(lambda self, skill_name: FakeSkillAgent(), runtime.agent_manager)
+        def build_fake_skill_agent(self, skill_name, *, session_id=None, run_id=None, usage_tracker=None):
+            _require(session_id == base_ctx.deps.session_id, "Skill agent did not receive the active session id.")
+            _require(run_id == base_ctx.deps.run_id, "Skill agent did not receive the active run id.")
+            _require(usage_tracker is base_ctx.deps.model_usage_tracker, "Skill agent did not receive the usage tracker.")
+            return FakeSkillAgent()
+
+        runtime.agent_manager.build_skill_agent = MethodType(build_fake_skill_agent, runtime.agent_manager)
         try:
             skill_run_result = await SkillToolkit.run_skill(base_ctx, "bundle-smoke-skill", "Run smoke skill")
         finally:
