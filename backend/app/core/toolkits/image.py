@@ -118,10 +118,9 @@ class ImageToolkit(Toolkit):
         prompt: str,
         model: str = "gpt-image-2",
         api_version: str = "2025-01-01-preview",
-        size: str = "1024x1024",
+        size: str | None = None,
         quality: str = "low",
         output_format: str = "png",
-        output_compression: int = 100,
         n: int = 1,
         output_path: str | None = None,
     ) -> dict[str, object]:
@@ -130,15 +129,18 @@ class ImageToolkit(Toolkit):
         Pass `api_key` and `base_url` at call time. When `base_url` contains
         `.azure.com`, the tool uses `AzureOpenAI` with `api_version`; otherwise
         it uses `OpenAI(base_url=...)`. `quality` defaults to `low` to control
-        cost and reduce accidental overuse. Generated images are saved inside
-        the current session workspace.
+        cost and reduce accidental overuse. If provided, `size` must use the
+        OpenAI Images API format `"<width>x<height>"`, for example
+        `"1024x1024"` or `"2560x1088"`; when omitted, no `size` parameter is
+        sent and the provider default applies. Generated images are saved
+        inside the current session workspace.
         """
         normalized_api_key = ImageToolkit._require_non_empty("api_key", api_key)
         normalized_base_url = ImageToolkit._require_non_empty("base_url", base_url)
         normalized_prompt = ImageToolkit._require_non_empty("prompt", prompt)
         normalized_model = ImageToolkit._require_non_empty("model", model)
         normalized_api_version = ImageToolkit._require_non_empty("api_version", api_version)
-        normalized_size = ImageToolkit._require_non_empty("size", size)
+        normalized_size = size.strip() if isinstance(size, str) and size.strip() else None
         normalized_quality = ImageToolkit._require_non_empty("quality", quality)
         normalized_output_format = ImageToolkit._normalize_output_format(output_format)
 
@@ -146,8 +148,6 @@ class ImageToolkit(Toolkit):
             raise ModelRetry("n must be at least 1.")
         if n > 4:
             raise ModelRetry("n must not exceed 4.")
-        if output_compression < 0 or output_compression > 100:
-            raise ModelRetry("output_compression must be between 0 and 100.")
 
         output_paths = ImageToolkit._resolve_output_paths(
             ctx,
@@ -162,12 +162,12 @@ class ImageToolkit(Toolkit):
             "api_version": normalized_api_version,
             "model": normalized_model,
             "prompt": normalized_prompt,
-            "size": normalized_size,
             "quality": normalized_quality,
             "output_format": normalized_output_format,
-            "output_compression": output_compression,
             "n": n,
         }
+        if normalized_size:
+            request_params["size"] = normalized_size
 
         result = await asyncio.to_thread(ImageToolkit._generate_image, request_params)
         images = result.get("data") or []

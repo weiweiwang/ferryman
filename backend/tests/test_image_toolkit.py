@@ -3,10 +3,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelRetry
 
 from app.core.config import Settings
 from app.core.runtime import FerrymanRuntime
+from app.core.tool_manager import ToolManager
 from app.core.toolkits.image import ImageToolkit
 from app.core.tool_activity_payload import summarize_tool_input_value
 
@@ -20,6 +22,16 @@ def make_context(tmp_path: Path, session_id: str = "image-session"):
     runtime = FerrymanRuntime(settings=settings)
     deps = runtime.create_agent_deps(session_id=session_id, run_id="run-image-toolkit-test")
     return SimpleNamespace(deps=deps)
+
+
+def test_generate_image_schema_keeps_size_optional_and_omits_compression():
+    agent = Agent("test")
+    ToolManager().register_toolkit(agent, ImageToolkit)
+
+    schema = agent._function_toolset.tools["generate_image"].function_schema.json_schema
+
+    assert "size" not in schema["required"]
+    assert "output_compression" not in schema["properties"]
 
 
 class FakeImageResult:
@@ -68,6 +80,7 @@ async def test_generate_image_uses_azure_client_for_azure_base_url(monkeypatch, 
         api_key="test-key",
         base_url="https://example.azure.com/",
         prompt="A quiet ferry terminal at sunrise",
+        size="1024x1024",
     )
 
     assert captured["client_type"] == "azure"
@@ -82,7 +95,6 @@ async def test_generate_image_uses_azure_client_for_azure_base_url(monkeypatch, 
         "size": "1024x1024",
         "quality": "low",
         "output_format": "png",
-        "output_compression": 100,
         "n": 1,
     }
     assert "provider" not in result
@@ -119,6 +131,7 @@ async def test_generate_image_uses_openai_client_for_non_azure_base_url(monkeypa
         api_key="test-key",
         base_url="https://router.example.com/v1",
         prompt="A compact app icon",
+        size="1024x1024",
         output_format="webp",
         output_path="assets/icon.webp",
     )
@@ -139,6 +152,32 @@ async def test_generate_image_uses_openai_client_for_non_azure_base_url(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_generate_image_omits_size_when_not_provided(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeImages:
+        def generate(self, **kwargs):
+            captured["generate_kwargs"] = kwargs
+            return FakeImageResult(image_payload())
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.images = FakeImages()
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+    ctx = make_context(tmp_path)
+    await ImageToolkit.generate_image(
+        ctx,
+        api_key="test-key",
+        base_url="https://router.example.com/v1",
+        prompt="A ferry",
+    )
+
+    assert "size" not in captured["generate_kwargs"]
+
+
+@pytest.mark.asyncio
 async def test_generate_image_rejects_output_path_escape(tmp_path):
     ctx = make_context(tmp_path)
 
@@ -148,6 +187,7 @@ async def test_generate_image_rejects_output_path_escape(tmp_path):
             api_key="test-key",
             base_url="https://example.azure.com/",
             prompt="A ferry",
+            size="1024x1024",
             output_path="../outside.png",
         )
 
@@ -189,7 +229,6 @@ def test_full_azure_generation_url_is_reduced_to_resource_root(monkeypatch):
             "size": "1024x1024",
             "quality": "low",
             "output_format": "png",
-            "output_compression": 100,
             "n": 1,
         }
     )
@@ -221,12 +260,14 @@ async def test_default_output_path_is_unique(monkeypatch, tmp_path):
         api_key="test-key",
         base_url="https://router.example.com/v1",
         prompt="A ferry",
+        size="1024x1024",
     )
     second = await ImageToolkit.generate_image(
         ctx,
         api_key="test-key",
         base_url="https://router.example.com/v1",
         prompt="A ferry",
+        size="1024x1024",
     )
 
     assert first["images"][0]["path"] != second["images"][0]["path"]

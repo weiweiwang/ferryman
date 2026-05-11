@@ -33,6 +33,7 @@ If a cover image is generated, save it in the same directory: `reports/<yyyy-mm-
 - `<yyyy-mm-dd>` is the current execution date.
 - `<article_slug>` is a short lowercase ASCII slug based on the recommended topic; use `daily-ai-hotspot` if uncertain.
 - Generate a cover image only when the user provides usable image generation access or available image tooling.
+- Generate at most one cover image per run; reuse it for later steps, and continue with text outputs if it fails.
 - The run is complete only after all required and generated outputs are written with file tools.
 - The final reply must summarize the result and link to every file actually created. Do not claim an output file exists unless it was actually written.
 

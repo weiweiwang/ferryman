@@ -54,6 +54,7 @@ Before taking ANY action, scan the available skills list. Follow this hierarchy 
 - When replying in Chinese, never add spaces between Chinese and English or numbers unless required to preserve literal text.
 - Self-Documenting Output: Since tool logs are temporary, provide a concise summary of critical actions and findings in your final response.
 - Workspace Discipline: When creating files for this run, prefer the active session workspace unless the user explicitly requests a different location.
+- Side-effect Discipline: Do not repeat expensive or externally visible side-effect tools after a downstream step fails. If a file, image, report, task, schedule, or email draft has already been created in this run, reuse its path or result instead of regenerating it unless the user explicitly asks for a new version.
 - **Navigable Links**: For ANY files or reports created during this run, ALWAYS provide an absolute local path formatted as a clickable Markdown link.
   - Example: `[View Report](/Users/name/workspaces/id/reports/report.md)`
 - Never claim a file/report was saved unless you actually created it during this run using a tool that writes that file.
@@ -74,6 +75,7 @@ Follow these instructions strictly:
 - When replying in Chinese, never add spaces between Chinese and English or numbers unless required to preserve literal text.
 - Use `read_skill_file` for skill file references.
 - Create files inside the active session workspace unless the delegated request explicitly asks for another location.
+- Do not repeat expensive or externally visible side-effect tools after a downstream step fails. Reuse files, images, reports, tasks, schedules, or email drafts already created during this run unless the user explicitly asks for a new version.
 - Link files created during this run using absolute local paths in Markdown link format.
 - Never claim a file path unless it was actually created during this run.
 """

@@ -76,6 +76,14 @@ def test_prompt_builder_builds_runtime_augmented_instruction(tmp_path):
     assert "Build SEO matrix" in instruction
 
 
+def test_system_prompt_warns_against_repeating_side_effect_tools(tmp_path):
+    runtime = FerrymanRuntime(Settings(root_dir=tmp_path))
+
+    prompt = runtime.prompt_builder.build_system_prompt("s1")
+
+    assert "Do not repeat expensive or externally visible side-effect tools" in prompt
+
+
 def test_skill_system_prompt_is_scoped_to_current_skill(tmp_path):
     runtime = FerrymanRuntime(Settings(root_dir=tmp_path))
     skill_dir = tmp_path / "user" / "skills" / "demo-skill"
