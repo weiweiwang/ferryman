@@ -50,6 +50,27 @@ def dataframe_row_value(frame: pd.DataFrame, label: str, column: Any, default: f
     return numeric_value(frame.loc[label, column], default)
 
 
+def first_row_value(
+    frame: pd.DataFrame,
+    labels: tuple[str, ...],
+    column: Any,
+    default: float | int | None = None,
+) -> float | int | None:
+    for label in labels:
+        value = dataframe_row_value(frame, label, column, default=None)
+        if value is not None:
+            return value
+    return default
+
+
+def safe_ratio(numerator: Any, denominator: Any) -> float | None:
+    numerator_value = numeric_value(numerator, None)
+    denominator_value = numeric_value(denominator, None)
+    if numerator_value is None or denominator_value in (None, 0):
+        return None
+    return numerator_value / denominator_value
+
+
 def price_history_rows(history: pd.DataFrame) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if history.empty:
@@ -89,9 +110,30 @@ def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
     for year in years:
         revenue = dataframe_row_value(financials, "Total Revenue", year, default=None)
         net_income = dataframe_row_value(financials, "Net Income", year, default=None)
+        normalized_income = dataframe_row_value(financials, "Normalized Income", year, default=None)
+        unusual_items = dataframe_row_value(financials, "Total Unusual Items", year, default=None)
+        ebit = first_row_value(financials, ("EBIT", "Operating Income"), year)
+        pretax_income = dataframe_row_value(financials, "Pretax Income", year, default=None)
+        tax_provision = dataframe_row_value(financials, "Tax Provision", year, default=None)
+        tax_rate = dataframe_row_value(financials, "Tax Rate For Calcs", year, default=None)
         equity = dataframe_row_value(balance, "Stockholders Equity", year, default=None)
+        invested_capital = dataframe_row_value(balance, "Invested Capital", year, default=None)
+        total_assets = dataframe_row_value(balance, "Total Assets", year, default=None)
+        total_debt = dataframe_row_value(balance, "Total Debt", year, default=None)
+        cash_and_investments = dataframe_row_value(
+            balance,
+            "Cash Cash Equivalents And Short Term Investments",
+            year,
+            default=None,
+        )
+        goodwill = dataframe_row_value(balance, "Goodwill", year, default=None)
+        goodwill_and_intangibles = dataframe_row_value(balance, "Goodwill And Other Intangible Assets", year, default=None)
+        accounts_receivable = first_row_value(balance, ("Accounts Receivable", "Receivables"), year)
+        inventory = dataframe_row_value(balance, "Inventory", year, default=None)
+        working_capital = dataframe_row_value(balance, "Working Capital", year, default=None)
         operating_cash_flow = dataframe_row_value(cashflow, "Operating Cash Flow", year, default=None)
         capital_expenditure = dataframe_row_value(cashflow, "Capital Expenditure", year, default=None)
+        asset_impairment = dataframe_row_value(cashflow, "Asset Impairment Charge", year, default=None)
         if all(value is None for value in (revenue, net_income, equity, operating_cash_flow)):
             continue
 
@@ -99,15 +141,43 @@ def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
         equity_value = numeric_value(equity, 0) or 0
         operating_cash_flow_value = numeric_value(operating_cash_flow, 0) or 0
         capital_expenditure_value = numeric_value(capital_expenditure, 0) or 0
+        effective_tax_rate = numeric_value(tax_rate, None)
+        if effective_tax_rate is None:
+            effective_tax_rate = safe_ratio(tax_provision, pretax_income)
+        nopat = None
+        if ebit is not None:
+            nopat = ebit * (1 - (effective_tax_rate or 0))
+        free_cash_flow = operating_cash_flow_value + capital_expenditure_value
         data.append(
             {
                 "Year": year.strftime("%Y") if hasattr(year, "strftime") else str(year),
                 "Revenue": numeric_value(revenue, 0),
                 "Net Income": net_income_value,
+                "Normalized Income": numeric_value(normalized_income, None),
+                "Total Unusual Items": numeric_value(unusual_items, None),
+                "EBIT": numeric_value(ebit, None),
+                "NOPAT": numeric_value(nopat, None),
                 "Operating Cash Flow": operating_cash_flow_value,
-                "Free Cash Flow": operating_cash_flow_value + capital_expenditure_value,
+                "Free Cash Flow": free_cash_flow,
                 "ROE": net_income_value / equity_value if equity_value else 0,
+                "ROIC": safe_ratio(nopat, invested_capital),
+                "Net Margin": safe_ratio(net_income, revenue),
+                "FCF Margin": safe_ratio(free_cash_flow, revenue),
+                "Cash Conversion": safe_ratio(operating_cash_flow, net_income),
                 "EPS": dataframe_row_value(financials, "Diluted EPS", year, default=None),
+                "Invested Capital": numeric_value(invested_capital, None),
+                "Stockholders Equity": numeric_value(equity, None),
+                "Total Assets": numeric_value(total_assets, None),
+                "Total Debt": numeric_value(total_debt, None),
+                "Cash And Investments": numeric_value(cash_and_investments, None),
+                "Goodwill": numeric_value(goodwill, None),
+                "Goodwill And Intangibles": numeric_value(goodwill_and_intangibles, None),
+                "Accounts Receivable": numeric_value(accounts_receivable, None),
+                "Inventory": numeric_value(inventory, None),
+                "Working Capital": numeric_value(working_capital, None),
+                "Asset Impairment Charge": numeric_value(asset_impairment, None),
+                "Goodwill To Equity": safe_ratio(goodwill, equity),
+                "Receivables To Revenue": safe_ratio(accounts_receivable, revenue),
             }
         )
     return data
@@ -140,8 +210,6 @@ def fetch_stock_data(ticker: str) -> dict[str, Any]:
         },
         "historical_financials": get_5y_financials(stock),
         "price_history": price_history_rows(history),
-        "chart_path": None,
-        "data_note": "Chart image generation is disabled in the bundled runtime.",
     }
 
 

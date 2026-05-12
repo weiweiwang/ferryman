@@ -52,6 +52,11 @@ def test_price_history_rows_and_financials_from_yfinance_frames():
                 year: {
                     "Total Revenue": 1000,
                     "Net Income": 200,
+                    "Normalized Income": 190,
+                    "Total Unusual Items": 10,
+                    "EBIT": 260,
+                    "Pretax Income": 250,
+                    "Tax Provision": 50,
                     "Diluted EPS": 2.5,
                 }
             }
@@ -61,19 +66,38 @@ def test_price_history_rows_and_financials_from_yfinance_frames():
                 year: {
                     "Operating Cash Flow": 250,
                     "Capital Expenditure": -70,
+                    "Asset Impairment Charge": 5,
                 }
             }
         )
-        balance_sheet = pd.DataFrame({year: {"Stockholders Equity": 500}})
+        balance_sheet = pd.DataFrame(
+            {
+                year: {
+                    "Stockholders Equity": 500,
+                    "Invested Capital": 1000,
+                    "Total Assets": 1500,
+                    "Total Debt": 100,
+                    "Cash Cash Equivalents And Short Term Investments": 300,
+                    "Goodwill": 50,
+                    "Accounts Receivable": 80,
+                    "Inventory": 20,
+                    "Working Capital": 400,
+                }
+            }
+        )
 
-    assert module.get_5y_financials(FakeStock()) == [
-        {
-            "Year": "2025",
-            "Revenue": 1000,
-            "Net Income": 200,
-            "Operating Cash Flow": 250,
-            "Free Cash Flow": 180,
-            "ROE": 0.4,
-            "EPS": 2.5,
-        }
-    ]
+    financials = module.get_5y_financials(FakeStock())
+    assert len(financials) == 1
+    row = financials[0]
+    assert row["Year"] == "2025"
+    assert row["Revenue"] == 1000
+    assert row["Net Income"] == 200
+    assert row["Operating Cash Flow"] == 250
+    assert row["Free Cash Flow"] == 180
+    assert row["ROE"] == 0.4
+    assert row["ROIC"] == 0.208
+    assert row["FCF Margin"] == 0.18
+    assert row["Cash Conversion"] == 1.25
+    assert row["Goodwill To Equity"] == 0.1
+    assert row["Receivables To Revenue"] == 0.08
+    assert row["EPS"] == 2.5
