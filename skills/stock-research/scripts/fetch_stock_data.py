@@ -93,6 +93,42 @@ def price_history_rows(history: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
+def money_value(value: Any, currency: str | None) -> dict[str, Any]:
+    return {"value": json_safe(value), "currency": currency}
+
+
+def fx_rate(from_currency: str | None, to_currency: str | None) -> dict[str, Any] | None:
+    if not from_currency or not to_currency:
+        return None
+    if from_currency == to_currency:
+        return {
+            "value": 1.0,
+            "from": from_currency,
+            "to": to_currency,
+            "source": "identity",
+            "symbol": None,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    symbol = f"{from_currency}{to_currency}=X"
+    try:
+        history = yf.Ticker(symbol).history(period="5d")
+    except Exception as exc:
+        logger.warning("FX rate fetch failed for %s: %s", symbol, exc)
+        return None
+    if history.empty or history["Close"].dropna().empty:
+        return None
+
+    return {
+        "value": json_safe(history["Close"].dropna().iloc[-1]),
+        "from": from_currency,
+        "to": to_currency,
+        "source": "yfinance",
+        "symbol": symbol,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
     """Fetch and process up to 5 years of annual financial statements."""
     try:
@@ -193,23 +229,36 @@ def fetch_stock_data(ticker: str) -> dict[str, Any]:
     if not isinstance(info, dict):
         info = {}
 
+    price_currency = info.get("currency")
+    financial_currency = info.get("financialCurrency")
     return {
         "ticker": ticker,
         "name": info.get("longName") or info.get("shortName") or ticker,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "currency": info.get("currency", "USD"),
+        "currency": price_currency,
+        "financialCurrency": financial_currency,
+        "fxRate": fx_rate(financial_currency, price_currency),
         "exchange": info.get("exchange"),
+        "sharesOutstanding": info.get("sharesOutstanding"),
+        "marketCap": money_value(info.get("marketCap"), price_currency),
         "ttm_metrics": {
-            "price": info.get("currentPrice", history["Close"].iloc[-1]),
+            "price": money_value(info.get("currentPrice", history["Close"].iloc[-1]), price_currency),
             "pe": info.get("trailingPE"),
             "pb": info.get("priceToBook"),
             "roe": info.get("returnOnEquity"),
-            "fcf": info.get("freeCashflow"),
-            "eps": info.get("trailingEps"),
+            "fcf": money_value(info.get("freeCashflow"), financial_currency),
+            "eps": money_value(info.get("trailingEps"), price_currency),
             "revenue_growth": info.get("revenueGrowth"),
         },
-        "historical_financials": get_5y_financials(stock),
-        "price_history": price_history_rows(history),
+        "historical_financials": {
+            "currency": financial_currency,
+            "perShareCurrency": financial_currency,
+            "rows": get_5y_financials(stock),
+        },
+        "price_history": {
+            "currency": price_currency,
+            "rows": price_history_rows(history),
+        },
     }
 
 
