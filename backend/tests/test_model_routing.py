@@ -36,7 +36,7 @@ async def test_routing_model_keeps_agent_usage_to_final_request(tmp_path, monkey
             "classifier_model": "gemini:gemini-3.1-flash-lite-preview",
             "flash_model": "gemini:gemini-3-flash-preview",
             "default_model": "system.llm.active_model",
-            "classifier_threshold": 50,
+            "classifier_threshold": 80,
             "classifier_timeout_seconds": 8,
         },
         category="system",
@@ -286,12 +286,24 @@ def test_classifier_input_filters_leading_system_prompt_and_keeps_current_reques
     assert isinstance(classifier_messages[0], ModelRequest)
     assert isinstance(classifier_messages[0].parts[0], SystemPromptPart)
     assert "Task Routing AI" in classifier_messages[0].parts[0].content
-    assert classifier_messages[1].parts == [messages[0].parts[1]]
-    assert classifier_messages[2] is messages[1]
-    assert classifier_messages[3] is messages[2]
-    assert all(not isinstance(part, SystemPromptPart) for part in classifier_messages[1].parts)
-    assert classifier_messages[2].parts[0].content == long_tool_output
-    assert classifier_messages[-1].parts[0].content == "Write the final answer."
+    assert "# Decision" not in classifier_messages[0].parts[0].content
+    assert "classifier_score <" not in classifier_messages[0].parts[0].content
+    assert isinstance(classifier_messages[1], ModelRequest)
+    assert isinstance(classifier_messages[2], ModelRequest)
+    assert isinstance(classifier_messages[3], ModelRequest)
+    assert isinstance(classifier_messages[1].parts[0], UserPromptPart)
+    assert isinstance(classifier_messages[2].parts[0], ToolReturnPart)
+    assert isinstance(classifier_messages[3].parts[0], UserPromptPart)
+    first_context = classifier_messages[1].parts[0].content
+    tool_context = classifier_messages[2].parts[0].content
+    final_context = classifier_messages[3].parts[0].content
+    assert "Analyze 中国建材." in first_context
+    assert "You are Ferryman." not in first_context
+    assert "[truncated original_chars=" in tool_context
+    assert len(tool_context) <= 2048
+    assert tool_context != long_tool_output
+    assert classifier_messages[2].parts[0].tool_name == "run_skill"
+    assert "Write the final answer." in final_context
 
 
 def test_classifier_input_keeps_last_8_non_system_messages(tmp_path):
@@ -308,9 +320,12 @@ def test_classifier_input_keeps_last_8_non_system_messages(tmp_path):
 
     assert len(classifier_messages) == 9
     assert classifier_messages[0].parts[0].content.startswith("You are a specialized Task Routing AI.")
-    assert [message.parts[0].content for message in classifier_messages[1:]] == [
-        f"message {index}" for index in range(2, 10)
-    ]
+    assert "Find three non-consensus AI products" in classifier_messages[0].parts[0].content
+    assert "Filesystem deletion carries data-loss risk" in classifier_messages[0].parts[0].content
+    assert [
+        f"message {index}" in message.parts[0].content
+        for index, message in zip(range(2, 10), classifier_messages[1:])
+    ] == [True] * 8
 
 
 def test_classifier_input_keeps_single_message_without_system_prompt(tmp_path):
@@ -322,7 +337,7 @@ def test_classifier_input_keeps_single_message_without_system_prompt(tmp_path):
     classifier_messages = router._build_classifier_messages([message])
 
     assert len(classifier_messages) == 2
-    assert classifier_messages[1] is message
+    assert "format this list" in classifier_messages[1].parts[0].content
 
 
 def test_classifier_input_filters_system_prompt_from_all_recent_messages(tmp_path):
@@ -342,12 +357,36 @@ def test_classifier_input_filters_system_prompt_from_all_recent_messages(tmp_pat
     classifier_messages = router._build_classifier_messages(messages)
 
     assert len(classifier_messages) == 4
-    assert classifier_messages[1] is messages[0]
-    assert classifier_messages[2].parts == [messages[1].parts[1]]
-    assert classifier_messages[3] is messages[3]
+    assert "first user" in classifier_messages[1].parts[0].content
+    assert "late user" in classifier_messages[2].parts[0].content
+    assert "late system" not in classifier_messages[2].parts[0].content
+    assert "assistant reply" in classifier_messages[3].parts[0].content
     assert all(
         not isinstance(part, SystemPromptPart)
         for message in classifier_messages[1:]
         if isinstance(message, ModelRequest)
         for part in message.parts
     )
+
+
+def test_classifier_input_preserves_instructions_with_message_limit(tmp_path):
+    settings = Settings(root_dir=tmp_path)
+    manager = ModelManager(settings)
+    router = ModelRouter(manager)
+    message = ModelRequest(
+        parts=[UserPromptPart(content="Current short request.")],
+        instructions="Important routing instruction. " * 200,
+    )
+
+    classifier_messages = router._build_classifier_messages([message])
+    sanitized_message = classifier_messages[1]
+    assert isinstance(sanitized_message, ModelRequest)
+    context = sanitized_message.parts[0].content
+    instructions = sanitized_message.instructions
+
+    assert len(context) <= 2048
+    assert instructions is not None
+    assert len(instructions) <= 2048
+    assert "Important routing instruction." in instructions
+    assert "Current short request." in context
+    assert "[truncated original_chars=" in instructions

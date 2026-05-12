@@ -41,6 +41,7 @@ UTC_DATETIME_COLUMNS: dict[str, tuple[str, ...]] = {
 # - For a different one-time migration, use a different dedicated key instead of
 #   overloading this one.
 UTC_DATETIME_MIGRATION_KEY = "system.utc_datetime_text_migration_v1"
+MODEL_ROUTING_THRESHOLD_MIGRATION_KEY = "system.model_routing_threshold_migration_v1"
 
 
 def migrate_session_memory_json_payloads() -> None:
@@ -172,6 +173,81 @@ def migrate_datetime_columns_to_explicit_utc_strings() -> None:
             )
         conn.commit()
 
+
+def migrate_model_routing_threshold_default() -> None:
+    """Upgrade the legacy model routing threshold default from 50 to 80."""
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+    except Exception as e:
+        logger.exception(f"⚠️ Could not inspect app_configs for model routing migration with exception: {e}")
+        return
+
+    if "app_configs" not in table_names:
+        return
+
+    now = format_utc_datetime(datetime.now(timezone.utc))
+    with engine.connect() as conn:
+        migration_marker = conn.execute(
+            text("SELECT 1 FROM app_configs WHERE key = :key LIMIT 1"),
+            {"key": MODEL_ROUTING_THRESHOLD_MIGRATION_KEY},
+        ).first()
+        if migration_marker:
+            return
+
+        row = conn.execute(
+            text("SELECT value FROM app_configs WHERE key = :key LIMIT 1"),
+            {"key": "system.llm.routing"},
+        ).first()
+        if row is not None:
+            raw_value = row[0]
+            routing_config = raw_value
+            if isinstance(raw_value, str):
+                try:
+                    routing_config = json.loads(raw_value)
+                except json.JSONDecodeError:
+                    routing_config = None
+
+            if isinstance(routing_config, dict):
+                try:
+                    threshold = int(routing_config.get("classifier_threshold"))
+                except (TypeError, ValueError):
+                    threshold = None
+                if threshold == 50:
+                    updated_config = {**routing_config, "classifier_threshold": 80}
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE app_configs
+                            SET value = :value, updated_at = :updated_at
+                            WHERE key = :key
+                            """
+                        ),
+                        {
+                            "key": "system.llm.routing",
+                            "value": json.dumps(updated_config, ensure_ascii=False),
+                            "updated_at": now,
+                        },
+                    )
+
+        conn.execute(
+            text(
+                """
+                INSERT OR REPLACE INTO app_configs (key, value, category, metadata, updated_at)
+                VALUES (:key, :value, :category, :metadata, :updated_at)
+                """
+            ),
+            {
+                "key": MODEL_ROUTING_THRESHOLD_MIGRATION_KEY,
+                "value": json.dumps(True),
+                "category": "system",
+                "metadata": json.dumps({"migration": "model_routing_threshold_v1"}),
+                "updated_at": now,
+            },
+        )
+        conn.commit()
+
+
 def auto_migrate_schema():
     """
     Automatically detects missing columns in the database and adds them.
@@ -228,6 +304,7 @@ def init_db():
         auto_migrate_schema()
         migrate_session_memory_json_payloads()
         migrate_datetime_columns_to_explicit_utc_strings()
+        migrate_model_routing_threshold_default()
     except Exception as e:
         logger.exception("🚨 DB Initialization Error")
         # Re-raise to prevent the app from starting in a broken state

@@ -35,3 +35,9 @@ def test_model_manager_raises_when_provider_init_fails(tmp_path, monkeypatch):
 
     with pytest.raises(LLMConfigurationError, match="Failed to initialize active model"):
         ModelManager(settings).create_active_model()
+
+
+def test_model_routing_default_threshold_is_80(tmp_path):
+    manager = ModelManager(Settings(root_dir=tmp_path))
+
+    assert manager.get_model_routing_config()["classifier_threshold"] == 80
