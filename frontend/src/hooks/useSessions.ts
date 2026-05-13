@@ -110,6 +110,18 @@ type TerminalRunSnapshot = {
   usage: Usage;
 };
 
+const emptyUsage = (): Usage => ({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+
+function getUsageTotals(usage?: Usage | MessageModelUsage): Usage {
+  if (!usage) {
+    return emptyUsage();
+  }
+  if ('request' in usage) {
+    return usage.request.total;
+  }
+  return usage;
+}
+
 export type ExecuteStatus = 'started' | 'busy' | 'error';
 
 export interface ExecuteResult {
@@ -258,7 +270,7 @@ export function useSessions({
 
     return {
       status,
-      usage: latestAssistantMessage?.metadata?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      usage: getUsageTotals(latestAssistantMessage?.metadata?.usage),
     };
   }, []);
 
