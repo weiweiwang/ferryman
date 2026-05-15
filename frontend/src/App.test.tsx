@@ -36,6 +36,7 @@ let mockedMessages: Message[] = [];
 let mockedToolActivities: ToolActivityPayload[] = [];
 const clipboardWriteText = vi.fn();
 const scrollIntoView = vi.fn();
+const mockedRenameSession = vi.fn();
 
 describe('App chat interactions', () => {
   beforeEach(() => {
@@ -44,6 +45,14 @@ describe('App chat interactions', () => {
     clipboardWriteText.mockReset();
     mockedOpenUrl.mockReset();
     scrollIntoView.mockReset();
+    mockedRenameSession.mockReset();
+    mockedRenameSession.mockResolvedValue({
+      id: 'session-1',
+      title: 'Renamed Session',
+      updated_at: '2026-04-15T00:01:00Z',
+      input_tokens: 0,
+      output_tokens: 0,
+    });
 
     const storage = new Map<string, string>();
     const localStorageMock = {
@@ -114,6 +123,8 @@ describe('App chat interactions', () => {
             'common.copied': 'Copied',
             'nav.recent_sessions': 'Recent Sessions',
             'nav.new_chat': 'New Chat',
+            'nav.rename_session': 'Rename session',
+            'nav.rename_session_placeholder': 'Enter session name',
             'nav.tasks': 'Tasks',
             'nav.schedules': 'Schedules',
             'nav.skills': 'Skills',
@@ -193,6 +204,7 @@ describe('App chat interactions', () => {
       refreshCurrentSession: vi.fn(),
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
+      renameSession: mockedRenameSession,
       deleteSession: vi.fn(),
       loadOlderMessages: vi.fn(),
       execute: vi.fn().mockResolvedValue({ status: 'started' }),
@@ -206,6 +218,21 @@ describe('App chat interactions', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('renames a recent session after double click', async () => {
+    render(<App />);
+
+    fireEvent.doubleClick(screen.getByText('Session 1'));
+    const titleInput = screen.getByLabelText('Rename session');
+    fireEvent.change(titleInput, { target: { value: 'SEO Matrix Session' } });
+    fireEvent.keyDown(titleInput, { key: 'Enter' });
+    fireEvent.blur(titleInput);
+
+    await waitFor(() => {
+      expect(mockedRenameSession).toHaveBeenCalledWith('session-1', 'SEO Matrix Session');
+    });
+    expect(mockedRenameSession).toHaveBeenCalledTimes(1);
   });
 
   it('copies both user and assistant bubbles', async () => {
@@ -479,6 +506,7 @@ describe('App chat interactions', () => {
       refreshCurrentSession: vi.fn(),
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
+      renameSession: mockedRenameSession,
       deleteSession: vi.fn(),
       loadOlderMessages,
       execute: vi.fn().mockResolvedValue({ status: 'started' }),
@@ -660,6 +688,7 @@ describe('App chat interactions', () => {
       refreshCurrentSession: vi.fn(),
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
+      renameSession: mockedRenameSession,
       deleteSession: vi.fn(),
       loadOlderMessages: vi.fn(),
       execute: vi.fn().mockResolvedValue({ status: 'started' }),
@@ -720,6 +749,7 @@ describe('App chat interactions', () => {
       refreshCurrentSession: vi.fn(),
       switchSession: vi.fn(),
       createNewSession: vi.fn().mockResolvedValue('session-2'),
+      renameSession: mockedRenameSession,
       deleteSession: vi.fn(),
       loadOlderMessages: vi.fn(),
       execute,

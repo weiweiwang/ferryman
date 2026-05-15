@@ -305,6 +305,7 @@ export default function App() {
     refreshSessions,
     switchSession,
     createNewSession,
+    renameSession,
     deleteSession,
     loadOlderMessages,
     hasOlderMessages,
@@ -341,18 +342,68 @@ export default function App() {
   const [composerNotice, setComposerNotice] = useState<string | null>(null);
   const [isInsightsOpen, setIsInsightsOpen] = useState(false);
   const [expandedToolActivityKeys, setExpandedToolActivityKeys] = useState<Set<string>>(() => new Set());
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const sessionTitleInputRef = useRef<HTMLInputElement>(null);
+  const isSavingSessionTitleRef = useRef(false);
   const didApplyInitialModelRouteRef = useRef(false);
   const copyResetTimerRef = useRef<number | null>(null);
   const pendingHistoryScrollOffsetRef = useRef<number | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const autoScrollSessionRef = useRef(currentSessionId);
   const sendShortcutHint = sendMode === 'enter' ? t('chat.send_shortcut_enter_hint') : t('chat.send_shortcut_mod_enter_hint');
+
+  useEffect(() => {
+    if (!editingSessionId) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      sessionTitleInputRef.current?.focus();
+      sessionTitleInputRef.current?.select();
+    });
+  }, [editingSessionId]);
+
+  const startRenamingSession = useCallback((sessionId: string, title: string) => {
+    isSavingSessionTitleRef.current = false;
+    setEditingSessionId(sessionId);
+    setEditingSessionTitle(title);
+  }, []);
+
+  const cancelRenamingSession = useCallback(() => {
+    isSavingSessionTitleRef.current = false;
+    setEditingSessionId(null);
+    setEditingSessionTitle('');
+  }, []);
+
+  const saveRenamingSession = useCallback(async () => {
+    const sessionId = editingSessionId;
+    if (!sessionId) {
+      return;
+    }
+    if (isSavingSessionTitleRef.current) {
+      return;
+    }
+    isSavingSessionTitleRef.current = true;
+
+    const nextTitle = editingSessionTitle.trim();
+    setEditingSessionId(null);
+    setEditingSessionTitle('');
+
+    try {
+      await renameSession(sessionId, nextTitle);
+    } catch {
+      await refreshSessions();
+    } finally {
+      isSavingSessionTitleRef.current = false;
+    }
+  }, [editingSessionId, editingSessionTitle, refreshSessions, renameSession]);
 
   const toggleToolActivityOutput = useCallback((key: string) => {
     setExpandedToolActivityKeys((current) => {
@@ -785,8 +836,15 @@ export default function App() {
             <div 
               key={s.id}
               onClick={() => {
+                if (editingSessionId === s.id) {
+                  return;
+                }
                 switchSession(s.id);
                 setCurrentView('chat');
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                startRenamingSession(s.id, s.title || '');
               }}
               className={cn(
                 "group relative p-3.5 rounded-2xl transition-all cursor-pointer flex flex-col gap-1.5 border border-transparent",
@@ -794,21 +852,49 @@ export default function App() {
               )}
             >
               <div className="flex items-center justify-between">
-                <span className={cn(
-                  "text-sm font-bold truncate flex-1 tracking-tight",
-                  currentSessionId === s.id ? "text-white" : "text-white/50 group-hover:text-white/80"
-                )}>
-                  {s.title || t('chat.untitled')}
-                </span>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteSession(s.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 hover:text-red-400 rounded-lg transition-all"
-                >
-                  <Trash2 size={13} />
-                </button>
+                {editingSessionId === s.id ? (
+                  <input
+                    ref={sessionTitleInputRef}
+                    value={editingSessionTitle}
+                    onChange={(e) => setEditingSessionTitle(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onBlur={() => {
+                      saveRenamingSession();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveRenamingSession();
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelRenamingSession();
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/10 px-2 py-1 text-sm font-bold tracking-tight text-white outline-none ring-0 placeholder:text-white/30 focus:border-white/30 focus:bg-white/15"
+                    placeholder={t('nav.rename_session_placeholder')}
+                    aria-label={t('nav.rename_session')}
+                  />
+                ) : (
+                  <span className={cn(
+                    "text-sm font-bold truncate flex-1 tracking-tight",
+                    currentSessionId === s.id ? "text-white" : "text-white/50 group-hover:text-white/80"
+                  )}>
+                    {s.title || t('chat.untitled')}
+                  </span>
+                )}
+                {editingSessionId !== s.id && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteSession(s.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 hover:text-red-400 rounded-lg transition-all"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                  <div className="text-[9px] font-black text-white/40 px-2 py-0.5 rounded-md bg-white/5 border border-white/5 group-hover:text-white/60 group-hover:border-white/10 transition-all uppercase tracking-wider">

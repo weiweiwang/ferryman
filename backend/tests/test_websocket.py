@@ -997,7 +997,10 @@ def test_websocket_session_message_and_task_flows(client, session):
             {"session_id": "session-1", "title": "Renamed Session"},
             request_id=13,
         )
-        assert response["result"] == {"status": "success"}
+        assert response["result"]["id"] == "session-1"
+        assert response["result"]["title"] == "Renamed Session"
+        assert response["result"]["active_run"] is None
+        assert response["result"]["updated_at"].endswith("Z")
 
         response = send_rpc(
             websocket,

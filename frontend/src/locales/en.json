@@ -31,7 +31,9 @@
     "settings": "Settings",
     "skills": "Skills",
     "new_chat": "New Chat",
-    "recent_sessions": "Recent Sessions"
+    "recent_sessions": "Recent Sessions",
+    "rename_session": "Rename session",
+    "rename_session_placeholder": "Enter session name"
   },
   "skills": {
     "title": "Skills",

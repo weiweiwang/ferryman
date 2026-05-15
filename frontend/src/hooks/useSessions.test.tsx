@@ -945,6 +945,67 @@ describe('useSessions', () => {
     expect(result.current.currentSessionId).toBe('backend-shortuuid-1');
   });
 
+  it('renames sessions using the backend returned session payload', async () => {
+    const call = vi.fn(async (method: string, params?: any) => {
+      if (method === 'list_sessions') {
+        return {
+          sessions: [
+            {
+              id: 'session-1',
+              title: 'Original Session',
+              updated_at: '2026-04-15T14:00:00Z',
+              input_tokens: 2,
+              output_tokens: 3,
+              active_run: null,
+            },
+          ],
+        };
+      }
+      if (method === 'update_session') {
+        return {
+          id: params.session_id,
+          title: params.title,
+          updated_at: '2026-04-15T14:05:00Z',
+          input_tokens: 2,
+          output_tokens: 3,
+          active_run: null,
+        };
+      }
+      return {};
+    });
+    const executeInstruction = vi.fn();
+    const cancelRun = vi.fn();
+    const clearToolActivities = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessions({
+        call,
+        executeInstruction,
+        cancelRun,
+        clearToolActivities,
+        lastEvent: null,
+      })
+    );
+
+    await act(async () => {
+      await result.current.refreshSessions();
+    });
+
+    await act(async () => {
+      await result.current.renameSession('session-1', '  Renamed Session  ');
+    });
+
+    expect(call).toHaveBeenCalledWith('update_session', {
+      session_id: 'session-1',
+      title: 'Renamed Session',
+    });
+    expect(result.current.sessions[0]).toMatchObject({
+      id: 'session-1',
+      title: 'Renamed Session',
+      updated_at: '2026-04-15T14:05:00Z',
+    });
+  });
+
   it('bootstraps an empty client by creating a backend session', async () => {
     const call = vi.fn(async (method: string) => {
       if (method === 'list_sessions') {

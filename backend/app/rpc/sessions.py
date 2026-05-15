@@ -11,7 +11,7 @@ from sqlmodel import select
 from app.core.db import get_session as get_db_session
 from app.core.pagination import fetch_datetime_cursor_page
 from app.models.database import MessageModel, SessionModel, TaskModel
-from app.models.schemas import SessionResponseSchema
+from app.models.schemas import MessageSchema, SessionResponseSchema
 
 logger = logging.getLogger(__name__)
 STALE_PENDING_RUN_ERROR = "Run interrupted before completion."
@@ -172,7 +172,8 @@ async def update_session(context, session_id: str, title: str):
         session_obj.updated_at = datetime.now(timezone.utc)
         db_session.add(session_obj)
         db_session.commit()
-        return Success({"status": "success"})
+        db_session.refresh(session_obj)
+        return Success(serialize_session(session_obj, context))
 
 
 @method
@@ -225,14 +226,15 @@ async def list_messages(context, session_id: str, cursor: Optional[str] = None, 
 
         return Success({
             "messages": [
-                {
+                MessageSchema.model_validate({
                     "id": message.id,
+                    "session_id": message.session_id,
                     "role": message.role,
                     "content": message.content,
                     "type": message.type,
                     "metadata": message.metadata_,
-                    "created_at": message.created_at.isoformat(),
-                }
+                    "created_at": message.created_at,
+                }).model_dump(mode="json", exclude={"session_id", "parts", "token_estimate"})
                 for message in messages_list
             ],
             "next_cursor": next_cursor,

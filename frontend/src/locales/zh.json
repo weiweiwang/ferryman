@@ -31,7 +31,9 @@
     "settings": "系统设置",
     "skills": "技能中心",
     "new_chat": "开启新对话",
-    "recent_sessions": "最近对话"
+    "recent_sessions": "最近对话",
+    "rename_session": "重命名对话",
+    "rename_session_placeholder": "输入对话名称"
   },
   "skills": {
     "title": "技能中心",

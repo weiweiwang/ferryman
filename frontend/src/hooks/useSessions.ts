@@ -649,6 +649,37 @@ export function useSessions({
     }
   }, [call, refreshSessions]);
 
+  const renameSession = useCallback(async (sessionId: string, title: string) => {
+    const normalizedTitle = title.trim();
+    try {
+      const result: any = await call('update_session', {
+        session_id: sessionId,
+        title: normalizedTitle,
+      });
+      if (result?.status === 'error') {
+        throw new Error(result.message || 'Failed to rename session');
+      }
+      if (result?.id) {
+        const nextSession = result as Session;
+        replaceSession(nextSession);
+        if (currentSessionIdRef.current === sessionId) {
+          setCurrentUsage({
+            input_tokens: nextSession.input_tokens,
+            output_tokens: nextSession.output_tokens,
+            total_tokens: nextSession.input_tokens + nextSession.output_tokens,
+          });
+        }
+        return nextSession;
+      }
+
+      patchSession(sessionId, { title: normalizedTitle });
+      return sessionsRef.current.find((session) => session.id === sessionId) || null;
+    } catch (error) {
+      console.error('Failed to rename session:', error);
+      throw error;
+    }
+  }, [call, patchSession, replaceSession]);
+
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
       await call('delete_session', { session_id: sessionId });
@@ -862,6 +893,7 @@ export function useSessions({
     refreshCurrentSession,
     switchSession,
     createNewSession,
+    renameSession,
     deleteSession,
     loadOlderMessages,
     execute,
