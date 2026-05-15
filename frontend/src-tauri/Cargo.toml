@@ -1,6 +1,6 @@
 [package]
 name = "frontend"
-version = "0.1.12"
+version = "0.1.13"
 description = "A Tauri App"
 authors = ["Beijing Huishuo Mobile Technology Co., Ltd."]
 license = "Apache-2.0"
