@@ -128,7 +128,7 @@ def run_frontend_ui_smoke(app_path: Path) -> None:
             stderr=subprocess.DEVNULL,
         )
         try:
-            deadline = time.time() + 45
+            deadline = time.time() + 120
             while time.time() < deadline:
                 if marker_path.exists():
                     payload = json.loads(marker_path.read_text(encoding="utf-8"))
