@@ -5,16 +5,49 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from jsonrpcserver import Success, method
+from pydantic import ValidationError
 from sqlalchemy import func
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import select
 
 from app.core.db import get_session as get_db_session
 from app.core.pagination import fetch_datetime_cursor_page
 from app.models.database import MessageModel, SessionModel, TaskModel
-from app.models.schemas import MessageSchema, SessionResponseSchema
+from app.models.schemas import MessageSchema, SessionMemory, SessionResponseSchema
 
 logger = logging.getLogger(__name__)
 STALE_PENDING_RUN_ERROR = "Run interrupted before completion."
+SESSION_MEMORY_CONFLICT_ERROR = "Session memory changed. Please refresh before saving."
+
+
+def parse_expected_memory_updated_at(value: Optional[str]) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def memory_updated_at_text(memory: object) -> str | None:
+    if not isinstance(memory, dict):
+        return None
+    compaction = memory.get("compaction")
+    if not isinstance(compaction, dict):
+        return None
+    updated_at = compaction.get("updated_at")
+    if not isinstance(updated_at, str):
+        return None
+    try:
+        parsed = parse_expected_memory_updated_at(updated_at)
+    except ValueError:
+        return None
+    return parsed.isoformat().replace("+00:00", "Z") if parsed else None
 
 
 def get_active_run_payload(context, session_id: str) -> dict[str, object] | None:
@@ -174,6 +207,64 @@ async def update_session(context, session_id: str, title: str):
         db_session.commit()
         db_session.refresh(session_obj)
         return Success(serialize_session(session_obj, context))
+
+
+@method
+async def update_session_memory(
+    context,
+    session_id: str,
+    compaction: Optional[dict[str, object]] = None,
+    expected_updated_at: Optional[str] = None,
+):
+    """Update the current editable session memory snapshot."""
+    logger.info(f"🧠 Updating session memory: {session_id}")
+    with get_db_session() as db_session:
+        session_obj = db_session.get(SessionModel, session_id)
+        if not session_obj:
+            return Success({"status": "error", "message": "Session not found"})
+
+        current_updated_at = memory_updated_at_text(session_obj.memory)
+        try:
+            expected_text = None
+            if expected_updated_at is not None:
+                parsed_expected = parse_expected_memory_updated_at(expected_updated_at)
+                expected_text = parsed_expected.isoformat().replace("+00:00", "Z") if parsed_expected else None
+        except ValueError:
+            return Success({"status": "error", "message": "Invalid expected_updated_at"})
+
+        if expected_updated_at is not None and current_updated_at != expected_text:
+            return Success({
+                "status": "conflict",
+                "message": SESSION_MEMORY_CONFLICT_ERROR,
+                "current_updated_at": current_updated_at,
+            })
+
+        try:
+            memory = SessionMemory.model_validate(session_obj.memory or {})
+        except ValidationError:
+            memory = SessionMemory()
+
+        next_compaction = memory.compaction.model_copy()
+        next_summary = ""
+        if isinstance(compaction, dict):
+            raw_summary = compaction.get("summary")
+            next_summary = raw_summary if isinstance(raw_summary, str) else ""
+        next_compaction.summary = next_summary
+        next_compaction.updated_at = datetime.now(timezone.utc)
+        memory.compaction = next_compaction
+
+        session_obj.memory = memory.model_dump(mode="json", exclude_none=True)
+        session_obj.updated_at = datetime.now(timezone.utc)
+        flag_modified(session_obj, "memory")
+        db_session.add(session_obj)
+        db_session.commit()
+        db_session.refresh(session_obj)
+
+        return Success({
+            "status": "success",
+            "memory": session_obj.memory,
+            "updated_at": session_obj.updated_at.isoformat().replace("+00:00", "Z"),
+        })
 
 
 @method

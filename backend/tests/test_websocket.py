@@ -16,7 +16,7 @@ from app.core.run_registry import RunAlreadyActiveError
 from app.models.database import MessageModel, ScheduleModel, SessionModel, TaskModel
 from app.models.schemas import AgentRunResult, Usage
 from app.rpc.agent_runs import persist_canceled_chat_run
-from app.rpc.sessions import list_messages, reconcile_stale_pending_runs_on_startup
+from app.rpc.sessions import list_messages, reconcile_stale_pending_runs_on_startup, update_session_memory
 import app.rpc.websocket as websocket_rpc
 
 
@@ -79,6 +79,76 @@ def test_websocket_session_insights_include_workspace(client, session):
 
     assert response["result"]["session_id"] == "session-insights"
     assert response["result"]["session_workspace"].endswith("/workspaces/session-insights")
+
+
+@pytest.mark.asyncio
+async def test_update_session_memory_updates_summary_without_persisting_estimate(session):
+    session.add(
+        SessionModel(
+            id="session-memory-edit",
+            title="Memory Edit",
+            memory={
+                "schema_version": 1,
+                "compaction": {
+                    "summary": "Old SEO summary.",
+                    "cutoff_created_at": "2026-05-01T12:00:00Z",
+                    "updated_at": "2026-05-01T12:05:00Z",
+                },
+            },
+        )
+    )
+    session.commit()
+
+    response = await update_session_memory(
+        None,
+        session_id="session-memory-edit",
+        compaction={"summary": "New SEO matrix summary."},
+        expected_updated_at="2026-05-01T12:05:00Z",
+    )
+
+    result = response._value.result
+    assert result["status"] == "success"
+    assert result["memory"]["compaction"]["summary"] == "New SEO matrix summary."
+    assert result["memory"]["compaction"]["cutoff_created_at"] == "2026-05-01T12:00:00Z"
+    assert "summary_token_estimate" not in result["memory"]["compaction"]
+
+    session.expire_all()
+    refreshed = session.get(SessionModel, "session-memory-edit")
+    assert refreshed.memory["compaction"]["summary"] == "New SEO matrix summary."
+    assert "summary_token_estimate" not in refreshed.memory["compaction"]
+
+
+@pytest.mark.asyncio
+async def test_update_session_memory_rejects_stale_expected_updated_at(session):
+    session.add(
+        SessionModel(
+            id="session-memory-conflict",
+            title="Memory Conflict",
+            memory={
+                "schema_version": 1,
+                "compaction": {
+                    "summary": "Current summary.",
+                    "updated_at": "2026-05-02T10:00:00Z",
+                },
+            },
+        )
+    )
+    session.commit()
+
+    response = await update_session_memory(
+        None,
+        session_id="session-memory-conflict",
+        compaction={"summary": "Stale edit."},
+        expected_updated_at="2026-05-01T10:00:00Z",
+    )
+
+    result = response._value.result
+    assert result["status"] == "conflict"
+    assert result["current_updated_at"] == "2026-05-02T10:00:00Z"
+
+    session.expire_all()
+    refreshed = session.get(SessionModel, "session-memory-conflict")
+    assert refreshed.memory["compaction"]["summary"] == "Current summary."
 
 
 def test_websocket_invalid_json_does_not_disconnect(client):

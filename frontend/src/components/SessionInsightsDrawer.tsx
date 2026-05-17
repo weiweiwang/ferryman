@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Check, Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { Check, Copy, FolderOpen, Pencil, RefreshCw, Save, X } from 'lucide-react';
 import { SideDrawer } from './SideDrawer';
 import { cn } from '../utils/cn';
 
@@ -171,6 +171,40 @@ export function SessionInsightsDrawer({
   const [error, setError] = useState<string | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [isSummaryCopied, setIsSummaryCopied] = useState(false);
+  const [isEditingMemory, setIsEditingMemory] = useState(false);
+  const [draftSummary, setDraftSummary] = useState('');
+  const [isSavingMemory, setIsSavingMemory] = useState(false);
+  const [memorySaveError, setMemorySaveError] = useState<string | null>(null);
+  const insightsRequestIdRef = useRef(0);
+
+  const loadInsights = useCallback(async (showLoading = true) => {
+    const requestId = insightsRequestIdRef.current + 1;
+    insightsRequestIdRef.current = requestId;
+    const isCurrentRequest = () => insightsRequestIdRef.current === requestId;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    if (showLoading) {
+      setIsLoading(true);
+    }
+    setError(null);
+    try {
+      const result = await call('get_session_insights', { session_id: sessionId, range_key: rangeKey, timezone });
+      if (isCurrentRequest()) {
+        setInsights(result as SessionInsights);
+      }
+      return result as SessionInsights;
+    } catch (loadError) {
+      console.error('Failed to load session insights:', loadError);
+      if (isCurrentRequest()) {
+        setError(t('insights.load_failed'));
+        setInsights(null);
+      }
+      throw loadError;
+    } finally {
+      if (showLoading && isCurrentRequest()) {
+        setIsLoading(false);
+      }
+    }
+  }, [call, rangeKey, sessionId, t]);
 
   useEffect(() => {
     if (!open || !isConnected || !sessionId) {
@@ -178,32 +212,18 @@ export function SessionInsightsDrawer({
     }
 
     let cancelled = false;
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    setIsLoading(true);
-    setError(null);
-    call('get_session_insights', { session_id: sessionId, range_key: rangeKey, timezone })
-      .then((result) => {
+    loadInsights(true)
+      .then(() => {
         if (!cancelled) {
-          setInsights(result as SessionInsights);
+          setMemorySaveError(null);
         }
       })
-      .catch((loadError) => {
-        console.error('Failed to load session insights:', loadError);
-        if (!cancelled) {
-          setError(t('insights.load_failed'));
-          setInsights(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      });
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
-  }, [call, isConnected, open, rangeKey, sessionId, t]);
+  }, [isConnected, loadInsights, open, sessionId]);
 
   const chartModel = useMemo(() => {
     return buildChartModel(insights?.usage.daily || []);
@@ -215,6 +235,13 @@ export function SessionInsightsDrawer({
   const unattributed = insights?.usage.unattributed_system_usage.total_tokens || 0;
   const hoveredPoint = hoverIndex === null ? null : chartModel.totalPoints[hoverIndex];
   const activeWorkspace = insights?.session_id === sessionId ? insights.session_workspace : null;
+
+  useEffect(() => {
+    if (!isEditingMemory) {
+      setDraftSummary(summary);
+      setMemorySaveError(null);
+    }
+  }, [isEditingMemory, summary]);
 
   const handleChartMouseMove = (event: MouseEvent<SVGSVGElement>) => {
     const daily = insights?.usage.daily || [];
@@ -231,16 +258,56 @@ export function SessionInsightsDrawer({
   };
 
   const handleCopySummary = async () => {
-    if (!summary) {
+    const copyText = isEditingMemory ? draftSummary : summary;
+    if (!copyText) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(summary);
+      await navigator.clipboard.writeText(copyText);
       setIsSummaryCopied(true);
       window.setTimeout(() => setIsSummaryCopied(false), 1600);
     } catch (copyError) {
       console.error('Failed to copy compaction summary:', copyError);
+    }
+  };
+
+  const handleStartMemoryEdit = () => {
+    setDraftSummary(summary);
+    setMemorySaveError(null);
+    setIsEditingMemory(true);
+  };
+
+  const handleCancelMemoryEdit = () => {
+    setDraftSummary(summary);
+    setMemorySaveError(null);
+    setIsEditingMemory(false);
+  };
+
+  const handleSaveMemory = async () => {
+    if (isSavingMemory) {
+      return;
+    }
+
+    setIsSavingMemory(true);
+    setMemorySaveError(null);
+    try {
+      const result = await call('update_session_memory', {
+        session_id: sessionId,
+        compaction: { summary: draftSummary },
+        expected_updated_at: typeof compaction?.updated_at === 'string' ? compaction.updated_at : null,
+      });
+      if (result?.status !== 'success') {
+        setMemorySaveError(result?.status === 'conflict' ? t('insights.memory_conflict') : result?.message || t('insights.save_failed'));
+        return;
+      }
+      setIsEditingMemory(false);
+      await loadInsights(false);
+    } catch (saveError) {
+      console.error('Failed to save session memory:', saveError);
+      setMemorySaveError(t('insights.save_failed'));
+    } finally {
+      setIsSavingMemory(false);
     }
   };
 
@@ -421,9 +488,46 @@ export function SessionInsightsDrawer({
               <h4 className="text-sm font-black tracking-tight text-white">{t('insights.memory_title')}</h4>
               <p className="mt-1 text-xs font-medium text-white/35">{t('insights.memory_subtitle')}</p>
             </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {isEditingMemory ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleCancelMemoryEdit}
+                    disabled={isSavingMemory}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.035] text-white/50 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                    aria-label={t('common.cancel')}
+                    title={t('common.cancel')}
+                  >
+                    <X size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveMemory}
+                    disabled={isSavingMemory}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-300/25 bg-emerald-300/[0.12] text-emerald-100 transition-colors hover:bg-emerald-300/[0.18] disabled:cursor-not-allowed disabled:opacity-55"
+                    aria-label={t('common.save')}
+                    title={t('common.save')}
+                  >
+                    {isSavingMemory ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartMemoryEdit}
+                  disabled={isLoading}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.035] text-white/50 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  aria-label={insights?.memory ? t('insights.edit_memory') : t('insights.create_memory')}
+                  title={insights?.memory ? t('insights.edit_memory') : t('insights.create_memory')}
+                >
+                  <Pencil size={15} />
+                </button>
+              )}
+            </div>
           </div>
 
-          {!insights?.memory ? (
+          {!insights?.memory && !isEditingMemory ? (
             <div className="rounded-2xl border border-white/8 bg-white/[0.025] px-5 py-8 text-center text-sm font-medium text-white/35">
               {t('insights.no_memory')}
             </div>
@@ -441,7 +545,7 @@ export function SessionInsightsDrawer({
                     <button
                       type="button"
                       onClick={handleCopySummary}
-                      disabled={!summary}
+                      disabled={!(isEditingMemory ? draftSummary : summary)}
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/[0.035] text-white/50 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
                       aria-label={isSummaryCopied ? t('common.copied') : t('common.copy')}
                       title={isSummaryCopied ? t('common.copied') : t('common.copy')}
@@ -450,9 +554,24 @@ export function SessionInsightsDrawer({
                     </button>
                   </div>
                 </div>
-                <div className="mt-4 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl bg-black/20 p-4 text-sm leading-6 text-white/72 custom-scrollbar">
-                  {summary || t('insights.empty_summary')}
-                </div>
+                {isEditingMemory ? (
+                  <textarea
+                    value={draftSummary}
+                    onChange={(event) => setDraftSummary(event.target.value)}
+                    disabled={isSavingMemory}
+                    className="mt-4 min-h-64 w-full resize-y rounded-xl border border-white/10 bg-black/25 p-4 text-sm leading-6 text-white/78 outline-none transition-colors placeholder:text-white/25 focus:border-emerald-200/35 focus:bg-black/30 disabled:cursor-not-allowed disabled:opacity-65 custom-scrollbar"
+                    placeholder={t('insights.empty_summary')}
+                  />
+                ) : (
+                  <div className="mt-4 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl bg-black/20 p-4 text-sm leading-6 text-white/72 custom-scrollbar">
+                    {summary || t('insights.empty_summary')}
+                  </div>
+                )}
+                {memorySaveError ? (
+                  <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-medium leading-5 text-red-100/82">
+                    {memorySaveError}
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
