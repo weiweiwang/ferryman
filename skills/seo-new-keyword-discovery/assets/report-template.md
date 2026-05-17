@@ -26,8 +26,10 @@ Use this Markdown structure as the blueprint for final reports. Adapt heading la
 | Seed / Lead | |
 | Target Audience | |
 | Target Market | |
+| Research Mode | [Discovery / Validation / Decision] |
 | Sources Checked | |
 | Paid Tool Access | [None / Ahrefs / Semrush / Similarweb / Other] |
+| Evidence Depth | [source types checked, SERP depth, and why depth was sufficient] |
 
 ## 2. Candidate Discovery
 
@@ -35,15 +37,27 @@ Use this Markdown structure as the blueprint for final reports. Adapt heading la
 |:--|:--|:--|:--|:--|
 | 1 | | | | |
 
-## 3. Validated Shortlist
+## 3. Evidence Patterns
 
-| # | Keyword | Demand Evidence | SERP Weakness | Product Gate | Decision Rationale | Score | Decision |
-|:--|:--|:--|:--|:--|:--|:--|:--|
-| 1 | | | | | | | |
+| Keyword | Demand Signals | SERP Opening | Product Signal | Evidence Pattern | Promote / Reject Reason |
+|:--|:--|:--|:--|:--|:--|
+| | | | | [2 weak demand signals / demand + SERP weakness / product signal + buildable page] | |
 
-## 4. Top Opportunities
+## 4. Incumbent Coverage
 
-### 4.1 [Keyword]
+| Product / Page | Coverage Type | Source URL | What It Covers | Opportunity Impact |
+|:--|:--|:--|:--|:--|
+| | [broad suite / exact-match tool / template / directory / official / forum] | | | |
+
+## 5. Validated Shortlist
+
+| # | Keyword | Demand Evidence | SERP Weakness | Product Gate | Minimum Useful Page | Title Tag | H1 | Score | Decision |
+|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
+| 1 | | | | | | | | | |
+
+## 6. Top Opportunities
+
+### 6.1 [Keyword]
 
 - **Decision**: [build_now / build_light / observe / reject]
 - **Score**: [x/45]
@@ -60,19 +74,19 @@ Use this Markdown structure as the blueprint for final reports. Adapt heading la
 - **Expansion Path**: [long-tail, multilingual, related tools, comparison, templates]
 - **Risk / Caveat**: [what could invalidate the opportunity]
 
-## 5. Rejected Or Watchlist Items
+## 7. Rejected Or Watchlist Items
 
 | Keyword | Decision | Reason |
 |:--|:--|:--|
 | | | |
 
-## 6. Suggested Content Matrix
+## 8. Suggested Content Matrix
 
-| Priority | Page | Primary Keyword | Supporting Keywords | Page Type | Notes |
-|:--|:--|:--|:--|:--|:--|
-| P0 | | | | | |
+| Priority | Page | Primary Keyword | Supporting Keywords | Page Type | Title Tag | H1 | Notes |
+|:--|:--|:--|:--|:--|:--|:--|:--|
+| P0 | | | | | | | |
 
-## 7. Next Validation Steps
+## 9. Next Validation Steps
 
 | Step | Owner | Success Standard |
 |:--|:--|:--|
@@ -83,6 +97,7 @@ Use this Markdown structure as the blueprint for final reports. Adapt heading la
 ## Appendix: Methodology & Sources
 
 - **Trend Data**: [Google Trends / heuristic fallback]
+- **Trend Query Ladder**: [exact product terms / broader demand terms / adjacent workflow terms checked]
 - **SERP Data**: [Search date and market]
 - **Demand Signals**: [autocomplete, PAA, public discussions, directories]
 - **Competition Signals**: [SERP page type, Title/H1 match, freshness, backlinks if available]

@@ -53,6 +53,8 @@ Use compact labels in CSV/report tables:
 - `competitor_page`: competitor page suggests active SEO targeting.
 - `no_visible_signal`: no meaningful demand signal found.
 
+When Google Trends is used, record whether the signal came from an exact product term, a broader natural-language demand term, or an adjacent workflow term. A low or `0` exact-term value should downgrade exact-match confidence, not automatically reject the underlying market.
+
 ## SERP Weakness Labels
 
 - `thin_content`: current pages are shallow or incomplete.
@@ -77,6 +79,19 @@ Record concise evidence for:
 - Authority signal: strong brand, medium site, weak site, or unknown.
 - KD/DR/backlinks: record only if actually available.
 
+## Incumbent Coverage Checklist
+
+When judging whether a demand is still open, classify visible products and pages:
+
+- Broad suite: a larger product covers the workflow but may be too heavy for the target user.
+- Exact-match tool: a focused product already targets the same keyword and use case.
+- Template/content page: static assets satisfy one-off intent but may not solve recurring work.
+- Marketplace/directory: listings prove demand but may not deliver a differentiated product.
+- Official source: official or compliance-oriented intent may be hard to beat.
+- Forum/discussion: users are asking for solutions, often a weak-content opportunity.
+
+Downgrade when exact-match tools already satisfy the recurring workflow well. Keep or promote when incumbents are broad, heavy, off-market, region-specific, or only solve the one-off query while the recurring data workflow remains underserved.
+
 ## Product Gate
 
 Before scoring, judge:
@@ -87,6 +102,20 @@ Before scoring, judge:
 - Monetization clarity: Is the value capture path obvious?
 
 Failing two or more means no `build_now`.
+
+For new website product opportunities, `AI Intensity`, `Usage Frequency`, and `Data Flywheel` are core fit dimensions, not merely nice-to-have traits. A candidate with weak scores in any two of these three should not be `build_now`, even if demand and SERP weakness are strong.
+
+Use stricter defaults for one-off task types:
+
+| Opportunity Type | Default Cap |
+|:--|:--|
+| One-time letter/document generator | `observe` unless it has recurring case management or stored history |
+| Single-use checklist | `observe` unless it becomes an ongoing tracker |
+| Simple calculator | `build_light` unless saved data improves future recommendations |
+| Template filler | `reject` if AI is not materially better than rules or static templates |
+| Professional workflow system | Can be `build_now` when repeated usage, retained data, and AI-native reasoning are all present |
+
+When a one-off task has strong search demand, record it as an SEO traffic opportunity, not necessarily a durable product opportunity.
 
 ## Decision Rationale
 
