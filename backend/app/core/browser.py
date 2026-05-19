@@ -440,7 +440,7 @@ class BrowserController:
             return "text"
         if normalized_type.startswith("text/") and normalized_type != "text/html":
             return "text"
-        if normalized_type in {"text/html", "application/xhtml+xml"}:
+        if normalized_type in {"text/html", "application/xhtml+xml"} or normalized_url.endswith((".html", ".htm")):
             return "html"
         return "unknown"
 
@@ -482,6 +482,152 @@ class BrowserController:
         except Exception as exc:  # pragma: no cover - defensive fallback for odd documents
             logger.debug(f"Failed to count interactive elements: {exc}")
             return 0
+
+    async def _get_page_summary_raw(self) -> dict[str, object]:
+        """Return a bounded, low-token page summary without article extraction."""
+        js_script = """
+        () => {
+            const maxHeadings = 12;
+            const maxItems = 8;
+            const maxHeadingText = 120;
+            const maxItemText = 220;
+            const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+            const clipInfo = (value, limit) => {
+                const text = normalize(value);
+                if (text.length > limit) {
+                    return {
+                        text: text.slice(0, Math.max(0, limit - 3)).trim() + '...',
+                        truncated: true
+                    };
+                }
+                return { text, truncated: false };
+            };
+            const metaContent = (selector) => document.querySelector(selector)?.getAttribute('content') || '';
+            const linkHref = (selector) => document.querySelector(selector)?.href || '';
+            const isVisible = (el) => {
+                if (!el || !(el instanceof HTMLElement)) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    rect.width > 0 &&
+                    rect.height > 0;
+            };
+            const isChrome = (el) => Boolean(el.closest('nav, header, footer, aside, script, style, noscript'));
+            const noiseTextPattern = /cookie|privacy|terms|newsletter|submit|login|sign in|sign up|twitter|x\\(twitter\\)|wechat|微信|go back home|cloudflare|security verification|正在进行安全验证|异常流量|为什么会这样/i;
+            const noiseUrlPattern = /privacy|terms|cookie|newsletter|submit|login|signin|signup|cloudflare\\.com|google\\.com\\/sorry|duckduckgo\\.com\\/html\\/?$|x\\.com\\/aicpb|twitter\\.com/i;
+            const isNoiseItem = (item) => {
+                const text = item.text || '';
+                const normalizedItemUrl = (item.url || '').replace(/\\/$/, '');
+                const normalizedPageUrl = location.href.replace(/\\/$/, '');
+                return normalizedItemUrl === normalizedPageUrl ||
+                    noiseTextPattern.test(text) ||
+                    noiseUrlPattern.test(item.url || '');
+            };
+            const absoluteUrl = (href) => {
+                try {
+                    const url = new URL(href, document.baseURI);
+                    if (!['http:', 'https:', 'file:'].includes(url.protocol)) return '';
+                    return url.href;
+                } catch {
+                    return '';
+                }
+            };
+            const itemSelectors = [
+                'article',
+                'li',
+                '[role="article"]',
+                '[data-testid*="result" i]',
+                '[data-testid*="card" i]',
+                'section[class*="card" i]',
+                'section[class*="result" i]',
+                'section[class*="item" i]',
+                'section[class*="product" i]',
+                'section[class*="post" i]',
+                'div[class*="card" i]',
+                'div[class*="result" i]',
+                'div[class*="item" i]',
+                'div[class*="product" i]',
+                'div[class*="post" i]'
+            ].join(',');
+            const rawItems = [];
+            for (const el of Array.from(document.querySelectorAll(itemSelectors))) {
+                if (!isVisible(el) || isChrome(el)) continue;
+                const link = el.querySelector('a[href]');
+                if (!link) continue;
+                const url = absoluteUrl(link.getAttribute('href'));
+                if (!url) continue;
+                const text = normalize(el.innerText || el.textContent || '');
+                if (text.length < 20 || text.length > 600) continue;
+                const clipped = clipInfo(text, maxItemText);
+                if (!clipped.text) continue;
+                rawItems.push({ text: clipped.text, url, truncated: clipped.truncated });
+            }
+            const visibleArticles = Array.from(document.querySelectorAll('article'))
+                .filter((el) => isVisible(el) && !isChrome(el))
+                .map((el) => normalize(el.innerText || el.textContent || ''));
+            const likelyArticlePage = visibleArticles.some((text) => text.length > 800);
+            if (rawItems.length < 3 && !likelyArticlePage) {
+                for (const link of Array.from(document.querySelectorAll('main a[href], body a[href]'))) {
+                    if (!isVisible(link) || isChrome(link)) continue;
+                    const url = absoluteUrl(link.getAttribute('href'));
+                    if (!url) continue;
+                    const linkText = normalize(link.innerText || link.textContent || link.getAttribute('aria-label') || '');
+                    if (linkText.length < 3) continue;
+                    const parentText = normalize(link.closest('li,article,section,div,p')?.innerText || linkText);
+                    if (parentText.length > 600) continue;
+                    const clipped = clipInfo(parentText, maxItemText);
+                    rawItems.push({
+                        url,
+                        text: clipped.text,
+                        truncated: clipped.truncated
+                    });
+                }
+            }
+            const seen = new Set();
+            const uniqueItems = [];
+            for (const item of rawItems) {
+                if (isNoiseItem(item)) continue;
+                const key = `${item.url}::${item.text}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                uniqueItems.push(item);
+            }
+            const headings = Array.from(document.querySelectorAll('h1,h2,h3'))
+                .filter((el) => isVisible(el) && !isChrome(el))
+                .map((el) => {
+                    const clipped = clipInfo(el.innerText || el.textContent || '', maxHeadingText);
+                    return { text: clipped.text, tag: el.tagName.toLowerCase(), truncated: clipped.truncated };
+                })
+                .filter((heading) => heading.text && !noiseTextPattern.test(heading.text))
+                .slice(0, maxHeadings);
+            const title = clipInfo(document.title, 160).text;
+            return {
+                meta: {
+                    title,
+                    description: clipInfo(metaContent('meta[name="description"]'), 260).text,
+                    canonical: linkHref('link[rel="canonical"]'),
+                    og_title: clipInfo(metaContent('meta[property="og:title"]'), 160).text,
+                    og_description: clipInfo(metaContent('meta[property="og:description"]'), 260).text
+                },
+                headings,
+                items: uniqueItems.slice(0, maxItems)
+            };
+        }
+        """
+        try:
+            return await self._page.evaluate(js_script)
+        except Exception as exc:  # pragma: no cover - defensive fallback for odd documents
+            logger.debug(f"Failed to build page summary: {exc}")
+            return self._empty_page_summary()
+
+    @staticmethod
+    def _empty_page_summary() -> dict[str, object]:
+        return {
+            "meta": {},
+            "headings": [],
+            "items": [],
+        }
 
     def _attach_page_observers(self, page) -> None:
         page.on("console", self._record_console_message)
@@ -714,7 +860,11 @@ class BrowserController:
     # RISC Web Actions (Exposed to the Agent as Tools)
     # -------------------------------------------------------------------------
 
-    async def navigate(self, url: str, include_snapshot: bool = False) -> dict[str, object]:
+    async def navigate(
+        self,
+        url: str,
+        include_snapshot: bool = False,
+    ) -> dict[str, object]:
         """Navigates to the given URL and waits for it to load."""
         await self._update_visual_status(f"Navigating to {url}...")
         logger.info(f"Navigating to {url}")
@@ -725,7 +875,12 @@ class BrowserController:
             title = await self._page.title()
             final_url = self._page.url
             content_type = response.headers.get("content-type") if response else None
+            status_code = getattr(response, "status", None) if response else None
             resource_type = self._classify_resource_type(content_type, final_url)
+            if resource_type == "html" and (status_code is None or status_code < 400):
+                page_summary = await self._get_page_summary_raw()
+            else:
+                page_summary = self._empty_page_summary()
 
             if include_snapshot:
                 snapshot = ""
@@ -735,25 +890,29 @@ class BrowserController:
                         break
                     await asyncio.sleep(1)
                 interactive_element_count = self._count_interactive_snapshot_ids(snapshot)
-                return {
-                    "status": "success",
+                payload = {
                     "url": final_url,
                     "title": title or "(untitled)",
+                    "status": status_code,
                     "resource_type": resource_type,
+                    **page_summary,
                     "interactive_element_count": interactive_element_count,
                     "snapshot_included": True,
                     "interactive_snapshot": wrap_browser_content(snapshot),
                 }
+                return payload
 
             interactive_element_count = await self._get_interactive_element_count_raw()
-            return {
-                "status": "success",
+            payload = {
                 "url": final_url,
                 "title": title or "(untitled)",
+                "status": status_code,
                 "resource_type": resource_type,
+                **page_summary,
                 "interactive_element_count": interactive_element_count,
                 "snapshot_included": False,
             }
+            return payload
         except PlaywrightError as e:
             logger.exception(f"Failed to navigate to {url}")
             raise BrowserActionError(f"Failed to navigate: {str(e)}") from e

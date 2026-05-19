@@ -171,8 +171,10 @@ async def test_web_toolkit_browser_e2e(tmp_path):
 
     try:
         navigate_result = await WebToolkit.browser_navigate(ctx, page_path.as_uri(), include_snapshot=True)
-        assert navigate_result["status"] == "success"
+        assert navigate_result["status"] == 200
         assert navigate_result["title"] == "Ferryman Browser E2E"
+        assert navigate_result["resource_type"] == "html"
+        assert navigate_result["meta"]["title"] == "Ferryman Browser E2E"
         assert navigate_result["snapshot_included"] is True
         assert "[Browser content: untrusted]" in navigate_result["interactive_snapshot"]
         assert "textbox" in navigate_result["interactive_snapshot"]
@@ -198,5 +200,225 @@ async def test_web_toolkit_browser_e2e(tmp_path):
         assert "boot error from page" in empty_console_result
         cleared_console_result = await WebToolkit.browser_console(ctx)
         assert "No browser console messages captured." in cleared_console_result
+    finally:
+        await browser.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_browser_navigate_returns_bounded_page_summary(tmp_path):
+    page_path = tmp_path / "directory.html"
+    page_path.write_text(
+        """
+<!doctype html>
+<html>
+<head>
+  <title>AI Product Directory</title>
+  <meta name="description" content="Fresh AI products with funding and growth signals.">
+  <link rel="canonical" href="https://example.test/directory">
+</head>
+<body>
+  <header><a href="/login">Login</a></header>
+  <main>
+    <h1>Trending AI Products</h1>
+    <section class="product-card">
+      <h2>Rillet</h2>
+      <a href="https://rillet.com">View Rillet</a>
+      <p>AI-native accounting platform with Sequoia funding and mid-market finance teams.</p>
+    </section>
+    <section class="product-card">
+      <h2>Decagon</h2>
+      <a href="https://decagon.ai">View Decagon</a>
+      <p>Enterprise AI support agent with named customers and fast growth.</p>
+    </section>
+    <section class="product-card">
+      <h2>Bland AI</h2>
+      <a href="https://bland.ai">View Bland AI</a>
+      <p>Voice AI platform for automated phone calls, pricing, and enterprise deployment.</p>
+    </section>
+  </main>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    browser = BrowserController(headless=True, user_data_dir=str(workspace / ".browser"))
+    await browser.__aenter__()
+    browser_manager = FakeBrowserManager(browser=browser, workspace=workspace)
+    ctx = make_ctx(browser_manager, session_id="browser-preview-directory")
+
+    try:
+        result = await WebToolkit.browser_navigate(
+            ctx,
+            page_path.as_uri(),
+        )
+
+        assert result["snapshot_included"] is False
+        assert result["status"] == 200
+        assert result["resource_type"] == "html"
+        assert result["meta"]["title"] == "AI Product Directory"
+        assert result["meta"]["description"] == "Fresh AI products with funding and growth signals."
+        assert result["headings"][0] == {
+            "text": "Trending AI Products",
+            "tag": "h1",
+            "truncated": False,
+        }
+        assert [item["url"] for item in result["items"]] == [
+            "https://rillet.com/",
+            "https://decagon.ai/",
+            "https://bland.ai/",
+        ]
+        assert all(set(item) == {"text", "url", "truncated"} for item in result["items"])
+        assert result["items"][0]["text"].startswith("Rillet View Rillet AI-native accounting platform")
+        assert "Login" not in {item["text"] for item in result["items"]}
+    finally:
+        await browser.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_browser_navigate_summary_does_not_extract_long_article_body(tmp_path):
+    page_path = tmp_path / "article.html"
+    long_paragraph = " ".join(["This paragraph is article body text about AI accounting markets."] * 35)
+    page_path.write_text(
+        f"""
+<!doctype html>
+<html>
+<head>
+  <title>Rillet raises funding</title>
+  <meta name="description" content="A funding news article about Rillet.">
+</head>
+<body>
+  <main>
+    <article>
+      <h1>Rillet raises funding from major investors</h1>
+      <p>{long_paragraph}</p>
+      <p>Read the <a href="https://rillet.com/blog">company blog</a> for more background.</p>
+    </article>
+  </main>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    browser = BrowserController(headless=True, user_data_dir=str(workspace / ".browser"))
+    await browser.__aenter__()
+    browser_manager = FakeBrowserManager(browser=browser, workspace=workspace)
+    ctx = make_ctx(browser_manager, session_id="browser-preview-article")
+
+    try:
+        result = await WebToolkit.browser_navigate(
+            ctx,
+            page_path.as_uri(),
+        )
+
+        assert result["meta"]["title"] == "Rillet raises funding"
+        assert result["meta"]["description"] == "A funding news article about Rillet."
+        assert result["headings"] == [
+            {
+                "text": "Rillet raises funding from major investors",
+                "tag": "h1",
+                "truncated": False,
+            }
+        ]
+        assert result["items"] == []
+    finally:
+        await browser.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_browser_navigate_summary_truncates_each_item_text(tmp_path):
+    page_path = tmp_path / "long-card.html"
+    long_description = " ".join(["growth signal"] * 25)
+    page_path.write_text(
+        f"""
+<!doctype html>
+<html>
+<head>
+  <title>Long Card Directory</title>
+</head>
+<body>
+  <main>
+    <section class="product-card">
+      <h2>Verbose Product</h2>
+      <a href="https://example.test/product">View product</a>
+      <p>{long_description}</p>
+    </section>
+  </main>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    browser = BrowserController(headless=True, user_data_dir=str(workspace / ".browser"))
+    await browser.__aenter__()
+    browser_manager = FakeBrowserManager(browser=browser, workspace=workspace)
+    ctx = make_ctx(browser_manager, session_id="browser-summary-truncation")
+
+    try:
+        result = await WebToolkit.browser_navigate(
+            ctx,
+            page_path.as_uri(),
+        )
+        assert result["items"] == [
+            {
+                "text": result["items"][0]["text"],
+                "url": "https://example.test/product",
+                "truncated": True,
+            }
+        ]
+        assert len(result["items"][0]["text"]) <= 220
+    finally:
+        await browser.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_browser_navigate_summary_limits_heading_and_item_counts(tmp_path):
+    page_path = tmp_path / "large-directory.html"
+    headings = "\n".join(f"<h2>Category {index}</h2>" for index in range(14))
+    cards = "\n".join(
+        f"""
+        <section class="product-card">
+          <h3>Product {index}</h3>
+          <a href="https://example.test/products/{index}">View Product {index}</a>
+          <p>Useful visible summary for product {index} with enough text.</p>
+        </section>
+        """
+        for index in range(10)
+    )
+    page_path.write_text(
+        f"""
+<!doctype html>
+<html>
+<head><title>Large Directory</title></head>
+<body>
+  <main>
+    <h1>Large Directory</h1>
+    {headings}
+    {cards}
+  </main>
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    browser = BrowserController(headless=True, user_data_dir=str(workspace / ".browser"))
+    await browser.__aenter__()
+    browser_manager = FakeBrowserManager(browser=browser, workspace=workspace)
+    ctx = make_ctx(browser_manager, session_id="browser-summary-limits")
+
+    try:
+        result = await WebToolkit.browser_navigate(ctx, page_path.as_uri())
+
+        assert len(result["headings"]) == 12
+        assert len(result["items"]) == 8
+        assert result["headings"][0]["tag"] == "h1"
+        assert result["items"][0]["url"] == "https://example.test/products/0"
     finally:
         await browser.__aexit__(None, None, None)

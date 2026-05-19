@@ -191,7 +191,7 @@ async def _run_websocket_smoke(report: dict[str, object]) -> None:
 
 async def _run_live_web_smoke(base_ctx, report: dict[str, object]) -> None:
     navigate_result = await WebToolkit.browser_navigate(base_ctx, "https://example.com/")
-    _require(navigate_result.get("status") == "success", f"Live browser_navigate failed: {navigate_result}")
+    _require(navigate_result.get("status") == 200, f"Live browser_navigate failed: {navigate_result}")
     _require(navigate_result.get("url") == "https://example.com/", f"Live browser_navigate URL mismatch: {navigate_result}")
     live_snapshot = await WebToolkit.browser_aria_snapshot(base_ctx)
     _require("Example Domain" in live_snapshot, f"Live aria snapshot missing expected content: {live_snapshot[:200]}")
@@ -376,7 +376,7 @@ async def run_bundle_smoke_test() -> dict[str, object]:
         smoke_page = workspace / "bundle-smoke.html"
         _write_smoke_page(smoke_page)
         navigate_result = await WebToolkit.browser_navigate(base_ctx, smoke_page.as_uri())
-        _require(navigate_result.get("status") == "success", f"browser_navigate failed: {navigate_result}")
+        _require(navigate_result.get("status") == 200, f"browser_navigate failed: {navigate_result}")
         _require(navigate_result.get("title") == "Ferryman Bundle Smoke", f"Unexpected page title: {navigate_result}")
         snapshot = await WebToolkit.browser_aria_snapshot(base_ctx)
         textbox_match = re.search(r'textbox.*\[(\d+)\]', snapshot)

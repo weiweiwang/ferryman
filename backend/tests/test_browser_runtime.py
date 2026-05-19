@@ -464,10 +464,13 @@ async def test_browser_navigate_returns_wrapped_snapshot_after_retry(monkeypatch
 
     payload = await controller.navigate("https://example.com", include_snapshot=True)
 
-    assert payload["status"] == "success"
     assert payload["url"] == "https://example.com/final"
     assert payload["title"] == "Example Domain"
+    assert payload["status"] is None
     assert payload["resource_type"] == "unknown"
+    assert payload["meta"] == {}
+    assert payload["headings"] == []
+    assert payload["items"] == []
     assert payload["interactive_element_count"] == 1
     assert payload["snapshot_included"] is True
     assert "[Browser content: untrusted]" in payload["interactive_snapshot"]
@@ -479,6 +482,7 @@ async def test_browser_navigate_returns_wrapped_snapshot_after_retry(monkeypatch
 async def test_browser_navigate_defaults_to_lightweight_status(monkeypatch):
     class FakeResponse:
         headers = {"content-type": "text/html; charset=utf-8"}
+        status = 200
 
     class FakePage:
         url = "https://example.com/final"
@@ -506,21 +510,81 @@ async def test_browser_navigate_defaults_to_lightweight_status(monkeypatch):
     async def fail_snapshot():
         raise AssertionError("navigate should not build a snapshot by default")
 
+    async def fake_summary():
+        return {
+            "meta": {"title": "Example Domain", "description": "", "canonical": ""},
+            "headings": [],
+            "items": [],
+        }
+
     monkeypatch.setattr("app.core.browser.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(controller, "_update_visual_status", fake_update_status)
     monkeypatch.setattr(controller, "_get_aria_snapshot_raw", fail_snapshot)
+    monkeypatch.setattr(controller, "_get_page_summary_raw", fake_summary)
 
     payload = await controller.navigate("https://example.com")
 
     assert payload == {
-        "status": "success",
         "url": "https://example.com/final",
         "title": "Example Domain",
+        "status": 200,
         "resource_type": "html",
+        "meta": {"title": "Example Domain", "description": "", "canonical": ""},
+        "headings": [],
+        "items": [],
         "interactive_element_count": 3,
         "snapshot_included": False,
     }
     assert sleeps == [2]
+
+
+@pytest.mark.asyncio
+async def test_browser_navigate_omits_summary_for_http_error(monkeypatch):
+    class FakeResponse:
+        headers = {"content-type": "text/html; charset=utf-8"}
+        status = 404
+
+    class FakePage:
+        url = "https://example.com/missing"
+
+        async def goto(self, url, wait_until="domcontentloaded", timeout=30000):
+            return FakeResponse()
+
+        async def title(self):
+            return "404 - Page Not Found"
+
+        async def evaluate(self, script):
+            return 0
+
+    controller = BrowserController()
+    controller._page = FakePage()
+
+    async def fake_sleep(seconds):
+        return None
+
+    async def fake_update_status(message):
+        return None
+
+    async def fail_summary():
+        raise AssertionError("HTTP error pages should not return meta/headings/items from page content")
+
+    monkeypatch.setattr("app.core.browser.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(controller, "_update_visual_status", fake_update_status)
+    monkeypatch.setattr(controller, "_get_page_summary_raw", fail_summary)
+
+    payload = await controller.navigate("https://example.com/missing")
+
+    assert payload == {
+        "url": "https://example.com/missing",
+        "title": "404 - Page Not Found",
+        "status": 404,
+        "resource_type": "html",
+        "meta": {},
+        "headings": [],
+        "items": [],
+        "interactive_element_count": 0,
+        "snapshot_included": False,
+    }
 
 
 @pytest.mark.asyncio
