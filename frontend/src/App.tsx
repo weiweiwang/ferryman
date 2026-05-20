@@ -1672,7 +1672,7 @@ export default function App() {
                                 .replace('{classifier}', modelRouting.classifier_model)
                                 .replace('{flash}', modelRouting.flash_model)
                               : t('settings.model_routing_detail')
-                                .replace('{classifier}', 'gemini:gemini-3.1-flash-lite-preview')
+                                .replace('{classifier}', 'gemini:gemini-3.1-flash-lite')
                                 .replace('{flash}', 'gemini:gemini-3-flash-preview')}
                           </p>
                         </div>

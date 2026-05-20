@@ -41,7 +41,7 @@ def test_session_manager_records_successful_agent_run_atomically(session):
                 },
             },
             "classifier": {
-                "model": "gemini:gemini-3.1-flash-lite-preview",
+                "model": "gemini:gemini-3.1-flash-lite",
                 "input_tokens": 3,
                 "output_tokens": 1,
                 "total_tokens": 4,
@@ -106,7 +106,7 @@ def test_session_manager_aggregates_session_model_usage(session):
                         },
                     },
                     "classifier": {
-                        "model": "gemini:gemini-3.1-flash-lite-preview",
+                        "model": "gemini:gemini-3.1-flash-lite",
                         "input_tokens": 2,
                         "output_tokens": 1,
                         "total_tokens": 3,
@@ -142,7 +142,7 @@ def test_session_manager_aggregates_session_model_usage(session):
                         },
                     },
                     "classifier": {
-                        "model": "gemini:gemini-3.1-flash-lite-preview",
+                        "model": "gemini:gemini-3.1-flash-lite",
                         "input_tokens": 4,
                         "output_tokens": 1,
                         "total_tokens": 5,
@@ -174,7 +174,7 @@ def test_session_manager_aggregates_session_model_usage(session):
         "output_tokens": 2,
         "total_tokens": 8,
         "request_count": 3,
-        "models": ["gemini:gemini-3.1-flash-lite-preview"],
+        "models": ["gemini:gemini-3.1-flash-lite"],
     }
 
 

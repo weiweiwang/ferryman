@@ -165,7 +165,7 @@ def test_agent_manager_final_payload_includes_model_usage():
                 },
             },
             "classifier": {
-                "model": "gemini:gemini-3.1-flash-lite-preview",
+                "model": "gemini:gemini-3.1-flash-lite",
                 "input_tokens": 2,
                 "output_tokens": 1,
                 "total_tokens": 3,
@@ -183,7 +183,7 @@ def test_agent_manager_final_payload_includes_model_usage():
     )
 
     assert payload["payload"]["messages"][0]["metadata"]["usage"]["classifier"] == {
-        "model": "gemini:gemini-3.1-flash-lite-preview",
+        "model": "gemini:gemini-3.1-flash-lite",
         "input_tokens": 2,
         "output_tokens": 1,
         "total_tokens": 3,

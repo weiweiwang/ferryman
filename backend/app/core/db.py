@@ -42,6 +42,7 @@ UTC_DATETIME_COLUMNS: dict[str, tuple[str, ...]] = {
 UTC_DATETIME_MIGRATION_KEY = "system.utc_datetime_storage_migration_v1"
 MODEL_ROUTING_THRESHOLD_MIGRATION_KEY = "system.model_routing_threshold_migration_v1"
 MODEL_ROUTING_FLASH_DEFAULT_MIGRATION_KEY = "system.model_routing_flash_default_migration_v1"
+MODEL_ROUTING_CLASSIFIER_MODEL_MIGRATION_KEY = "system.model_routing_classifier_model_migration_v1"
 DOUBAO_PROVIDER_REMOVAL_MIGRATION_KEY = "system.remove_doubao_provider_config_v1"
 
 
@@ -332,6 +333,78 @@ def migrate_model_routing_flash_default() -> None:
         conn.commit()
 
 
+def migrate_model_routing_classifier_model_default() -> None:
+    """Upgrade the Gemini Flash Lite classifier model from preview to stable."""
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+    except Exception as e:
+        logger.exception(f"⚠️ Could not inspect app_configs for model routing classifier migration with exception: {e}")
+        return
+
+    if "app_configs" not in table_names:
+        return
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=" ")
+    with engine.connect() as conn:
+        migration_marker = conn.execute(
+            text("SELECT 1 FROM app_configs WHERE key = :key LIMIT 1"),
+            {"key": MODEL_ROUTING_CLASSIFIER_MODEL_MIGRATION_KEY},
+        ).first()
+        if migration_marker:
+            return
+
+        row = conn.execute(
+            text("SELECT value FROM app_configs WHERE key = :key LIMIT 1"),
+            {"key": "system.llm.routing"},
+        ).first()
+        if row is not None:
+            raw_value = row[0]
+            routing_config = raw_value
+            if isinstance(raw_value, str):
+                try:
+                    routing_config = json.loads(raw_value)
+                except json.JSONDecodeError:
+                    routing_config = None
+
+            if isinstance(routing_config, dict):
+                updated_config = dict(routing_config)
+                if updated_config.get("classifier_model") == "gemini:gemini-3.1-flash-lite-preview":
+                    updated_config["classifier_model"] = "gemini:gemini-3.1-flash-lite"
+                if updated_config != routing_config:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE app_configs
+                            SET value = :value, updated_at = :updated_at
+                            WHERE key = :key
+                            """
+                        ),
+                        {
+                            "key": "system.llm.routing",
+                            "value": json.dumps(updated_config, ensure_ascii=False),
+                            "updated_at": now,
+                        },
+                    )
+
+        conn.execute(
+            text(
+                """
+                INSERT OR REPLACE INTO app_configs (key, value, category, metadata, updated_at)
+                VALUES (:key, :value, :category, :metadata, :updated_at)
+                """
+            ),
+            {
+                "key": MODEL_ROUTING_CLASSIFIER_MODEL_MIGRATION_KEY,
+                "value": json.dumps(True),
+                "category": "system",
+                "metadata": json.dumps({"migration": "model_routing_classifier_model_v1"}),
+                "updated_at": now,
+            },
+        )
+        conn.commit()
+
+
 def migrate_remove_doubao_provider_config() -> None:
     """Remove the disabled Doubao provider from local LLM settings."""
     try:
@@ -449,6 +522,7 @@ def init_db():
         migrate_datetime_columns_to_utc_storage()
         migrate_model_routing_threshold_default()
         migrate_model_routing_flash_default()
+        migrate_model_routing_classifier_model_default()
         migrate_remove_doubao_provider_config()
     except Exception as e:
         logger.exception("🚨 DB Initialization Error")

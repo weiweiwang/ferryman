@@ -25,7 +25,7 @@ from app.core.toolkits.pricing import PricingToolkit
 
 def test_pricing_parsers_extract_supported_model_prices():
     gemini_prices = parse_gemini_prices("""
-    gemini-3.1-flash-lite-preview
+    gemini-3.1-flash-lite
     Input price
     Free of charge
     $0.25 (text / image / video)
@@ -49,7 +49,7 @@ def test_pricing_parsers_extract_supported_model_prices():
     $12.00, prompts
     """)
     assert {price.model_id: price.input_per_million for price in gemini_prices} == {
-        "gemini:gemini-3.1-flash-lite-preview": 0.25,
+        "gemini:gemini-3.1-flash-lite": 0.25,
         "gemini:gemini-3-flash-preview": 0.5,
         "gemini:gemini-3.1-pro-preview": 2.0,
     }
@@ -131,7 +131,7 @@ def test_refresh_converts_qwen_cny_prices_to_usd():
     pages = {
         CNY_USD_FX_URL: json.dumps({"date": "2026-05-13", "rates": {"USD": 0.14}}),
         GEMINI_PRICING_URL: """
-        gemini-3.1-flash-lite-preview
+        gemini-3.1-flash-lite
         Input price
         $0.25
         Output price
@@ -231,7 +231,7 @@ async def test_start_waits_for_initial_refresh_before_returning():
     pages = {
         CNY_USD_FX_URL: json.dumps({"date": "2026-05-13", "rates": {"USD": 0.14}}),
         GEMINI_PRICING_URL: """
-        gemini-3.1-flash-lite-preview
+        gemini-3.1-flash-lite
         Input price
         $0.25
         Output price

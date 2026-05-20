@@ -160,7 +160,7 @@ describe('App chat interactions', () => {
         if (method === 'get_model_routing') {
           return {
             enabled: false,
-            classifier_model: 'gemini:gemini-3.1-flash-lite-preview',
+            classifier_model: 'gemini:gemini-3.1-flash-lite',
             flash_model: 'deepseek:deepseek-v4-flash',
             flash_fallback_model: 'gemini:gemini-3-flash-preview',
             default_model: 'system.llm.active_model',
@@ -293,7 +293,7 @@ describe('App chat interactions', () => {
               },
             },
             classifier: {
-              model: 'gemini:gemini-3.1-flash-lite-preview',
+              model: 'gemini:gemini-3.1-flash-lite',
               input_tokens: 300,
               output_tokens: 20,
               total_tokens: 320,
@@ -327,7 +327,7 @@ describe('App chat interactions', () => {
     expect(screen.getByText('gemini:gemini-3-flash-preview')).toBeInTheDocument();
     expect(screen.getByText('deepseek:deepseek-v4-pro')).toBeInTheDocument();
     expect(screen.getByText('Classifier')).toBeInTheDocument();
-    expect(screen.getByText('gemini:gemini-3.1-flash-lite-preview')).toBeInTheDocument();
+    expect(screen.getByText('gemini:gemini-3.1-flash-lite')).toBeInTheDocument();
   });
 
   it('explains incomplete model cost pricing', async () => {
@@ -397,7 +397,7 @@ describe('App chat interactions', () => {
       if (method === 'get_model_routing') {
         return {
           enabled: false,
-          classifier_model: 'gemini:gemini-3.1-flash-lite-preview',
+          classifier_model: 'gemini:gemini-3.1-flash-lite',
           flash_model: 'deepseek:deepseek-v4-flash',
           flash_fallback_model: 'gemini:gemini-3-flash-preview',
           default_model: 'system.llm.active_model',

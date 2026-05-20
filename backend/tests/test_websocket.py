@@ -255,7 +255,7 @@ def test_websocket_llm_and_model_config_flow(client):
 
             response = send_rpc(websocket, "get_model_routing", request_id=61)
             assert response["result"]["enabled"] is False
-            assert response["result"]["classifier_model"] == "gemini:gemini-3.1-flash-lite-preview"
+            assert response["result"]["classifier_model"] == "gemini:gemini-3.1-flash-lite"
 
             response = send_rpc(
                 websocket,

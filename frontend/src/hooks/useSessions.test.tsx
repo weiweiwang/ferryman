@@ -220,7 +220,7 @@ describe('useSessions', () => {
                   },
                 },
                 classifier: {
-                  model: 'gemini:gemini-3.1-flash-lite-preview',
+                  model: 'gemini:gemini-3.1-flash-lite',
                   input_tokens: 2,
                   output_tokens: 1,
                   total_tokens: 3,
@@ -278,7 +278,7 @@ describe('useSessions', () => {
             },
           },
           classifier: {
-            model: 'gemini:gemini-3.1-flash-lite-preview',
+            model: 'gemini:gemini-3.1-flash-lite',
             input_tokens: 2,
             output_tokens: 1,
             total_tokens: 3,

@@ -76,7 +76,7 @@ def first_price_after_label(lines: list[str], label: str, currency: str = "$") -
 def parse_gemini(text: str) -> list[PriceProbeResult]:
     url = "https://ai.google.dev/gemini-api/docs/pricing"
     targets = [
-        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
         "gemini-3-flash-preview",
         "gemini-3.1-pro-preview",
     ]

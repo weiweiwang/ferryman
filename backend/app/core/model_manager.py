@@ -29,7 +29,7 @@ class ModelManager:
 
     DEFAULT_MODEL_ROUTING_CONFIG: dict[str, object] = {
         "enabled": False,
-        "classifier_model": "gemini:gemini-3.1-flash-lite-preview",
+        "classifier_model": "gemini:gemini-3.1-flash-lite",
         "flash_model": "deepseek:deepseek-v4-flash",
         "flash_fallback_model": "gemini:gemini-3-flash-preview",
         "default_model": "system.llm.active_model",
@@ -78,7 +78,7 @@ class ModelManager:
                 "list_mode": "gemini",
                 "models": [
                     "gemini-3.1-pro-preview",
-                    "gemini-3.1-flash-lite-preview",
+                    "gemini-3.1-flash-lite",
                     "gemini-3-flash-preview",
                 ],
             },

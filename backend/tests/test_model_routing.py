@@ -33,7 +33,7 @@ async def test_routing_model_keeps_agent_usage_to_final_request(tmp_path, monkey
         "system.llm.routing",
         {
             "enabled": True,
-            "classifier_model": "gemini:gemini-3.1-flash-lite-preview",
+            "classifier_model": "gemini:gemini-3.1-flash-lite",
             "flash_model": "gemini:gemini-3-flash-preview",
             "default_model": "system.llm.active_model",
             "classifier_threshold": 80,
@@ -44,7 +44,7 @@ async def test_routing_model_keeps_agent_usage_to_final_request(tmp_path, monkey
     manager = ModelManager(settings)
 
     classifier = function_model(
-        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
         '{"classifier_reasoning":"Routine task.","classifier_score":34}',
         RequestUsage(input_tokens=10, output_tokens=2),
     )
@@ -56,7 +56,7 @@ async def test_routing_model_keeps_agent_usage_to_final_request(tmp_path, monkey
 
     def create_model(model_id: str):
         resolved = manager.resolve_model_id(model_id)
-        if resolved == "gemini:gemini-3.1-flash-lite-preview":
+        if resolved == "gemini:gemini-3.1-flash-lite":
             return classifier
         if resolved == "gemini:gemini-3-flash-preview":
             return flash
@@ -125,7 +125,7 @@ async def test_routing_model_keeps_agent_usage_to_final_request(tmp_path, monkey
             },
         },
         "classifier": {
-            "model": "gemini:gemini-3.1-flash-lite-preview",
+            "model": "gemini:gemini-3.1-flash-lite",
             "input_tokens": 10,
             "output_tokens": 2,
             "total_tokens": 12,
@@ -211,7 +211,7 @@ async def test_router_uses_gemini_flash_fallback_when_deepseek_flash_unavailable
         "system.llm.routing",
         {
             "enabled": True,
-            "classifier_model": "gemini:gemini-3.1-flash-lite-preview",
+            "classifier_model": "gemini:gemini-3.1-flash-lite",
             "flash_model": "deepseek:deepseek-v4-flash",
             "flash_fallback_model": "gemini:gemini-3-flash-preview",
             "default_model": "system.llm.active_model",
@@ -222,7 +222,7 @@ async def test_router_uses_gemini_flash_fallback_when_deepseek_flash_unavailable
     )
     manager = ModelManager(settings)
     classifier = function_model(
-        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
         '{"classifier_reasoning":"Routine task.","classifier_score":34}',
         RequestUsage(input_tokens=10, output_tokens=2),
     )
@@ -234,7 +234,7 @@ async def test_router_uses_gemini_flash_fallback_when_deepseek_flash_unavailable
 
     def create_model(model_id: str):
         resolved = manager.resolve_model_id(model_id)
-        if resolved == "gemini:gemini-3.1-flash-lite-preview":
+        if resolved == "gemini:gemini-3.1-flash-lite":
             return classifier
         if resolved == "deepseek:deepseek-v4-flash":
             raise LLMConfigurationError("DeepSeek is missing API Key.")
@@ -262,7 +262,7 @@ async def test_router_uses_active_model_when_all_flash_models_unavailable(tmp_pa
         "system.llm.routing",
         {
             "enabled": True,
-            "classifier_model": "gemini:gemini-3.1-flash-lite-preview",
+            "classifier_model": "gemini:gemini-3.1-flash-lite",
             "flash_model": "deepseek:deepseek-v4-flash",
             "flash_fallback_model": "gemini:gemini-3-flash-preview",
             "default_model": "system.llm.active_model",
@@ -273,14 +273,14 @@ async def test_router_uses_active_model_when_all_flash_models_unavailable(tmp_pa
     )
     manager = ModelManager(settings)
     classifier = function_model(
-        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
         '{"classifier_reasoning":"Routine task.","classifier_score":34}',
         RequestUsage(input_tokens=10, output_tokens=2),
     )
 
     def create_model(model_id: str):
         resolved = manager.resolve_model_id(model_id)
-        if resolved == "gemini:gemini-3.1-flash-lite-preview":
+        if resolved == "gemini:gemini-3.1-flash-lite":
             return classifier
         if resolved in {"deepseek:deepseek-v4-flash", "gemini:gemini-3-flash-preview"}:
             raise LLMConfigurationError(f"{resolved} is not configured.")
@@ -306,7 +306,7 @@ async def test_router_uses_active_model_when_classifier_unavailable(tmp_path, mo
         "system.llm.routing",
         {
             "enabled": True,
-            "classifier_model": "gemini:gemini-3.1-flash-lite-preview",
+            "classifier_model": "gemini:gemini-3.1-flash-lite",
             "flash_model": "deepseek:deepseek-v4-flash",
             "flash_fallback_model": "gemini:gemini-3-flash-preview",
             "default_model": "system.llm.active_model",
@@ -319,7 +319,7 @@ async def test_router_uses_active_model_when_classifier_unavailable(tmp_path, mo
 
     def create_model(model_id: str):
         resolved = manager.resolve_model_id(model_id)
-        if resolved == "gemini:gemini-3.1-flash-lite-preview":
+        if resolved == "gemini:gemini-3.1-flash-lite":
             raise LLMConfigurationError("Gemini Lite is not configured.")
         return function_model("gpt-test", "default", RequestUsage(input_tokens=999, output_tokens=999))
 
