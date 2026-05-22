@@ -38,6 +38,7 @@ yfinance==1.2.1
 pandas==3.0.2
 numpy==2.4.2
 Pillow==12.2.0
+google-cloud-bigquery==3.38.0
 
 # --- Testing ---
 pytest==9.0.2
