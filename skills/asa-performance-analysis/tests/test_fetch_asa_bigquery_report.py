@@ -559,6 +559,11 @@ def test_aggregate_daily_metrics():
     # RRC4 = 4 / 20 = 0.2000
     assert kw1["RRC4"] == 0.2
     assert kw1["RRC5"] is None
+    assert kw1["effective_RRC1"] == 0.8286
+    assert kw1["effective_RRC2"] == 0.6
+    assert kw1["effective_RRC3"] == 0.3667
+    assert kw1["effective_RRC4"] == 0.2
+    assert kw1["effective_RRC5"] is None
 
     # Keyword 2
     kw2 = agg[1]
@@ -569,6 +574,11 @@ def test_aggregate_daily_metrics():
     assert kw2["RRC3"] is None
     assert kw2["RRC4"] is None
     assert kw2["RRC5"] is None
+    assert kw2["effective_RRC1"] is None
+    assert kw2["effective_RRC2"] is None
+    assert kw2["effective_RRC3"] is None
+    assert kw2["effective_RRC4"] is None
+    assert kw2["effective_RRC5"] is None
 
 
 def test_mature_purchase_denominators_respect_cutoff_boundaries():
@@ -851,6 +861,8 @@ def test_main_writes_split_csvs(tmp_path, monkeypatch):
         assert "RUC5" in header
         assert "RRC4" in header
         assert "RRC5" in header
+        assert "effective_RRC1" in header
+        assert "effective_RRC5" in header
         assert "RUC4_mature_purchases" in header
         assert "RUC5_mature_purchases" in header
         assert "Target_CPI" in header
@@ -932,6 +944,38 @@ def test_calculate_ltv_uses_real_rrc4_and_rrc5_before_extrapolating():
     )
 
     assert ltv == 25.0
+
+
+def test_effective_rrc_curve_caps_cumulative_renewal_increases():
+    module = load_module()
+
+    assert module.effective_rrc_curve([0.3875, 0.3448, 0.3438, 0.2857, 0.75]) == [
+        0.3875,
+        0.3448,
+        0.3438,
+        0.2857,
+        0.2857,
+    ]
+
+
+def test_calculate_ltv_uses_effective_monotonic_rrc_curve():
+    module = load_module()
+
+    ltv = module.calculate_ltv(
+        first_purchase_gross=48.0,
+        regular_period_gross=48.0,
+        trial_days=3,
+        billing_period_days=7,
+        payback_days=180,
+        apple_fee=0.15,
+        rrc1=0.3875,
+        rrc2=0.3448,
+        rrc3=0.3438,
+        rrc4=0.2857,
+        rrc5=0.75,
+    )
+
+    assert ltv == 226.59
 
 
 def test_calculate_ltv_yearly():

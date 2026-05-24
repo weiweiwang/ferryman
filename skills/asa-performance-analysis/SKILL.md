@@ -25,6 +25,7 @@ updated: 2026-05-22
 - `LTV_per_purchase_user`：目标回本周期内单个购买用户的预估净收入。
 - `Target_CPI`：由关键词自己的LTV和安装到购买率换算得到，物理上对应苹果ASA后台的CPA目标，不是统一人工目标。
 - `RUC1_mature_purchases`至`RUC5_mature_purchases`：对应续订周期已成熟的购买分母，用来判断续订率是否可用。
+- `RRC1`至`RRC5`保留原始观测值；`effective_RRC1`至`effective_RRC5`用于LTV和回本计算，并对累计续费率做单调不升约束。
 
 ---
 
@@ -108,7 +109,7 @@ updated: 2026-05-22
 ### 1. CSV格式规范（Action CSV）
 分析产生的决策应生成对应的 CSV 文件，表头契约如下：
 ```csv
-keyword,ad_group,match_type,keyword_status,action,priority,confidence,spend,daily_spend,CPS,Target_CPI,payback_ratio,required_CPS_reduction,purchase_users,RUC1,RUC2,RUC3,RUC4,RUC5,RRC1,RRC2,RRC3,RRC4,RRC5,RUC1_mature_purchases,RUC2_mature_purchases,RUC3_mature_purchases,RUC4_mature_purchases,RUC5_mature_purchases,LTV_per_purchase_user,expected_revenue,days,clicks,installs,CVR,CPR1,reason,ad_group_id
+keyword,ad_group,match_type,keyword_status,action,priority,confidence,spend,daily_spend,CPS,Target_CPI,payback_ratio,required_CPS_reduction,purchase_users,RUC1,RUC2,RUC3,RUC4,RUC5,RRC1,RRC2,RRC3,RRC4,RRC5,effective_RRC1,effective_RRC2,effective_RRC3,effective_RRC4,effective_RRC5,RUC1_mature_purchases,RUC2_mature_purchases,RUC3_mature_purchases,RUC4_mature_purchases,RUC5_mature_purchases,LTV_per_purchase_user,expected_revenue,days,clicks,installs,CVR,CPR1,reason,ad_group_id
 ```
 
 ### 2. 诊断报告模板（Markdown Report）

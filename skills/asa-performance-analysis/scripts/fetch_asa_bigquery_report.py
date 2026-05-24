@@ -248,7 +248,9 @@ WHERE
 COLUMNS = [
     "ad_group_id", "ad_group", "match_type", "keyword", "keyword_status", "days",
     "purchase_users", "RUC1", "RUC2", "RUC3", "RUC4", "RUC5", "spend", "daily_spend", "CPS", "CPR1",
-    "RRC1", "RRC2", "RRC3", "RRC4", "RRC5", "impressions", "clicks", "installs", "CTR", "CIR", "CVR", "CPC", "CPI",
+    "RRC1", "RRC2", "RRC3", "RRC4", "RRC5",
+    "effective_RRC1", "effective_RRC2", "effective_RRC3", "effective_RRC4", "effective_RRC5",
+    "impressions", "clicks", "installs", "CTR", "CIR", "CVR", "CPC", "CPI",
     "purchase_income", "active_users", "RU15m", "RU", "ASR15m", "ASR",
     "RUC1_mature_purchases", "RUC2_mature_purchases", "RUC3_mature_purchases",
     "RUC4_mature_purchases", "RUC5_mature_purchases",
@@ -388,6 +390,20 @@ def make_currency_case(rates: dict[str, float], currency_col: str, value_col: st
     return "\n".join(lines)
 
 
+def effective_rrc_curve(values: list[float | None]) -> list[float | None]:
+    """Cap cumulative renewal rates so later cycles cannot exceed earlier cycles."""
+    effective: list[float | None] = []
+    previous: float | None = None
+    for value in values:
+        if value is None:
+            effective.append(None)
+            continue
+        capped = value if previous is None else min(value, previous)
+        effective.append(capped)
+        previous = capped
+    return effective
+
+
 def calculate_ltv(
     first_purchase_gross: float,
     regular_period_gross: float,
@@ -404,6 +420,7 @@ def calculate_ltv(
     """Calculate lifetime value per purchase user within the target payback window."""
     net_first = first_purchase_gross * (1.0 - apple_fee)
     net_regular = regular_period_gross * (1.0 - apple_fee)
+    rrc1, rrc2, rrc3, rrc4, rrc5 = effective_rrc_curve([rrc1, rrc2, rrc3, rrc4, rrc5])
 
     r_curve = []
     
@@ -590,6 +607,9 @@ def aggregate_daily_metrics(
         rrc3 = safe_div(ruc3_renewals, ruc3_purchases, 4)
         rrc4 = safe_div(ruc4_renewals, ruc4_purchases, 4)
         rrc5 = safe_div(ruc5_renewals, ruc5_purchases, 4)
+        effective_rrc1, effective_rrc2, effective_rrc3, effective_rrc4, effective_rrc5 = effective_rrc_curve(
+            [rrc1, rrc2, rrc3, rrc4, rrc5]
+        )
 
         if purchase_users > 0:
             ltv = calculate_ltv(
@@ -599,11 +619,11 @@ def aggregate_daily_metrics(
                 billing_period_days=billing_period_days,
                 payback_days=payback_days,
                 apple_fee=apple_fee,
-                rrc1=rrc1,
-                rrc2=rrc2,
-                rrc3=rrc3,
-                rrc4=rrc4,
-                rrc5=rrc5
+                rrc1=effective_rrc1,
+                rrc2=effective_rrc2,
+                rrc3=effective_rrc3,
+                rrc4=effective_rrc4,
+                rrc5=effective_rrc5
             )
             expected_rev = round(ltv * purchase_users, 2)
             payback_ratio = round(expected_rev / spend, 4) if spend > 0 else 0.0
@@ -638,6 +658,11 @@ def aggregate_daily_metrics(
             "RRC3": rrc3,
             "RRC4": rrc4,
             "RRC5": rrc5,
+            "effective_RRC1": effective_rrc1,
+            "effective_RRC2": effective_rrc2,
+            "effective_RRC3": effective_rrc3,
+            "effective_RRC4": effective_rrc4,
+            "effective_RRC5": effective_rrc5,
             "impressions": impressions,
             "clicks": clicks,
             "installs": installs,
