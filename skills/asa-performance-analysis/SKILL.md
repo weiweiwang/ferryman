@@ -16,7 +16,7 @@ updated: 2026-05-22
 
 ## 一、工作原则
 
-使用技能内置脚本获取关键词表现CSV。脚本输出是默认数据底座；报告分析必须基于脚本输出的CSV字段完成，不得在workspace中创建或执行临时分析脚本。
+使用技能内置脚本获取关键词表现CSV。脚本输出是默认数据底座；报告分析必须基于脚本输出的CSV字段完成，不得创建或执行任何临时分析脚本。
 
 默认回本周期为180天。若用户指定其他回本周期，执行脚本时传入`--payback-days`，报告中的LTV、预估收入、回本率和Target_CPI都应按该周期解释。
 
@@ -54,7 +54,7 @@ updated: 2026-05-22
 
 使用技能内置脚本 `scripts/fetch_asa_bigquery_report.py`，路径相对本技能目录解析。调用时传入以下参数：`--bundle-id`、`--output`、`--start-date`、`--target-currency`、`--trial-days`、`--billing-period-days`、`--first-purchase-gross`、`--regular-period-gross`、`--payback-days`。
 
-脚本执行后，除了在指定的`--output`路径下生成整体关键词聚合汇总表（例如`report.csv`）外，还会自动在其同级目录下生成拆分CSV文件（对于未成熟的数据切片，对应的聚合表可能为空，仅包含表头），以便智能体直接扫描和深入分析：
+脚本执行后，除了在指定的`--output`路径下生成整体关键词聚合汇总表（例如`report.csv`）外，还会自动在其同级目录下生成拆分CSV文件（对于未成熟的数据切片，对应的聚合表可能为空，仅包含表头），用于报告撰写时基于CSV字段按需读取、核对和深入分析：
 - `report_daily.csv`：按天维度的原始明细数据，包含完整字段，用于趋势与波动分析。
 - `report_ruc1.csv`：对`report_date <= ruc1_cutoff`的成熟期数据进行切片后的关键词聚合表。列名为常规的`purchases`、`renewals`和`RRC`。
 - `report_ruc2.csv`：对`report_date <= ruc2_cutoff`的成熟期数据进行切片后的关键词聚合表。列名为常规的`purchases`、`renewals`和`RRC`。
