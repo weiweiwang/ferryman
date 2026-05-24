@@ -57,6 +57,9 @@ CLASSIFIER_PROMPT = """You are a specialized Task Routing AI. Your sole function
 - High-stakes professional recommendations where a low-quality answer could materially harm the user's work.
 - Novel strategy, broad cross-system changes, or decisions that are difficult to recover from.
 
+# Hard Routing Rule
+If the user explicitly asks for a Pro/high-quality model or rejects Flash/Lite models, assign classifier_score 100.
+
 # Output Format
 Respond only in JSON:
 {"classifier_reasoning":"...","classifier_score":1}

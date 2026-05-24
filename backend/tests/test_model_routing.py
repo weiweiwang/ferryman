@@ -11,7 +11,7 @@ from pydantic_ai.usage import RequestUsage
 from app.core.config import Settings
 from app.core.agent_manager import AgentManager
 from app.core.model_manager import LLMConfigurationError, ModelManager
-from app.core.model_routing import ModelRouter, ModelUsageTracker, RoutingContext, RoutingModel
+from app.core.model_routing import CLASSIFIER_PROMPT, ModelRouter, ModelUsageTracker, RoutingContext, RoutingModel
 
 
 def function_model(name: str, text: str, usage: RequestUsage) -> FunctionModel:
@@ -471,6 +471,12 @@ def test_classifier_input_keeps_single_message_without_system_prompt(tmp_path):
 
     assert len(classifier_messages) == 2
     assert "format this list" in classifier_messages[1].parts[0].content
+
+
+def test_classifier_prompt_treats_explicit_pro_request_as_hard_rule():
+    assert "explicitly asks for a Pro/high-quality model" in CLASSIFIER_PROMPT
+    assert "assign classifier_score 100" in CLASSIFIER_PROMPT
+    assert "rejects Flash/Lite models" in CLASSIFIER_PROMPT
 
 
 def test_classifier_input_filters_system_prompt_from_all_recent_messages(tmp_path):
