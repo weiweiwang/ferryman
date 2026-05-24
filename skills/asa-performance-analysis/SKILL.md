@@ -2,8 +2,8 @@
 name: asa-performance-analysis
 description: >
   Use this for Apple Search Ads (ASA) post-campaign performance analysis,
-  BigQuery attribution and purchase cohort reporting, keyword-level CPR/RRC
-  diagnostics, and optimization decision support for App Store ads.
+  purchase cohort reporting, keyword-level CPS/CPI/RRC diagnostics, LTV-based
+  payback analysis, and optimization decision support for App Store ads.
 version: 1.0.0
 author: Ferryman
 created: 2026-05-22
@@ -12,24 +12,19 @@ updated: 2026-05-22
 
 # ASA Performance Analysis
 
-**专家目标**：从BigQuery拉取分天粒度的ASA关键词表现数据，通过Python在本地进行订阅归因队列分析，排除队列成熟度偏差（Cohort Maturity Bias），计算精确的LTV6与多维度订阅健康指标，最终生成包含出价调整、停投、否词屏蔽等专家级优化决策的分析报告。
+**专家目标**：作为资深ASA投放优化师，基于关键词级投放表现、订阅续费质量和目标回本周期内的回本能力，输出可执行的拓量、降价、暂停、观察和否词建议。
 
-## 一、核心数学模型与数据说明
+## 一、工作原则
 
-本技能将分析工作流中的复杂数学计算（包括LTV6、成熟期校正以及转化成本转换）完全下放到数据提取脚本 `fetch_asa_bigquery_report.py` 中。智能体**严禁**自行编写或执行临时Python脚本进行数据清洗和数学计算，只需直接读取并分析生成的CSV报表。
+使用技能内置脚本获取关键词表现CSV。脚本输出是默认数据底座；智能体可以做必要的汇总、排序、抽样核对和轻量计算，但不要绕开技能脚本另写一套数据抓取流程。
 
-### 1. 核心计算指标说明
-脚本在提取并聚合数据时已完成了以下计算：
-- **无偏差续订率（RRC1, RRC2, RRC3）**：通过队列成熟度截止日（Cut-off Date）过滤，仅累加已到达续订点（试用期+账单周期天数）的成熟用户，排除由于“近期获取用户尚未到达续订点”导致的生存偏差（Survival Bias）。
-- **订阅LTV6（6个月生命周期价值）**：基于输入的首期毛价、常规续费毛价、试用天数、计费天数和苹果税率（默认15%），根据180天内最大计费期数（Weekly约为25期，Monthly约为5期，Yearly为0期），乘以对应的无偏差续订率（缺失或未成熟期使用行业默认衰减曲线估算）进行累加计算。
-- **预估6个月净收入（expected_revenue_6m）**：$\text{LTV6\_per\_purchase\_user} \times \text{purchase\_users}$。
-- **预估6个月回本率（payback_ratio_6m）**：$\text{expected\_revenue\_6m} / \text{spend}$。
-- **目标CPA（Target_CPA）**：根据每次购买签约成本目标（Target CPS）和安装到购买率自动转换所得：$\text{Target\_CPA} = \text{Target\_Purchase\_CPS} \times \frac{\text{purchase\_users}}{\text{installs}}$。
+默认回本周期为180天。若用户指定其他回本周期，执行脚本时传入`--payback-days`，报告中的LTV、预估收入、回本率和Target_CPI都应按该周期解释。
 
-### 2. 智能体职责定义
-- **最终决策与定性诊断**：智能体是整个优化流程的决策大脑。大模型负责读取并分析客观数据、进行定性诊断与异常指标归因（例如通过 `ASR15m` 评估订阅质量），并在研判数据置信度后输出最终的优化动作决策（如 Scale、Lower Bid、Pause、Observe 等）。
-- **脚本定位**：Python 脚本仅作为客观的数据计算工具，提供无偏差的数学指标（如 LTV6、回本率、目标 CPA 等），脚本本身不参与任何规则判断与决策生成。
-- **杜绝运行时脚本计算**：智能体应直接读取汇总 CSV 和分切片 CSV（如 `ruc1`, `ruc2`, `ruc3`），**绝对禁止**尝试通过编写本地 Python 脚本对数据进行二次加工。
+关键字段：
+- `payback_ratio`：目标回本周期内的预估净收入/spend。
+- `LTV_per_purchase_user`：目标回本周期内单个购买用户的预估净收入。
+- `Target_CPI`：由关键词自己的LTV和安装到购买率换算得到，物理上对应苹果ASA后台的CPA目标，不是统一人工目标。
+- `RUC1_mature_purchases`至`RUC5_mature_purchases`：对应续订周期已成熟的购买分母，用来判断续订率是否可用。
 
 ---
 
@@ -40,8 +35,8 @@ updated: 2026-05-22
 ### 1. 精确匹配（Exact Match）
 - **特点**：流量精准，用户意图强。
 - **优化路径**：
-  - **Payback6 >= 1.0**：调高出价（Raise Bid），获取更多曝光。
-  - **Payback6 < 1.0**：若数据充足且CPS过高，通过降低出价（Lower Bid）使实际CPA逼近 `Target_CPA`；若CPS依然失控或续订率极低，则暂停（Pause）。
+  - `payback_ratio >= 1.0`：调高出价（Raise Bid），获取更多曝光。
+  - `payback_ratio < 1.0`：若数据充足且CPS过高，通过降低出价（Lower Bid）使实际CPI逼近 `Target_CPI`；若CPS依然失控或续订率极低，则暂停（Pause）。
 
 ### 2. 广泛匹配/搜索匹配（Broad Match / Search Match）
 - **特点**：用于拓词与流量探测，杂音大。
@@ -54,56 +49,56 @@ updated: 2026-05-22
 ## 三、分析决策SOP
 
 ### 1. 数据准备与脚本执行
-确认参数：`bundle_id`、输出CSV路径、`start_date`、目标本位币（默认CNY）、试用期天数（`--trial-days`，默认7）、账单周期天数（`--billing-period-days`，默认30）、首期毛收入（`--first-purchase-gross`）、常规续费毛价（`--regular-period-gross`）、苹果税率（`--apple-fee`，默认0.15）、目标CPS（`--target-cps`）。
+确认参数：`bundle_id`、输出CSV路径、`start_date`、目标本位币（默认CNY）、试用期天数（`--trial-days`，默认7）、账单周期天数（`--billing-period-days`，默认30）、首期毛收入（`--first-purchase-gross`）、常规续费毛价（`--regular-period-gross`）、苹果税率（`--apple-fee`，默认0.15）、目标回本周期（`--payback-days`，默认180）。
 
-**凭证处理规范(重要)**：
-- 脚本执行需要GCP BigQuery访问凭证。优先依赖环境变量`ASA_BIGQUERY_SERVICE_ACCOUNT_JSON`或`GOOGLE_APPLICATION_CREDENTIALS`。由于Ferryman后端已支持在macOS GUI启动时动态继承当前用户的终端shell环境变量，因此大多数情况下无需显式传递凭证文件参数。
-- 如果环境变量未设置，或者需要覆盖默认凭证，则可以使用 `--credentials-file` 参数指定凭证路径。
-- **用户当前的正确本地凭证路径为**：`/Users/wangweiwei/Library/Mobile Documents/com~apple~CloudDocs/chatgpt/公司/晦朔移动/ASA/asa-analysis-service-account.json`
-- **严禁**虚构、猜测或盲目传入不存在的默认凭证路径。
+使用技能内置脚本 `scripts/fetch_asa_bigquery_report.py`，路径相对本技能目录解析。调用时传入以下参数：`--bundle-id`、`--output`、`--start-date`、`--target-currency`、`--trial-days`、`--billing-period-days`、`--first-purchase-gross`、`--regular-period-gross`、`--payback-days`。
 
-执行数据提取命令示例：
-```bash
-conda run -n ferryman python skills/asa-performance-analysis/scripts/fetch_asa_bigquery_report.py \
-  --bundle-id app.blynkai.todo \
-  --output reports/2026-05-22/asa-performance-app-blynkai-todo-2026-04-22.csv \
-  --start-date 2026-04-22 \
-  --target-currency CNY \
-  --trial-days 7 \
-  --billing-period-days 30 \
-  --credentials-file "/Users/wangweiwei/Library/Mobile Documents/com~apple~CloudDocs/chatgpt/公司/晦朔移动/ASA/asa-analysis-service-account.json"
-```
-
-该命令执行后，除了在指定的`--output`路径下生成整体关键词聚合汇总表（例如`report.csv`）外，还会自动在其同级目录下生成以下四个拆分CSV文件（对于未成熟的数据切片，对应的聚合表可能为空，仅包含表头），以便智能体直接扫描和深入分析：
+脚本执行后，除了在指定的`--output`路径下生成整体关键词聚合汇总表（例如`report.csv`）外，还会自动在其同级目录下生成拆分CSV文件（对于未成熟的数据切片，对应的聚合表可能为空，仅包含表头），以便智能体直接扫描和深入分析：
 - `report_daily.csv`：按天维度的原始明细数据，包含完整字段，用于趋势与波动分析。
 - `report_ruc1.csv`：对`report_date <= ruc1_cutoff`的成熟期数据进行切片后的关键词聚合表。列名为常规的`purchases`、`renewals`和`RRC`。
 - `report_ruc2.csv`：对`report_date <= ruc2_cutoff`的成熟期数据进行切片后的关键词聚合表。列名为常规的`purchases`、`renewals`和`RRC`。
 - `report_ruc3.csv`：对`report_date <= ruc3_cutoff`的成熟期数据进行切片后的关键词聚合表。列名为常规的`purchases`、`renewals`和`RRC`。
+- `report_ruc4.csv`：对`report_date <= ruc4_cutoff`的成熟期数据进行切片后的关键词聚合表。
+- `report_ruc5.csv`：对`report_date <= ruc5_cutoff`的成熟期数据进行切片后的关键词聚合表。
 
 ### 2. 置信度与数据充要性研判
 对关键词的数据量进行分级：
-- **转化信号（Conversion Signal）**：
-  - `installs < 10` 且 `clicks < 30`：无置信度，直接判定为 **Observe**。
-  - `installs >= 10`：弱置信度；`installs >= 20`：中等置信度；`installs >= 50`：高置信度。
+- **样本量（Sample Size）**：
+  - `installs < 20`：样本很小，通常只观察，除非消耗异常高。
+  - `20 <= installs < 50`：弱方向性信号，可做小幅降价或继续观察。
+  - `50 <= installs < 100`：方向性信号，可以做明确优化动作。
+  - `installs >= 100`：稳定信号，可以做强动作。
 - **购买信号（Purchase Signal）**：
-  - `purchase_users = 0` 且 `spend` 已达到目标CPS的1.5倍以上：可判定为 **Pause**。
+  - `purchase_users = 0` 且 `installs < 50`：不要轻易暂停，优先观察或小幅降价。
+  - `purchase_users = 0` 且 `installs >= 50`：若消耗明显、CPI/CPC不低，可降价或暂停。
+  - `purchase_users = 0` 且 `installs >= 100`：通常可暂停，除非该词有战略价值。
+  - `purchase_users >= 1`：有弱正向信号。
   - `purchase_users >= 3`：有方向性购买信号；`purchase_users >= 10`：强购买信号。
 - **续订信号（Renewal Signal）**：
-  - `RUC1_mature_purchases >= 5`：弱置信度；`RUC1_mature_purchases >= 10`：中等置信度；`RUC1_mature_purchases >= 20`：高置信度。
-  - **警惕**：若 `RUC1_mature_purchases = 0`，代表该关键词的首期用户还未到续费点，即便 `RUC1 = 0` 也不能代表流失，必须判定为 **Observe**。
+  - `RUC1_mature_purchases < 3`：不能用RRC1做强判断。
+  - `RUC1_mature_purchases >= 3`：弱方向性续订信号。
+  - `RUC1_mature_purchases >= 5`：可用于辅助判断。
+  - `RUC1_mature_purchases >= 10`：续订判断较稳定。
+  - **警惕**：若 `RUC1_mature_purchases = 0`，不能用RRC1判断续订质量；此时主要看购买转化、消耗和样本量。
 
 ### 3. 基准（Benchmark）制定
-筛选出 `payback_ratio_6m >= 1.0` 且具有中等及以上置信度（`purchase_users >= 3` 且 `RUC1_mature_purchases >= 5`）的优质关键词集合，计算其平均 `CVR`、`RRC1` 和 `CPC` 作为全账户的“健康基准值”，用以指导弱表现关键词的归因诊断。
+为了防止小样本/偶发性高回本词污染基准（如花费极低、仅产生1~2个安装和1个购买的词），健康基准词必须同时满足以下数据充要性门槛：
+1. `spend >= 100`（按账户本位币计，如100 CNY）
+2. `installs >= 50`
+3. `RUC1_mature_purchases >= 5`
+4. `payback_ratio >= 1.0`
+
+筛选出上述优质关键词集合后，计算其平均 `CVR`、`RRC1` 和 `CPC` 作为全账户的“健康基准值”，用以指导弱表现关键词的归因诊断。若没有可靠健康词，不要硬凑基准，直接说明“暂无可靠健康基准”。
 
 ### 4. 优化动作决策矩阵
 
 | 状态分类 | 判定条件 | 核心推荐动作 |
 | :--- | :--- | :--- |
-| **Scale (拓量)** | `payback_ratio_6m >= 1.2` 且数据置信度中等及以上 | 提高出价（每次+10%~20%），确保预算充足 |
-| **Keep (维持)** | `0.9 <= payback_ratio_6m < 1.2` 且表现稳定 | 维持当前出价与预算 |
-| **Lower Bid (降价)** | `payback_ratio_6m < 0.9` 且有真实购买转化，降幅缺口（`required_CPS_reduction`） $\le 50\%$ | 降低出价，幅度可参考：$\text{New\_Bid} = \text{Current\_Bid} \times \frac{\text{Target\_CPA}}{\text{Actual\_CPA}}$ |
-| **Pause (暂停)** | `payback_ratio_6m < 0.9` 且有成熟购买但 $\text{RRC1}$ 极低，或降幅缺口 $> 50\%$；或无购买转化且消耗已超过目标CPS的1.5倍 | 暂停关键词投放 |
-| **Observe (观察)** | 消耗低，数据未达置信度门槛，或 $\text{RUC1\_mature\_purchases} = 0$ | 保持观察，不做实质动作，等待数据累积 |
+| **Scale (拓量)** | `payback_ratio >= 1.2` 且数据置信度中等及以上 | 提高出价（每次+10%~20%），确保预算充足 |
+| **Keep (维持)** | `0.9 <= payback_ratio < 1.2` 且表现稳定 | 维持当前出价与预算 |
+| **Lower Bid (降价)** | `payback_ratio < 0.9` 且有真实购买转化，降幅缺口（`required_CPS_reduction`） $\le 50\%$ | 降低出价，幅度可参考：$\text{New\_Bid} = \text{Current\_Bid} \times \frac{\text{Target\_CPI}}{\text{CPI}}$（注：若 `installs = 0`，CPI 为空，此时直接执行固定降幅如降价 20%~30%，不使用该公式） |
+| **Pause (暂停)** | `payback_ratio < 0.9` 且有成熟购买但 $\text{RRC1}$ 极低，或降幅缺口 $> 50\%$；或无购买转化且样本稳定；或 `installs = 0` 且消耗已超出测试预算上限 | 暂停关键词投放 |
+| **Observe (观察)** | 消耗低，数据未达置信度门槛，或 $\text{RUC1\_mature\_purchases} = 0$，或 `payback_ratio` 很高但安装/购买样本仍很小 | 保持观察，不做实质动作，等待数据累积；高回本小样本词可标记为“小预算验证”，但不要写成“接近回本线” |
 | **Review Only (仅复盘)** | 关键词状态为 `PAUSED` | 仅做历史复盘与成效总结，不建议重新开启 |
 
 ---
@@ -113,11 +108,11 @@ conda run -n ferryman python skills/asa-performance-analysis/scripts/fetch_asa_b
 ### 1. CSV格式规范（Action CSV）
 分析产生的决策应生成对应的 CSV 文件，表头契约如下：
 ```csv
-keyword,action,reason,payback_ratio_6m,required_CPS_reduction,confidence,keyword_status,spend,daily_spend,purchase_users,RUC1,RRC1,RRC2,RRC3,CPS,CPR1,LTV6_per_purchase_user,expected_revenue_6m,breakeven_CPS,ad_group,match_type,days,clicks,installs,RUC2,RUC3,CVR,priority,ad_group_id
+keyword,ad_group,match_type,keyword_status,action,priority,confidence,spend,daily_spend,CPS,Target_CPI,payback_ratio,required_CPS_reduction,purchase_users,RUC1,RUC2,RUC3,RUC4,RUC5,RRC1,RRC2,RRC3,RRC4,RRC5,RUC1_mature_purchases,RUC2_mature_purchases,RUC3_mature_purchases,RUC4_mature_purchases,RUC5_mature_purchases,LTV_per_purchase_user,expected_revenue,days,clicks,installs,CVR,CPR1,reason,ad_group_id
 ```
 
 ### 2. 诊断报告模板（Markdown Report）
-分析报告需使用中文输出，中英文边界不加空格。
+报告语言跟随用户输入语言；中文报告遵守中文文案规范。
 
 ```markdown
 # ASA关键词表现与队列LTV分析报告
@@ -128,43 +123,58 @@ keyword,action,reason,payback_ratio_6m,required_CPS_reduction,confidence,keyword
 - **订阅模式**：[免费试用 (如7天试用+30天续订) / 无免费试用直接付费]
 - **产品毛价**：{monthly_gross_price} {currency} | **首期毛收入**：{first_purchase_gross_revenue} {currency}
 - **苹果渠道税率**：{apple_fee}%
-- **回本周期目标**：6个月 (Payback6)
+- **回本目标**：{payback_days}天内预估净收入 >= spend
 
 ## 二、账户整体表现 (Account Summary)
 - **总消耗**：{total_spend} {currency} | **每日均消耗**：{daily_spend} {currency}
 - **总购买人数**：{total_purchase_users} | **总首期续订数**：{total_ruc1}
 - **平均每次购买成本 (CPS)**：{account_cps} {currency} | **平均首期续订成本 (CPR1)**：{account_cpr1} {currency}
 - **无偏差首期续订率 (RRC1)**：{account_rrc1}% (成熟分母：{account_ruc1_mature_purchases})
-- **预估6个月净收入**：{estimated_revenue_6m} {currency}
-- **预估6个月回本率 (Payback Ratio)**：{account_payback_ratio}%
+- **预估净收入**：{estimated_revenue} {currency}
+- **目标周期回本率 (Payback Ratio)**：{account_payback_ratio}%
 
 ## 三、健康账户基准 (Healthy Benchmark)
 - **优质基准词数**：{benchmark_count} 个
 - **基准线 CVR**：{benchmark_cvr}% | **基准线 RRC1**：{benchmark_rrc1}%
-- **基准回本率 (Payback6)**：{benchmark_payback_ratio}%
+- **基准回本率**：{benchmark_payback_ratio}%
 
-| 关键词 (Keyword) | 匹配类型 | 消耗 (Spend) | 购买成本 (CPS) | 购买人数 | RRC1 | 6月回本率 | 诊断结论 |
+| 关键词 (Keyword) | 匹配类型 | 消耗 (Spend) | 购买成本 (CPS) | 购买人数 | RRC1 | 回本率 | 诊断结论 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | example_exact | EXACT | 120.00 | 15.00 | 8 | 50.00% | 125.0% | 表现健康，回本符合预期 |
 
 ## 四、核心优化决策 (Key Actions)
-*(注：以下仅列出高影响力/高消耗的代表性词，完整列表见决策CSV：[action_csv_basename](file:///path/to/csv))*
+每个动作分组优先使用表格展示，单表最多展示20个关键词；完整明细见决策CSV：[action_csv_basename](file:///path/to/csv)。
 
 ### 1. 拓量 (Scale)
-- **{keyword}** ({match_type} | 消耗: {spend} | 回本率: {payback_ratio}): [决策逻辑，如：回本表现极佳，CVR高于基准，建议提价15%夺取曝光。]
+
+| 关键词 | 广告组 | 状态 | spend | installs | purchase | CPS | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {CPS} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
 
 ### 2. 降低出价 (Lower Bid)
-- **{keyword}** ({match_type} | 消耗: {spend} | CPS: {cps}): [决策逻辑，如：匹配类型为EXACT，有稳定付费转化，但CPS超标30%。目前Install-to-Purchase为10%，建议控制台目标CPA由原出价调低至{target_cpa} {currency}。]
+
+| 关键词 | 广告组 | 状态 | spend | installs | purchase | CPS | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {CPS} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
 
 ### 3. 暂停投放 (Pause)
-- **{keyword}** ({match_type} | 消耗: {spend} | 转化数: {purchase_users}): [决策逻辑，如：EXACT词，消耗已达{spend}且无任何购买用户；或RRC1为0%已完全成熟，判断无法回本，建议立即暂停。]
+
+| 关键词 | 广告组 | 状态 | spend | installs | purchase | CPS | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {CPS} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
 
 ### 4. 否词屏蔽 (Negative Keywords)
-- **{keyword}** ({match_type} | 消耗: {spend}): [决策逻辑，如：广泛匹配/搜索匹配流量混杂。搜索词报告显示存在大量[无效搜索词]，导致整体CPS偏高，建议在后台将[无效搜索词]添加为精确否定词，不调整该广泛匹配词的出价。]
+
+| 关键词 | 广告组 | 状态 | spend | installs | purchase | CPS | Target_CPI | 搜索词/问题 | 建议 |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | :--- |
+| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {CPS} | {Target_CPI} | {query_issue} | {reason} |
 
 ### 5. 保持观察 (Observe)
-- **{keyword}** ({match_type} | 消耗: {spend} | 成熟分母: {mature_purchases}): [决策逻辑，如：用户均未达续订期，RRC1尚未成熟，首期流失率具有欺骗性，建议继续观察。]
+
+| 关键词 | 广告组 | 状态 | spend | installs | purchase | CPS | Target_CPI | 成熟分母 | 回本率 | 建议 |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {CPS} | {Target_CPI} | {mature_purchases} | {payback_ratio} | {reason} |
 
 ## 五、风险与不确定性提示 (Risks & Limitations)
-1. **数据不成熟**：近期（近38天内）获取的用户尚未经过续订点，本报告已通过分天归因排除此偏差，但整体数据量仍偏少。
-2. **长尾预测依赖**：RUC4及以后的留存基于70%-90%的行业衰减率预测，若实际产品长期留存偏离该曲线，LTV6将存在波动。
+1. **数据不成熟**：未达到续订观察窗口的用户不能用于判断对应RRC，窗口由试用期和账单周期决定。
+2. **长尾预测依赖**：更长期的留存依赖衰减曲线预测，若实际产品长期留存偏离该曲线，LTV将存在波动。

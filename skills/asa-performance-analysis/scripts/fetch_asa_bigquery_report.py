@@ -21,9 +21,6 @@ from typing import Any
 import yfinance as yf
 
 
-PROJECT_ID = "singular-silo-438306-v6"
-ATTRIBUTION_TABLE = "singular-silo-438306-v6.attribution_log_dataset._AllLogs"
-IAP_TABLE = "singular-silo-438306-v6.iap_log_dataset._AllLogs"
 SERVICE_ACCOUNT_ENV_VARS = ("ASA_BIGQUERY_SERVICE_ACCOUNT_JSON", "GOOGLE_APPLICATION_CREDENTIALS")
 
 QUERY = """
@@ -39,7 +36,7 @@ WITH
       AND JSON_VALUE(json_payload.message.payload.params.pkg) = @bundle_id
       AND JSON_VALUE(json_payload.message.payload.params.channel) = "ASA"
       AND JSON_VALUE(json_payload.message.payload.params.keyword_id) IS NOT NULL
-      AND DATE(timestamp, "UTC") >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+      AND timestamp >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
   ),
 
   purchases AS (
@@ -55,7 +52,7 @@ WITH
       AND JSON_VALUE(json_payload.message.payload.events[0].name) = "server_purchase"
       AND JSON_VALUE(json_payload.message.payload.events[0].params.bundle_id) = @bundle_id
       AND JSON_VALUE(json_payload.message.payload.events[0].params.environment) = "production"
-      AND DATE(timestamp, "UTC") >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+      AND timestamp >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
   ),
 
   renew_cycles AS (
@@ -71,7 +68,7 @@ WITH
       AND JSON_VALUE(json_payload.message.payload.events[0].name) = "server_renew"
       AND JSON_VALUE(json_payload.message.payload.events[0].params.bundle_id) = @bundle_id
       AND JSON_VALUE(json_payload.message.payload.events[0].params.environment) = "production"
-      AND DATE(timestamp, "UTC") >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+      AND timestamp >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
   ),
 
   unsubscribes_15m AS (
@@ -85,7 +82,7 @@ WITH
       AND JSON_VALUE(json_payload.message.payload.events[0].params.bundle_id) = @bundle_id
       AND JSON_VALUE(json_payload.message.payload.events[0].params.environment) = "production"
       AND CAST(JSON_VALUE(json_payload.message.payload.events[0].params.unsubscribe_delay) AS INT64) <= 15
-      AND DATE(timestamp, "UTC") >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+      AND timestamp >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
   ),
 
   unsubscribes AS (
@@ -98,7 +95,7 @@ WITH
       AND JSON_VALUE(json_payload.message.payload.events[0].name) = "server_unsubscribe"
       AND JSON_VALUE(json_payload.message.payload.events[0].params.bundle_id) = @bundle_id
       AND JSON_VALUE(json_payload.message.payload.events[0].params.environment) = "production"
-      AND DATE(timestamp, "UTC") >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+      AND timestamp >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
   ),
 
   keyword_attributions AS (
@@ -112,7 +109,9 @@ WITH
       COUNT(DISTINCT p.token) - COUNT(DISTINCT u.token) AS RU,
       COUNT(DISTINCT CASE WHEN r.renewal_cycle = 1 THEN r.token END) AS RUC1,
       COUNT(DISTINCT CASE WHEN r.renewal_cycle = 2 THEN r.token END) AS RUC2,
-      COUNT(DISTINCT CASE WHEN r.renewal_cycle = 3 THEN r.token END) AS RUC3
+      COUNT(DISTINCT CASE WHEN r.renewal_cycle = 3 THEN r.token END) AS RUC3,
+      COUNT(DISTINCT CASE WHEN r.renewal_cycle = 4 THEN r.token END) AS RUC4,
+      COUNT(DISTINCT CASE WHEN r.renewal_cycle = 5 THEN r.token END) AS RUC5
     FROM first_opens AS f
     LEFT JOIN purchases p ON f.token = p.token
     LEFT JOIN renew_cycles r ON f.token = r.token
@@ -160,7 +159,7 @@ WITH
       AND JSON_VALUE(json_payload.message.payload.params.granularity) = "HOURLY"
       AND JSON_VALUE(json_payload.message.payload.params.bundle_id) = @bundle_id
       AND JSON_VALUE(json_payload.message.payload.params.environment) = "production"
-      AND DATE(timestamp, "UTC") >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+      AND timestamp >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
     QUALIFY
       ROW_NUMBER() OVER (
         PARTITION BY
@@ -217,7 +216,9 @@ SELECT
   COALESCE(ka.RU, 0) AS RU,
   COALESCE(ka.RUC1, 0) AS RUC1,
   COALESCE(ka.RUC2, 0) AS RUC2,
-  COALESCE(ka.RUC3, 0) AS RUC3
+  COALESCE(ka.RUC3, 0) AS RUC3,
+  COALESCE(ka.RUC4, 0) AS RUC4,
+  COALESCE(ka.RUC5, 0) AS RUC5
 FROM keyword_costs kc
 LEFT JOIN keyword_attributions ka
   ON kc.report_date = ka.first_open_date
@@ -240,23 +241,26 @@ WHERE
   AND JSON_VALUE(json_payload.message.payload.params.granularity) = "HOURLY"
   AND JSON_VALUE(json_payload.message.payload.params.bundle_id) = @bundle_id
   AND JSON_VALUE(json_payload.message.payload.params.environment) = "production"
-  AND DATE(timestamp, "UTC")
-    >= COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY))
+  AND timestamp
+    >= TIMESTAMP(COALESCE(@start_date, DATE_SUB(CURRENT_DATE("UTC"), INTERVAL 60 DAY)), "UTC")
 """
 
 COLUMNS = [
     "ad_group_id", "ad_group", "match_type", "keyword", "keyword_status", "days",
-    "purchase_users", "RUC1", "RUC2", "RUC3", "spend", "daily_spend", "CPS", "CPR1",
-    "RRC1", "RRC2", "RRC3", "impressions", "clicks", "installs", "CTR", "CIR", "CVR", "CPC", "CPI",
+    "purchase_users", "RUC1", "RUC2", "RUC3", "RUC4", "RUC5", "spend", "daily_spend", "CPS", "CPR1",
+    "RRC1", "RRC2", "RRC3", "RRC4", "RRC5", "impressions", "clicks", "installs", "CTR", "CIR", "CVR", "CPC", "CPI",
     "purchase_income", "active_users", "RU15m", "RU", "ASR15m", "ASR",
     "RUC1_mature_purchases", "RUC2_mature_purchases", "RUC3_mature_purchases",
-    "LTV6_per_purchase_user", "expected_revenue_6m", "payback_ratio_6m", "Target_CPA", "required_CPS_reduction"
+    "RUC4_mature_purchases", "RUC5_mature_purchases",
+    "payback_days", "LTV_per_purchase_user", "expected_revenue", "payback_ratio", "Target_CPI",
+    "required_CPS_reduction"
 ]
 
 DAILY_COLUMNS = [
     "report_date", "campaign_id", "ad_group_id", "ad_group", "keyword", "keyword_id",
     "keyword_status", "match_type", "spend", "impressions", "clicks", "installs",
-    "purchase_income", "active_users", "purchase_users", "RU15m", "RU", "RUC1", "RUC2", "RUC3"
+    "purchase_income", "active_users", "purchase_users", "RU15m", "RU", "RUC1", "RUC2", "RUC3",
+    "RUC4", "RUC5"
 ]
 
 COHORT_COLUMNS = [
@@ -304,7 +308,7 @@ def client(key_file: Path) -> Any:
     except ModuleNotFoundError as exc:
         raise AsaPerformanceError("缺少依赖google-cloud-bigquery") from exc
     creds = service_account.Credentials.from_service_account_file(str(key_file))
-    return bigquery.Client(project=creds.project_id or PROJECT_ID, credentials=creds)
+    return bigquery.Client(project=creds.project_id, credentials=creds)
 
 
 def query_config(bundle_id: str, start_date: date | None, args: argparse.Namespace) -> Any:
@@ -352,7 +356,7 @@ def fx_rate(currency: str, target: str) -> tuple[float, str]:
     return rate, f"yfinance:{symbol}"
 
 
-def resolve_rates(client_: Any, args: argparse.Namespace, config: Any) -> tuple[dict[str, float], dict[str, str]]:
+def resolve_rates(client_: Any, args: argparse.Namespace, config: Any, attribution_table: str) -> tuple[dict[str, float], dict[str, str]]:
     target = args.target_currency.upper()
     rates = {target: 1.0}
     sources = {target: "identity"}
@@ -363,7 +367,7 @@ def resolve_rates(client_: Any, args: argparse.Namespace, config: Any) -> tuple[
         rates["CNY"] = 1.0
         sources["CNY"] = "identity"
 
-    rows = run(client_, CURRENCY_QUERY.format(attribution_table=ATTRIBUTION_TABLE), config, args.job_timeout_seconds)
+    rows = run(client_, CURRENCY_QUERY.format(attribution_table=attribution_table), config, args.job_timeout_seconds)
     for row in rows:
         currency = (row.get("currency") or target).upper()
         if currency == "RMB":
@@ -384,19 +388,20 @@ def make_currency_case(rates: dict[str, float], currency_col: str, value_col: st
     return "\n".join(lines)
 
 
-def calculate_ltv6(
+def calculate_ltv(
     first_purchase_gross: float,
     regular_period_gross: float,
     trial_days: int,
     billing_period_days: int,
+    payback_days: int,
     apple_fee: float,
     rrc1: float | None,
     rrc2: float | None,
-    rrc3: float | None
+    rrc3: float | None,
+    rrc4: float | None = None,
+    rrc5: float | None = None
 ) -> float:
-    """Calculate the 6-month (180-day) Lifetime Value (LTV6) per purchase user
-    for a generalized billing period and trial days.
-    """
+    """Calculate lifetime value per purchase user within the target payback window."""
     net_first = first_purchase_gross * (1.0 - apple_fee)
     net_regular = regular_period_gross * (1.0 - apple_fee)
 
@@ -419,32 +424,60 @@ def calculate_ltv6(
     else:
         c3 = r_curve[1] * 0.85
     r_curve.append(c3)
+
+    # Cycle 4 (index 3): fourth payment
+    if rrc4 is not None:
+        c4 = rrc4
+    else:
+        c4 = r_curve[2] * 0.90
+    r_curve.append(c4)
+
+    # Cycle 5 (index 4): fifth payment
+    if rrc5 is not None:
+        c5 = rrc5
+    else:
+        c5 = r_curve[3] * 0.92
+    r_curve.append(c5)
     
-    # Extrapolate higher cycles (4 to 30) using marginal renewal rates
-    marginal_rates = [0.90, 0.92, 0.95]
-    for i in range(3, 30):
-        if i - 3 < len(marginal_rates):
-            m = marginal_rates[i - 3]
+    # Extrapolate higher cycles (6 to 52) using marginal renewal rates
+    for i in range(5, 52):
+        if i == 5:
+            m = 0.95
         else:
             m = 0.96
         r_curve.append(r_curve[-1] * m)
 
     if trial_days > 0:
-        if trial_days >= 180:
+        if trial_days >= payback_days:
             return 0.0
         ltv = net_first * r_curve[0]
-        k_max = math.floor((180 - trial_days) / billing_period_days)
+        k_max = math.floor((payback_days - trial_days) / billing_period_days)
         for k in range(1, k_max + 1):
             if k < len(r_curve):
                 ltv += net_regular * r_curve[k]
         return round(ltv, 2)
     else:
         ltv = net_first
-        k_max = math.floor(180 / billing_period_days)
+        k_max = math.floor(payback_days / billing_period_days)
         for k in range(0, k_max):
             if k < len(r_curve):
                 ltv += net_regular * r_curve[k]
         return round(ltv, 2)
+
+
+def renewal_cutoff_date(
+    today_dt: date,
+    trial_days: int,
+    billing_period_days: int,
+    renewal_cycle: int
+) -> date:
+    if renewal_cycle < 1:
+        raise AsaPerformanceError("renewal_cycle必须大于等于1")
+    if trial_days > 0:
+        mature_days = trial_days + (renewal_cycle - 1) * billing_period_days + 1
+    else:
+        mature_days = renewal_cycle * billing_period_days + 1
+    return today_dt - timedelta(days=mature_days)
 
 
 def aggregate_daily_metrics(
@@ -455,12 +488,13 @@ def aggregate_daily_metrics(
     first_purchase_gross: float = 0.0,
     regular_period_gross: float = 0.0,
     apple_fee: float = 0.15,
-    target_cps: float = 0.0
+    payback_days: int = 180
 ) -> list[dict[str, Any]]:
-    # For a given cohort, a renewal cycle i matures at: trial_days + i * billing_period_days
-    ruc1_cutoff = today_dt - timedelta(days=trial_days + billing_period_days + 1)
-    ruc2_cutoff = today_dt - timedelta(days=trial_days + 2 * billing_period_days + 1)
-    ruc3_cutoff = today_dt - timedelta(days=trial_days + 3 * billing_period_days + 1)
+    ruc1_cutoff = renewal_cutoff_date(today_dt, trial_days, billing_period_days, 1)
+    ruc2_cutoff = renewal_cutoff_date(today_dt, trial_days, billing_period_days, 2)
+    ruc3_cutoff = renewal_cutoff_date(today_dt, trial_days, billing_period_days, 3)
+    ruc4_cutoff = renewal_cutoff_date(today_dt, trial_days, billing_period_days, 4)
+    ruc5_cutoff = renewal_cutoff_date(today_dt, trial_days, billing_period_days, 5)
 
     def to_date(val: Any) -> date:
         if isinstance(val, date):
@@ -473,6 +507,8 @@ def aggregate_daily_metrics(
     ruc1_rows = [r for r in rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc1_cutoff]
     ruc2_rows = [r for r in rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc2_cutoff]
     ruc3_rows = [r for r in rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc3_cutoff]
+    ruc4_rows = [r for r in rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc4_cutoff]
+    ruc5_rows = [r for r in rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc5_cutoff]
 
     # 辅助函数：将行列表按关键词分组
     def group_by_keyword(subset: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
@@ -487,6 +523,8 @@ def aggregate_daily_metrics(
     ruc1_grouped = group_by_keyword(ruc1_rows)
     ruc2_grouped = group_by_keyword(ruc2_rows)
     ruc3_grouped = group_by_keyword(ruc3_rows)
+    ruc4_grouped = group_by_keyword(ruc4_rows)
+    ruc5_grouped = group_by_keyword(ruc5_rows)
 
     out_rows = []
     for key, all_rows in overall_grouped.items():
@@ -506,6 +544,8 @@ def aggregate_daily_metrics(
         RUC1 = sum(int(row.get("RUC1") or 0) for row in all_rows)
         RUC2 = sum(int(row.get("RUC2") or 0) for row in all_rows)
         RUC3 = sum(int(row.get("RUC3") or 0) for row in all_rows)
+        RUC4 = sum(int(row.get("RUC4") or 0) for row in all_rows)
+        RUC5 = sum(int(row.get("RUC5") or 0) for row in all_rows)
 
         report_dates = set()
         for row in all_rows:
@@ -530,6 +570,16 @@ def aggregate_daily_metrics(
         ruc3_purchases = sum(int(r.get("purchase_users") or 0) for r in ruc3_sub)
         ruc3_renewals = sum(int(r.get("RUC3") or 0) for r in ruc3_sub)
 
+        # 从RUC4子集分组中提取成熟指标
+        ruc4_sub = ruc4_grouped.get(key, [])
+        ruc4_purchases = sum(int(r.get("purchase_users") or 0) for r in ruc4_sub)
+        ruc4_renewals = sum(int(r.get("RUC4") or 0) for r in ruc4_sub)
+
+        # 从RUC5子集分组中提取成熟指标
+        ruc5_sub = ruc5_grouped.get(key, [])
+        ruc5_purchases = sum(int(r.get("purchase_users") or 0) for r in ruc5_sub)
+        ruc5_renewals = sum(int(r.get("RUC5") or 0) for r in ruc5_sub)
+
         def safe_div(n: float, d: float, round_digits: int = 2) -> float | None:
             if not d:
                 return None
@@ -538,28 +588,33 @@ def aggregate_daily_metrics(
         rrc1 = safe_div(ruc1_renewals, ruc1_purchases, 4)
         rrc2 = safe_div(ruc2_renewals, ruc2_purchases, 4)
         rrc3 = safe_div(ruc3_renewals, ruc3_purchases, 4)
+        rrc4 = safe_div(ruc4_renewals, ruc4_purchases, 4)
+        rrc5 = safe_div(ruc5_renewals, ruc5_purchases, 4)
 
         if purchase_users > 0:
-            ltv6 = calculate_ltv6(
+            ltv = calculate_ltv(
                 first_purchase_gross=first_purchase_gross,
                 regular_period_gross=regular_period_gross,
                 trial_days=trial_days,
                 billing_period_days=billing_period_days,
+                payback_days=payback_days,
                 apple_fee=apple_fee,
                 rrc1=rrc1,
                 rrc2=rrc2,
-                rrc3=rrc3
+                rrc3=rrc3,
+                rrc4=rrc4,
+                rrc5=rrc5
             )
-            expected_rev = round(ltv6 * purchase_users, 2)
+            expected_rev = round(ltv * purchase_users, 2)
             payback_ratio = round(expected_rev / spend, 4) if spend > 0 else 0.0
             required_reduction = round(max(0.0, 1.0 - payback_ratio), 4)
         else:
-            ltv6 = 0.0
+            ltv = 0.0
             expected_rev = 0.0
             payback_ratio = 0.0
             required_reduction = 0.0
 
-        target_cpa = safe_div(target_cps * purchase_users, installs, 2) if target_cps > 0 else None
+        target_cpi = safe_div(ltv * purchase_users, installs, 2) if purchase_users > 0 and installs > 0 and ltv > 0 else None
 
         g = {
             "ad_group_id": ad_group_id,
@@ -572,6 +627,8 @@ def aggregate_daily_metrics(
             "RUC1": RUC1,
             "RUC2": RUC2,
             "RUC3": RUC3,
+            "RUC4": RUC4,
+            "RUC5": RUC5,
             "spend": round(spend, 2),
             "daily_spend": safe_div(spend, days),
             "CPS": safe_div(spend, purchase_users),
@@ -579,6 +636,8 @@ def aggregate_daily_metrics(
             "RRC1": rrc1,
             "RRC2": rrc2,
             "RRC3": rrc3,
+            "RRC4": rrc4,
+            "RRC5": rrc5,
             "impressions": impressions,
             "clicks": clicks,
             "installs": installs,
@@ -596,10 +655,13 @@ def aggregate_daily_metrics(
             "RUC1_mature_purchases": ruc1_purchases,
             "RUC2_mature_purchases": ruc2_purchases,
             "RUC3_mature_purchases": ruc3_purchases,
-            "LTV6_per_purchase_user": ltv6,
-            "expected_revenue_6m": expected_rev,
-            "payback_ratio_6m": payback_ratio,
-            "Target_CPA": target_cpa,
+            "RUC4_mature_purchases": ruc4_purchases,
+            "RUC5_mature_purchases": ruc5_purchases,
+            "payback_days": payback_days,
+            "LTV_per_purchase_user": ltv,
+            "expected_revenue": expected_rev,
+            "payback_ratio": payback_ratio,
+            "Target_CPI": target_cpi,
             "required_CPS_reduction": required_reduction,
         }
         out_rows.append(g)
@@ -674,21 +736,29 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--first-purchase-gross", type=float, default=0.0)
     p.add_argument("--regular-period-gross", type=float, default=0.0)
     p.add_argument("--apple-fee", type=float, default=0.15)
-    p.add_argument("--target-cps", type=float, default=0.0)
+    p.add_argument("--payback-days", type=int, default=180)
+    p.add_argument("--attribution-table")
+    p.add_argument("--iap-table")
     return p
 
 
 def main() -> int:
     try:
         args = parser().parse_args()
+        if args.payback_days <= 0:
+            raise AsaPerformanceError("--payback-days必须大于0")
         start_date = parse_date_arg(args.start_date)
         bq = client(credentials_path(args.credentials_file))
+        
+        attribution_table = args.attribution_table or f"{bq.project}.attribution_log_dataset._AllLogs"
+        iap_table = args.iap_table or f"{bq.project}.iap_log_dataset._AllLogs"
+        
         config = query_config(args.bundle_id, start_date, args)
-        rates, rate_sources = resolve_rates(bq, args, config)
+        rates, rate_sources = resolve_rates(bq, args, config, attribution_table)
         
         sql = QUERY.format(
-            attribution_table=ATTRIBUTION_TABLE,
-            iap_table=IAP_TABLE,
+            attribution_table=attribution_table,
+            iap_table=iap_table,
             spend_case=make_currency_case(rates, "bc.currency", "bc.spend"),
             purchase_income_case=make_currency_case(rates, "p.currency", "p.income"),
         )
@@ -704,7 +774,7 @@ def main() -> int:
             first_purchase_gross=args.first_purchase_gross,
             regular_period_gross=args.regular_period_gross,
             apple_fee=args.apple_fee,
-            target_cps=args.target_cps
+            payback_days=args.payback_days
         )
         
         output_path = Path(args.output).expanduser()
@@ -719,12 +789,15 @@ def main() -> int:
         ruc1_path = parent / f"{stem}_ruc1{suffix}"
         ruc2_path = parent / f"{stem}_ruc2{suffix}"
         ruc3_path = parent / f"{stem}_ruc3{suffix}"
+        ruc4_path = parent / f"{stem}_ruc4{suffix}"
+        ruc5_path = parent / f"{stem}_ruc5{suffix}"
         
         # 准备切片条件与数据
-        # For a given cohort, a renewal cycle i matures at: trial_days + i * billing_period_days
-        ruc1_cutoff = today_dt - timedelta(days=args.trial_days + args.billing_period_days + 1)
-        ruc2_cutoff = today_dt - timedelta(days=args.trial_days + 2 * args.billing_period_days + 1)
-        ruc3_cutoff = today_dt - timedelta(days=args.trial_days + 3 * args.billing_period_days + 1)
+        ruc1_cutoff = renewal_cutoff_date(today_dt, args.trial_days, args.billing_period_days, 1)
+        ruc2_cutoff = renewal_cutoff_date(today_dt, args.trial_days, args.billing_period_days, 2)
+        ruc3_cutoff = renewal_cutoff_date(today_dt, args.trial_days, args.billing_period_days, 3)
+        ruc4_cutoff = renewal_cutoff_date(today_dt, args.trial_days, args.billing_period_days, 4)
+        ruc5_cutoff = renewal_cutoff_date(today_dt, args.trial_days, args.billing_period_days, 5)
         
         def to_date(val: Any) -> date:
             if isinstance(val, date):
@@ -736,11 +809,15 @@ def main() -> int:
         ruc1_rows = [r for r in daily_rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc1_cutoff]
         ruc2_rows = [r for r in daily_rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc2_cutoff]
         ruc3_rows = [r for r in daily_rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc3_cutoff]
+        ruc4_rows = [r for r in daily_rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc4_cutoff]
+        ruc5_rows = [r for r in daily_rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc5_cutoff]
         
         # 生成分表数据
         ruc1_report = aggregate_cohort_slice(ruc1_rows, "RUC1")
         ruc2_report = aggregate_cohort_slice(ruc2_rows, "RUC2")
         ruc3_report = aggregate_cohort_slice(ruc3_rows, "RUC3")
+        ruc4_report = aggregate_cohort_slice(ruc4_rows, "RUC4")
+        ruc5_report = aggregate_cohort_slice(ruc5_rows, "RUC5")
         
         # 按 report_date 降序，spend 降序排序日表数据
         sorted_daily_rows = sorted(
@@ -757,6 +834,8 @@ def main() -> int:
         write_generic_csv(ruc1_report, COHORT_COLUMNS, ruc1_path)
         write_generic_csv(ruc2_report, COHORT_COLUMNS, ruc2_path)
         write_generic_csv(ruc3_report, COHORT_COLUMNS, ruc3_path)
+        write_generic_csv(ruc4_report, COHORT_COLUMNS, ruc4_path)
+        write_generic_csv(ruc5_report, COHORT_COLUMNS, ruc5_path)
         
         print(json.dumps({
             "ok": True,
@@ -765,9 +844,12 @@ def main() -> int:
                 "daily": str(daily_path),
                 "ruc1": str(ruc1_path),
                 "ruc2": str(ruc2_path),
-                "ruc3": str(ruc3_path)
+                "ruc3": str(ruc3_path),
+                "ruc4": str(ruc4_path),
+                "ruc5": str(ruc5_path)
             },
-            "row_count": len(agg_rows)
+            "row_count": len(agg_rows),
+            "payback_days": args.payback_days
         }, ensure_ascii=False))
         return 0
     except Exception as exc:
@@ -776,4 +858,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
