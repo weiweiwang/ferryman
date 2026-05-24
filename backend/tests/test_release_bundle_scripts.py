@@ -7,6 +7,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STAGE_SCRIPT_PATH = REPO_ROOT / "frontend" / "scripts" / "stage_backend_bundle.py"
 VERIFY_SCRIPT_PATH = REPO_ROOT / "frontend" / "scripts" / "verify_release_bundle.py"
+RELEASE_SMOKE_PATH = REPO_ROOT / "backend" / "app" / "release_smoke.py"
 
 
 def load_module(module_name: str, path: Path):
@@ -126,3 +127,10 @@ def test_ensure_packaged_skills_clean_rejects_leaked_smoke_skill(tmp_path):
 
     with pytest.raises(RuntimeError, match="internal smoke skill"):
         verify_module.ensure_packaged_skills_clean(packaged_skills_dir)
+
+
+def test_release_smoke_allows_slow_packaged_websocket_startup():
+    smoke_text = RELEASE_SMOKE_PATH.read_text(encoding="utf-8")
+
+    assert "WEBSOCKET_SMOKE_STARTUP_TIMEOUT_SECONDS = 90" in smoke_text
+    assert "deadline = loop.time() + WEBSOCKET_SMOKE_STARTUP_TIMEOUT_SECONDS" in smoke_text

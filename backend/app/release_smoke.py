@@ -25,6 +25,8 @@ from app.core.toolkits.skill import SkillToolkit
 from app.core.toolkits.task import TaskToolkit
 from app.core.toolkits.web import WebToolkit
 
+WEBSOCKET_SMOKE_STARTUP_TIMEOUT_SECONDS = 90
+
 
 def _require(condition: bool, message: str) -> None:
     if not condition:
@@ -164,9 +166,9 @@ async def _run_websocket_smoke(report: dict[str, object]) -> None:
     )
     server_task = asyncio.create_task(server.serve())
     try:
-        for _ in range(600):
-            if server.started:
-                break
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + WEBSOCKET_SMOKE_STARTUP_TIMEOUT_SECONDS
+        while not server.started and loop.time() < deadline:
             await asyncio.sleep(0.05)
         _require(server.started, "Embedded websocket smoke server did not start.")
 
