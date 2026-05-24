@@ -55,6 +55,19 @@ if [[ -n "$NOTARY_ISSUER_ID" || -n "$NOTARY_KEY_ID" || -n "$NOTARY_KEY_PATH" ]];
   NOTARY_CONFIGURED=1
 fi
 
+codesign_with_retry() {
+  local max_attempts=5
+  local attempt=1
+  until codesign "$@"; do
+    if [[ "$attempt" -ge "$max_attempts" ]]; then
+      return 1
+    fi
+    echo "codesign failed; retrying ($attempt/$max_attempts)." >&2
+    sleep 5
+    attempt=$((attempt + 1))
+  done
+}
+
 if [[ ! -d "$APP_PATH" ]]; then
   echo "App bundle not found at $APP_PATH" >&2
   exit 1
@@ -100,9 +113,9 @@ sign_macho_payloads() {
   while IFS= read -r candidate; do
     if file "$candidate" | grep -q "Mach-O"; then
       if [[ "$candidate" == "$PLAYWRIGHT_NODE" ]]; then
-        codesign --force --options runtime --timestamp --entitlements "$PLAYWRIGHT_NODE_ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$candidate"
+        codesign_with_retry --force --options runtime --timestamp --entitlements "$PLAYWRIGHT_NODE_ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$candidate"
       else
-        codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$candidate"
+        codesign_with_retry --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$candidate"
       fi
     fi
   done < <(find "$root" -type f)
@@ -111,13 +124,13 @@ sign_macho_payloads() {
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   echo "Signing app with Developer ID identity: $SIGNING_IDENTITY"
   sign_macho_payloads "$BACKEND_SIDECAR"
-  codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_PATH"
+  codesign_with_retry --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_PATH"
 else
   # Tauri's unsigned app bundle can contain an ad-hoc executable signature that
   # does not seal bundled resources. Re-sign locally so macOS accepts the copied
   # app bundle from the DMG during install smoke tests.
   echo "APPLE_SIGNING_IDENTITY is not set; using ad-hoc signing for local smoke tests."
-  codesign --force --deep --sign - "$APP_PATH"
+  codesign_with_retry --force --deep --sign - "$APP_PATH"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$PLAYWRIGHT_NODE" "$PLAYWRIGHT_CLI" --version >/dev/null
@@ -151,7 +164,7 @@ hdiutil create \
 
 if [[ -n "$SIGNING_IDENTITY" ]]; then
   echo "Signing DMG with Developer ID identity: $SIGNING_IDENTITY"
-  codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG_PATH"
+  codesign_with_retry --force --timestamp --sign "$SIGNING_IDENTITY" "$DMG_PATH"
   codesign --verify --verbose=2 "$DMG_PATH"
 fi
 
