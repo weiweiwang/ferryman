@@ -102,9 +102,25 @@ updated: 2026-05-22
 | **Observe (观察)** | 消耗低，数据未达置信度门槛，或 $\text{RUC1\_mature\_purchases} = 0$，或 `payback_ratio` 很高但安装/购买样本仍很小 | 保持观察，不做实质动作，等待数据累积；高回本小样本词可标记为“小预算验证”，但不要写成“接近回本线” |
 | **Review Only (仅复盘)** | 关键词状态为 `PAUSED` | 仅做历史复盘与成效总结，不建议重新开启 |
 
+### 5. Pro模型复核与优化
+
+完成Markdown报告和Action CSV后，应使用更高阶Pro模型进行一次最终复核、策略审视和表达优化。复核阶段不允许创建或执行任何临时分析脚本。
+
+复核重点：
+- 验证报告中的核心计算、指标解释和推导逻辑是否准确。
+- 审视投放动作是否符合数据证据、样本置信度、订阅质量和回本目标。
+- 识别报告中可能存在的过度判断、遗漏判断、前后矛盾或表达不清。
+- 优化最终报告，使结论更像资深投放优化师的决策复盘，动作明确、理由充分、优先级清晰。
+
 ---
 
 ## 四、输出规范与模板
+
+若用户未指定最终报告文件名，默认使用：
+- `asa-{bundle_id_short}-{run_timestamp}_actions.csv`
+- `asa-{bundle_id_short}-{run_timestamp}_report.md`
+
+其中，`bundle_id_short`取`bundle_id`最后一段，例如`app.blynkai.todo`取`todo`，`com.linkaiapp.gtrans`取`gtrans`；`run_timestamp`使用本地时间`YYYYMMDD-HHMM`。若同一分钟内重复生成同一产品报告导致文件名冲突，追加`-2`、`-3`等序号。
 
 ### 1. CSV格式规范（Action CSV）
 分析产生的决策应生成对应的 CSV 文件，表头契约如下：
@@ -179,3 +195,4 @@ keyword,ad_group,match_type,keyword_status,action,priority,confidence,spend,dail
 ## 五、风险与不确定性提示 (Risks & Limitations)
 1. **数据不成熟**：未达到续订观察窗口的用户不能用于判断对应RRC，窗口由试用期和账单周期决定。
 2. **长尾预测依赖**：更长期的留存依赖衰减曲线预测，若实际产品长期留存偏离该曲线，LTV将存在波动。
+```
