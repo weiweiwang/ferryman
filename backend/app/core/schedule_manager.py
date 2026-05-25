@@ -27,6 +27,7 @@ DEFAULT_TIMEZONE = "UTC"
 CATCHUP_JOB_SUFFIX = ":catchup"
 DEFAULT_CATCHUP_GRACE_TIME_SECONDS = 4 * 60 * 60
 DEFAULT_CATCHUP_SKIP_IF_NEXT_WITHIN_SECONDS = 60 * 60
+CRON_DAY_OF_WEEK_NAMES = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 
 def get_default_timezone_name() -> str:
@@ -64,6 +65,37 @@ def normalize_timezone_name(timezone_name: Optional[str]) -> str:
     return candidate
 
 
+def _convert_standard_cron_to_apscheduler(cron_expression: str) -> str:
+    parts = cron_expression.split()
+    if len(parts) != 5:
+        return cron_expression
+
+    def convert_day(value: str) -> str:
+        if value in {"*", "?"} or value.lower() in CRON_DAY_OF_WEEK_NAMES:
+            return value
+        day = int(value)
+        if day == 7:
+            day = 0
+        if not 0 <= day <= 6:
+            raise ValueError(f"day-of-week value must be between 0 and 7: {value}")
+        return str((day - 1) % 7)
+
+    converted_items = []
+    for item in parts[4].split(","):
+        base, slash, step = item.partition("/")
+        if not base or (slash and not step):
+            raise ValueError(f"invalid day-of-week item: {item}")
+        if "-" in base:
+            start, end = base.split("-", 1)
+            base = f"{convert_day(start)}-{convert_day(end)}"
+        else:
+            base = convert_day(base)
+        converted_items.append(f"{base}/{step}" if slash else base)
+
+    parts[4] = ",".join(converted_items)
+    return " ".join(parts)
+
+
 def build_cron_trigger(cron_expression: str, timezone_name: Optional[str] = None) -> CronTrigger:
     normalized_cron = cron_expression.strip()
     if not normalized_cron:
@@ -71,8 +103,9 @@ def build_cron_trigger(cron_expression: str, timezone_name: Optional[str] = None
 
     normalized_timezone = normalize_timezone_name(timezone_name)
     try:
+        apscheduler_cron = _convert_standard_cron_to_apscheduler(normalized_cron)
         return CronTrigger.from_crontab(
-            normalized_cron,
+            apscheduler_cron,
             timezone=ZoneInfo(normalized_timezone),
         )
     except ValueError as exc:

@@ -198,6 +198,28 @@ def test_schedule_cron_helpers_validate_inputs_and_compute_utc_next_run():
     ) == datetime(2026, 4, 19, 8, 0, tzinfo=trigger.timezone)
 
 
+def test_schedule_cron_helpers_use_standard_cron_weekday_semantics():
+    now = datetime(2026, 5, 24, 22, 58, tzinfo=timezone.utc)
+
+    monday = build_cron_trigger("0 6 * * 1", "Asia/Shanghai")
+    assert monday.get_next_fire_time(
+        previous_fire_time=None,
+        now=now,
+    ) == datetime(2026, 6, 1, 6, 0, tzinfo=monday.timezone)
+
+    tuesday = build_cron_trigger("0 6 * * 2", "Asia/Shanghai")
+    assert tuesday.get_next_fire_time(
+        previous_fire_time=None,
+        now=now,
+    ) == datetime(2026, 5, 26, 6, 0, tzinfo=tuesday.timezone)
+
+    weekday = build_cron_trigger("0 10 * * 1-5", "Asia/Shanghai")
+    assert weekday.get_next_fire_time(
+        previous_fire_time=None,
+        now=now,
+    ) == datetime(2026, 5, 25, 10, 0, tzinfo=weekday.timezone)
+
+
 @pytest.mark.parametrize(
     ("cron_expression", "timezone_name", "expected_message"),
     [
