@@ -94,6 +94,14 @@ Adapt the headings and labels to match the user's requested language and channel
 
 - [Forward-looking implication or uncertainty]
 
+## Evidence Table
+
+Bind each key factual claim to a specific source so readers can quickly verify the basis for the analysis.
+
+| Claim | Source URL | Source Type | Confidence | Notes |
+|---|---|---|---|---|
+| [Specific factual claim] | [URL] | [Official / media / directory / community / data source] | [High / Medium / Low] | [Why this source supports the claim, or any caveat] |
+
 ## Source & Methodology Notes
 
 - **Platforms Visited**: [List]

@@ -1,10 +1,11 @@
 ---
 name: ai-product-scout
 description: >
-  Use this for discovering and evaluating concrete AI products, SaaS tools, apps,
-  developer platforms, and market examples from directories, launch platforms, or curated lists.
-  Produces product case studies focused on why a product works, how it is productized,
-  how it monetizes, and what builders can learn from it.
+  End-to-end AI product case-study workflow. Discovers promising AI products
+  while filtering out previously covered products, evaluates candidates, selects
+  one featured case, and produces the research brief, publishable article, and
+  requested delivery assets. Call once with the full goal, exclusion list, and
+  deliverables; do not split into candidate discovery and separate deep dives.
 version: 0.1.0
 author: Ferryman
 created: 2026-03-17
