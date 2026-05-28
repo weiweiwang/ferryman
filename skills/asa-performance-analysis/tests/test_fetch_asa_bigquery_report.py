@@ -728,6 +728,47 @@ def test_aggregate_cohort_slice():
     assert kw1["RRC"] == 0.7333  # 11 / 15 = 0.73333...
 
 
+def test_aggregate_daily_metrics_keeps_keyword_id_distinct():
+    module = load_module()
+    today_dt = date(2026, 5, 22)
+
+    def row(keyword_id: str, spend: float, purchases: int) -> dict:
+        return {
+            "report_date": "2026-05-01",
+            "ad_group_id": "111",
+            "ad_group": "Group1",
+            "match_type": "EXACT",
+            "keyword": "same keyword",
+            "keyword_id": keyword_id,
+            "keyword_status": "ENABLED",
+            "spend": spend,
+            "impressions": 100,
+            "clicks": 10,
+            "installs": 5,
+            "purchase_income": 0.0,
+            "active_users": 0,
+            "purchase_users": purchases,
+            "RU15m": 0,
+            "RU": 0,
+            "RUC1": 1,
+            "RUC2": 0,
+            "RUC3": 0,
+            "RUC4": 0,
+            "RUC5": 0,
+        }
+
+    agg = module.aggregate_daily_metrics(
+        [row("k1", 10.0, 1), row("k2", 20.0, 2)],
+        trial_days=3,
+        billing_period_days=7,
+        today_dt=today_dt,
+    )
+
+    assert len(agg) == 2
+    assert {r["keyword_id"] for r in agg} == {"k1", "k2"}
+    assert {r["spend"] for r in agg} == {10.0, 20.0}
+
+
 def test_target_cpi_is_derived_from_keyword_ltv():
     module = load_module()
     today_dt = date(2026, 5, 22)
@@ -859,6 +900,7 @@ def test_main_writes_split_csvs(tmp_path, monkeypatch):
         assert "payback_ratio" in header
         assert "RUC4" in header
         assert "RUC5" in header
+        assert "keyword_id" in header
         assert "RRC4" in header
         assert "RRC5" in header
         assert "effective_RRC1" in header

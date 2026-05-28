@@ -246,7 +246,7 @@ WHERE
 """
 
 COLUMNS = [
-    "ad_group_id", "ad_group", "match_type", "keyword", "keyword_status", "days",
+    "ad_group_id", "ad_group", "match_type", "keyword", "keyword_id", "keyword_status", "days",
     "purchase_users", "RUC1", "RUC2", "RUC3", "RUC4", "RUC5", "spend", "daily_spend", "CPS", "CPR1",
     "RRC1", "RRC2", "RRC3", "RRC4", "RRC5",
     "effective_RRC1", "effective_RRC2", "effective_RRC3", "effective_RRC4", "effective_RRC5",
@@ -528,10 +528,14 @@ def aggregate_daily_metrics(
     ruc5_rows = [r for r in rows if r.get("report_date") and to_date(r.get("report_date")) <= ruc5_cutoff]
 
     # 辅助函数：将行列表按关键词分组
-    def group_by_keyword(subset: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
-        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    def group_by_keyword(subset: list[dict[str, Any]]) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         for r in subset:
-            key = (str(r.get("ad_group_id") or ""), str(r.get("keyword") or ""))
+            key = (
+                str(r.get("ad_group_id") or ""),
+                str(r.get("keyword_id") or ""),
+                str(r.get("keyword") or "")
+            )
             grouped.setdefault(key, []).append(r)
         return grouped
 
@@ -545,7 +549,7 @@ def aggregate_daily_metrics(
 
     out_rows = []
     for key, all_rows in overall_grouped.items():
-        ad_group_id, keyword = key
+        ad_group_id, keyword_id, keyword = key
         first_row = all_rows[0]
 
         spend = sum(float(row.get("spend") or 0) for row in all_rows)
@@ -641,6 +645,7 @@ def aggregate_daily_metrics(
             "ad_group": first_row.get("ad_group"),
             "match_type": first_row.get("match_type"),
             "keyword": keyword,
+            "keyword_id": keyword_id,
             "keyword_status": first_row.get("keyword_status"),
             "days": days,
             "purchase_users": purchase_users,

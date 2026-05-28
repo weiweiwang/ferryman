@@ -125,7 +125,7 @@ updated: 2026-05-22
 ### 1. CSV格式规范（Action CSV）
 分析产生的决策应生成对应的 CSV 文件，表头契约如下：
 ```csv
-keyword,ad_group,match_type,keyword_status,action,priority,confidence,spend,daily_spend,CPS,CPR1,Target_CPI,payback_ratio,required_CPS_reduction,purchase_users,RUC1,RUC2,RUC3,RUC4,RUC5,RRC1,RRC2,RRC3,RRC4,RRC5,effective_RRC1,effective_RRC2,effective_RRC3,effective_RRC4,effective_RRC5,RUC1_mature_purchases,RUC2_mature_purchases,RUC3_mature_purchases,RUC4_mature_purchases,RUC5_mature_purchases,LTV_per_purchase_user,expected_revenue,days,clicks,installs,CVR,reason,ad_group_id
+keyword,keyword_id,ad_group,match_type,keyword_status,action,priority,confidence,spend,daily_spend,CPS,CPR1,Target_CPI,payback_ratio,required_CPS_reduction,purchase_users,RUC1,RUC2,RUC3,RUC4,RUC5,RRC1,RRC2,RRC3,RRC4,RRC5,effective_RRC1,effective_RRC2,effective_RRC3,effective_RRC4,effective_RRC5,RUC1_mature_purchases,RUC2_mature_purchases,RUC3_mature_purchases,RUC4_mature_purchases,RUC5_mature_purchases,LTV_per_purchase_user,expected_revenue,days,clicks,installs,CVR,reason,ad_group_id
 ```
 
 ### 2. 诊断报告模板（Markdown Report）
@@ -155,42 +155,42 @@ keyword,ad_group,match_type,keyword_status,action,priority,confidence,spend,dail
 - **基准线 CVR**：{benchmark_cvr}% | **基准线 RRC1**：{benchmark_rrc1}%
 - **基准回本率**：{benchmark_payback_ratio}%
 
-| 关键词 (Keyword) | 匹配类型 | 消耗 (Spend) | 购买成本 (CPS) | 购买人数 | RRC1 | 回本率 | 诊断结论 |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| example_exact | EXACT | 120.00 | 15.00 | 8 | 50.00% | 125.0% | 表现健康，回本符合预期 |
+| 关键词 (Keyword) | Keyword ID | 匹配类型 | 消耗 (Spend) | 购买成本 (CPS) | 购买人数 | RRC1 | 回本率 | 诊断结论 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| example_exact | 123456789 | EXACT | 120.00 | 15.00 | 8 | 50.00% | 125.0% | 表现健康，回本符合预期 |
 
 ## 四、核心优化决策 (Key Actions)
 每个动作分组优先使用表格展示，单表最多展示20个关键词；完整明细见决策CSV：[action_csv_basename](file:///path/to/csv)。
 
 ### 1. 拓量 (Scale)
 
-| 关键词 | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
-| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
-| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
+| 关键词 | Keyword ID | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
+| :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {keyword_id} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
 
 ### 2. 降低出价 (Lower Bid)
 
-| 关键词 | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
-| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
-| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
+| 关键词 | Keyword ID | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
+| :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {keyword_id} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
 
 ### 3. 暂停投放 (Pause)
 
-| 关键词 | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
-| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
-| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
+| 关键词 | Keyword ID | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | RRC1/RRC2/RRC3/RRC4/RRC5 | 回本率 | 建议 |
+| :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {keyword_id} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {RRC_summary} | {payback_ratio} | {reason} |
 
 ### 4. 否词屏蔽 (Negative Keywords)
 
-| 关键词 | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | 搜索词/问题 | 建议 |
-| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | :--- |
-| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {query_issue} | {reason} |
+| 关键词 | Keyword ID | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | 搜索词/问题 | 建议 |
+| :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | :--- |
+| {keyword} | {keyword_id} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {query_issue} | {reason} |
 
 ### 5. 保持观察 (Observe)
 
-| 关键词 | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | 成熟分母 | 回本率 | 建议 |
-| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
-| {keyword} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {mature_purchases} | {payback_ratio} | {reason} |
+| 关键词 | Keyword ID | 广告组 | 状态 | spend | installs | purchase | RUC1 | CPS | CPR1 | Target_CPI | 成熟分母 | 回本率 | 建议 |
+| :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| {keyword} | {keyword_id} | {ad_group} | {keyword_status} | {spend} | {installs} | {purchase_users} | {RUC1} | {CPS} | {CPR1} | {Target_CPI} | {mature_purchases} | {payback_ratio} | {reason} |
 
 ## 五、风险与不确定性提示 (Risks & Limitations)
 1. **数据不成熟**：未达到续订观察窗口的用户不能用于判断对应RRC，窗口由试用期和账单周期决定。
