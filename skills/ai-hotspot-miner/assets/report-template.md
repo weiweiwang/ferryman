@@ -96,48 +96,28 @@ Use the following Markdown structures as the blueprint for your output. Adapt th
 
 ## Article Draft
 
-Use this structure for the publishable article output.
+Use this exact structure for the publishable article output. The article file is the clean publication source; it must contain only the final title and final body.
 
 ```md
-# [Article Working Title]
+# [One final title only]
 
-**Date**: [YYYY-MM-DD]  
-**Publication / Channel**: [e.g. WeChat public account / newsletter / blog]  
-**Brand Name**: [Name or "Not provided"]  
-
-## Article Strategy
-
-- **Chosen Topic**: [Title]
-- **Chosen Hook**: [Surprise / consequence / conflict / practical implication / pattern reveal]
-- **Core Claim**: [The one idea the reader should remember]
-- **Reader Payoff**: [Why this piece is worth their time]
-- **Source Basis**: [Which findings from the research brief this article depends on]
-- **Click Driver**: [Consequence-led / Contrast-led / Reframing-led / Reader-stakes-led]
-
-## Title Candidates
-
-1. [Consequence-led title]
-2. [Contrast-led title]
-3. [Reframing-led or Reader-stakes-led title]
-
-## Fact Check Notes
-
-- **Claims requiring careful wording**: [List]
-- **Inferences explicitly labeled**: [List]
-- **Primary source URLs**: [List]
-- **Chinese Finalization Check**: [Confirm non-essential Chinese/English spacing has been cleaned up]
-
-====================
-OPERATIONS PUBLISHING ZONE START
-====================
-
-Title:
-[One final title only]
-
-Body:
 [Final copy-paste-ready article body only]
-
-====================
-OPERATIONS PUBLISHING ZONE END
-====================
 ```
+
+Do not include date metadata, publication profile, article strategy, title candidates, fact-check notes, source URLs, `Operations Publishing Zone` markers, or handoff instructions in this article file. Put all non-publication material in the research brief.
+
+## Formatted Article HTML
+
+After saving the publishable article Markdown, generate the formatted HTML file with:
+
+```sh
+scripts/render_article_html.py reports/<yyyy-mm-dd>/ai-hotspot-article-<article_slug>.md
+```
+
+The generated file must be named:
+
+```md
+reports/<yyyy-mm-dd>/ai-hotspot-article-<article_slug>.html
+```
+
+This HTML file is a copy-paste-ready formatted rendering for a rich-text editor. It renders the clean article Markdown directly.
