@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render clean ai-hotspot article Markdown into formatted HTML."""
+"""Render clean ai-product-scout article Markdown into formatted HTML."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ FORBIDDEN_SOURCE_PATTERNS = (
     re.compile(r"operations publishing zone", re.I),
     re.compile(r"^\s*#{2,6}\s+article strategy\s*$", re.I | re.M),
     re.compile(r"^\s*#{2,6}\s+title candidates\s*$", re.I | re.M),
-    re.compile(r"^\s*#{2,6}\s+fact check notes\s*$", re.I | re.M),
+    re.compile(r"^\s*#{2,6}\s+fact check notes(?:\s*/\s*source notes)?\s*$", re.I | re.M),
     re.compile(r"^\s*\*\*(?:date|publication / channel|brand name)\*\*\s*:", re.I | re.M),
 )
 MARKDOWN = MarkdownIt("commonmark", {"html": False})
@@ -353,7 +353,7 @@ def render_file(input_path: Path, output_path: Path | None = None) -> dict[str, 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", help="Path to the ai-hotspot article Markdown file.")
+    parser.add_argument("input", help="Path to the ai-product-scout article Markdown file.")
     parser.add_argument("-o", "--output", help="Optional HTML output path.")
     return parser.parse_args()
 

@@ -41,6 +41,16 @@ OPERATIONS PUBLISHING ZONE START
         render_article_html.extract_article(
             """# Draft
 
+## Fact Check Notes / Source Notes
+
+- Primary source URLs
+"""
+        )
+
+    with pytest.raises(ValueError, match="only '# final title' and final body"):
+        render_article_html.extract_article(
+            """# Draft
+
 **Date**: 2026-05-31
 
 Body
@@ -94,11 +104,11 @@ def test_markdown_it_handles_links_and_code_literals():
 
 
 def test_render_file_uses_article_html_filename(tmp_path):
-    source = tmp_path / "ai-hotspot-article-demo.md"
+    source = tmp_path / "ai-product-case-article-demo.md"
     source.write_text("# 标题\n\n正文", encoding="utf-8")
 
     result = render_article_html.render_file(source)
 
     output = Path(result["output"])
-    assert output.name == "ai-hotspot-article-demo.html"
+    assert output.name == "ai-product-case-article-demo.html"
     assert output.exists()
