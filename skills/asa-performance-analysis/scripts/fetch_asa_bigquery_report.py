@@ -14,14 +14,19 @@ import csv
 import json
 import math
 import os
+import random
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import yfinance as yf
+import requests
 
 
 SERVICE_ACCOUNT_ENV_VARS = ("ASA_BIGQUERY_SERVICE_ACCOUNT_JSON", "GOOGLE_APPLICATION_CREDENTIALS")
+EXCHANGERATE_API_KEYS = (
+    "00076a37c7365e0ff16762ac",
+    "4620df7174e8576d303152bf",
+)
 
 QUERY = """
 WITH
@@ -330,32 +335,46 @@ def run(client_: Any, sql: str, config: Any, timeout: int) -> list[dict[str, Any
         raise AsaPerformanceError(f"BigQuery查询失败: {exc}") from exc
 
 
-def fx_rate(currency: str, target: str) -> tuple[float, str]:
+def fetch_exchange_rates() -> dict[str, float]:
+    api_key = random.choice(EXCHANGERATE_API_KEYS)
+    url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
+    try:
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        raise AsaPerformanceError(f"无法获取汇率表: {exc}") from exc
+
+    if data.get("result") != "success":
+        raise AsaPerformanceError(f"无法获取汇率表: {data}")
+
+    rates = data.get("conversion_rates") or {}
+    out = {"USD": 1.0, "USDT": 1.0}
+    for currency, rate in rates.items():
+        try:
+            value = float(rate)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and math.isfinite(value):
+            out[currency.upper()] = value
+    return out
+
+
+def fx_rate(currency: str, target: str, exchange_rates: dict[str, float]) -> tuple[float, str]:
     c = "CNY" if currency == "RMB" else currency
     t = "CNY" if target == "RMB" else target
     if c == t:
         return 1.0, "identity"
-    symbol = f"{c}{t}=X"
 
-    import time
-    history = None
-    for attempt in range(3):
-        try:
-            history = yf.Ticker(symbol).history(period="5d")
-            if not (history.empty or history["Close"].dropna().empty):
-                break
-        except Exception as exc:
-            if attempt == 2:
-                raise AsaPerformanceError(f"无法获取汇率: {symbol} (连接失败: {exc})") from exc
-        if attempt < 2:
-            time.sleep(1)
+    source_rate = exchange_rates.get(c)
+    target_rate = exchange_rates.get(t)
+    if source_rate is None or target_rate is None:
+        raise AsaPerformanceError(f"无法获取汇率: {c}->{t}")
 
-    if history is None or history.empty or history["Close"].dropna().empty:
-        raise AsaPerformanceError(f"无法获取汇率: {symbol}")
-    rate = float(history["Close"].dropna().iloc[-1])
+    rate = target_rate / source_rate
     if rate <= 0 or not math.isfinite(rate):
-        raise AsaPerformanceError(f"非法汇率: {symbol}={rate}")
-    return rate, f"yfinance:{symbol}"
+        raise AsaPerformanceError(f"非法汇率: {c}->{t}={rate}")
+    return rate, "exchangerate-api:latest/USD"
 
 
 def resolve_rates(client_: Any, args: argparse.Namespace, config: Any, attribution_table: str) -> tuple[dict[str, float], dict[str, str]]:
@@ -370,12 +389,15 @@ def resolve_rates(client_: Any, args: argparse.Namespace, config: Any, attributi
         sources["CNY"] = "identity"
 
     rows = run(client_, CURRENCY_QUERY.format(attribution_table=attribution_table), config, args.job_timeout_seconds)
+    exchange_rates: dict[str, float] | None = None
     for row in rows:
         currency = (row.get("currency") or target).upper()
         if currency == "RMB":
             currency = "CNY"
         if currency not in rates:
-            rates[currency], sources[currency] = fx_rate(currency, target)
+            if exchange_rates is None:
+                exchange_rates = fetch_exchange_rates()
+            rates[currency], sources[currency] = fx_rate(currency, target, exchange_rates)
     return rates, sources
 
 

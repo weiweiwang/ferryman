@@ -147,39 +147,40 @@ def test_output_argument_is_required():
         raise AssertionError("Expected --output to be required")
 
 
-def test_auto_exchange_rates_use_yfinance(monkeypatch):
+def test_auto_exchange_rates_use_exchangerate_api(monkeypatch):
     module = load_module()
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "result": "success",
+                "conversion_rates": {
+                    "USD": 1.0,
+                    "CNY": 7.1234,
+                    "EUR": 0.92,
+                },
+            }
+
     calls = []
 
-    class FakeHistory:
-        empty = False
+    def fake_get(url, timeout):
+        calls.append((url, timeout))
+        return FakeResponse()
 
-        def __getitem__(self, key):
-            assert key == "Close"
-            return self
+    monkeypatch.setattr(module.random, "choice", lambda keys: keys[0])
+    monkeypatch.setattr(module.requests, "get", fake_get)
 
-        def dropna(self):
-            return self
+    exchange_rates = module.fetch_exchange_rates()
+    rate, source = module.fx_rate("USD", "CNY", exchange_rates)
 
-        @property
-        def iloc(self):
-            return [7.1234]
-
-    class FakeTicker:
-        def __init__(self, symbol):
-            calls.append(symbol)
-
-        def history(self, period):
-            assert period == "5d"
-            return FakeHistory()
-
-    monkeypatch.setattr(module.yf, "Ticker", FakeTicker)
-
-    rate, source = module.fx_rate("USD", "CNY")
-
-    assert calls == ["USDCNY=X"]
+    assert calls == [
+        ("https://v6.exchangerate-api.com/v6/00076a37c7365e0ff16762ac/latest/USD", 15)
+    ]
     assert rate == 7.1234
-    assert source == "yfinance:USDCNY=X"
+    assert source == "exchangerate-api:latest/USD"
 
 
 def test_main_query_locks_environment_to_production():
@@ -232,18 +233,8 @@ def test_resolve_rates_initializes_with_target_currency_usd(monkeypatch):
     def mock_run(client_, sql, config, timeout):
         return [{"currency": "CNY"}, {"currency": "EUR"}, {"currency": "USD"}]
 
-    # Mock the fx_rate function
-    fx_calls = []
-    def mock_fx_rate(currency, target):
-        fx_calls.append((currency, target))
-        if currency == "CNY":
-            return 0.14, "mock:CNYUSD"
-        if currency == "EUR":
-            return 1.08, "mock:EURUSD"
-        return 1.0, "mock:identity"
-
     monkeypatch.setattr(module, "run", mock_run)
-    monkeypatch.setattr(module, "fx_rate", mock_fx_rate)
+    monkeypatch.setattr(module, "fetch_exchange_rates", lambda: {"USD": 1.0, "CNY": 7.2, "EUR": 0.9259})
 
     class FakeArgs:
         target_currency = "USD"
@@ -253,11 +244,12 @@ def test_resolve_rates_initializes_with_target_currency_usd(monkeypatch):
 
     # USD is target, CNY and EUR should be fetched.
     # USD should be target, so USD is not fetched since target in rates is initialized to 1.0.
-    assert rates == {"USD": 1.0, "CNY": 0.14, "EUR": 1.08}
-    assert sources == {"USD": "identity", "CNY": "mock:CNYUSD", "EUR": "mock:EURUSD"}
-    assert ("CNY", "USD") in fx_calls
-    assert ("EUR", "USD") in fx_calls
-    assert ("USD", "USD") not in fx_calls
+    assert rates == {"USD": 1.0, "CNY": 1.0 / 7.2, "EUR": 1.0 / 0.9259}
+    assert sources == {
+        "USD": "identity",
+        "CNY": "exchangerate-api:latest/USD",
+        "EUR": "exchangerate-api:latest/USD",
+    }
 
 
 def test_resolve_rates_initializes_with_target_currency_cny(monkeypatch):
@@ -267,13 +259,10 @@ def test_resolve_rates_initializes_with_target_currency_cny(monkeypatch):
     def mock_run(client_, sql, config, timeout):
         return [{"currency": "CNY"}, {"currency": "RMB"}]
 
-    fx_calls = []
-    def mock_fx_rate(currency, target):
-        fx_calls.append((currency, target))
-        return 1.0, "mock"
+    fetch_calls = []
 
     monkeypatch.setattr(module, "run", mock_run)
-    monkeypatch.setattr(module, "fx_rate", mock_fx_rate)
+    monkeypatch.setattr(module, "fetch_exchange_rates", lambda: fetch_calls.append(True) or {})
 
     class FakeArgs:
         target_currency = "CNY"
@@ -284,7 +273,7 @@ def test_resolve_rates_initializes_with_target_currency_cny(monkeypatch):
     # For CNY target, CNY and RMB are pre-populated as 1.0, so no fx_rate calls should happen.
     assert rates == {"CNY": 1.0, "RMB": 1.0}
     assert sources == {"CNY": "identity", "RMB": "identity"}
-    assert len(fx_calls) == 0
+    assert fetch_calls == []
 
 
 def test_make_currency_case_generation_removes_dead_code():
@@ -306,86 +295,35 @@ def test_make_currency_case_generation_removes_dead_code():
 def test_fx_rate_normalization(monkeypatch):
     module = load_module()
 
-    symbol_calls = []
-    class FakeHistory:
-        empty = False
-        def __getitem__(self, key):
-            assert key == "Close"
-            return self
-        def dropna(self):
-            return self
-        @property
-        def iloc(self):
-            return [0.14]
-
-    class FakeTicker:
-        def __init__(self, symbol):
-            symbol_calls.append(symbol)
-        def history(self, period):
-            return FakeHistory()
-
-    monkeypatch.setattr(module.yf, "Ticker", FakeTicker)
+    exchange_rates = {"USD": 1.0, "CNY": 7.2}
 
     # 1. RMB target and CNY currency -> 1.0, identity
-    rate, source = module.fx_rate("CNY", "RMB")
+    rate, source = module.fx_rate("CNY", "RMB", exchange_rates)
     assert rate == 1.0
     assert source == "identity"
-    assert len(symbol_calls) == 0
 
-    # 2. RMB currency and USD target -> fetches CNYUSD=X
-    rate, source = module.fx_rate("RMB", "USD")
-    assert rate == 0.14
-    assert source == "yfinance:CNYUSD=X"
-    assert symbol_calls == ["CNYUSD=X"]
+    # 2. RMB currency and USD target uses the CNY rate.
+    rate, source = module.fx_rate("RMB", "USD", exchange_rates)
+    assert rate == 1.0 / 7.2
+    assert source == "exchangerate-api:latest/USD"
 
 
-def test_fx_rate_retries_on_failure(monkeypatch):
+def test_fetch_exchange_rates_errors_are_structured(monkeypatch):
     module = load_module()
 
-    attempt = 0
-    class FakeHistory:
-        empty = False
-        def __getitem__(self, key):
-            return self
-        def dropna(self):
-            return self
-        @property
-        def iloc(self):
-            return [0.14]
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
 
-    class FakeTicker:
-        def __init__(self, symbol):
-            pass
-        def history(self, period):
-            nonlocal attempt
-            attempt += 1
-            if attempt < 3:
-                raise ConnectionError("Network timeout")
-            return FakeHistory()
+        def json(self):
+            return {"result": "error", "error-type": "bad-key"}
 
-    import time
-    monkeypatch.setattr(module.yf, "Ticker", FakeTicker)
-    monkeypatch.setattr(time, "sleep", lambda x: None)
+    monkeypatch.setattr(module.requests, "get", lambda url, timeout: FakeResponse())
 
-    rate, source = module.fx_rate("CNY", "USD")
-    assert rate == 0.14
-    assert attempt == 3
-
-    attempt = 0
-    class FakeTickerFailed:
-        def __init__(self, symbol):
-            pass
-        def history(self, period):
-            nonlocal attempt
-            attempt += 1
-            raise ConnectionError("Persistent network failure")
-
-    monkeypatch.setattr(module.yf, "Ticker", FakeTickerFailed)
     try:
-        module.fx_rate("CNY", "USD")
+        module.fetch_exchange_rates()
     except module.AsaPerformanceError as exc:
-        assert "连接失败" in str(exc)
-        assert attempt == 3
+        assert "无法获取汇率表" in str(exc)
     else:
         raise AssertionError("Expected AsaPerformanceError but none raised")
 
