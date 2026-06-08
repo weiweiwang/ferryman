@@ -277,6 +277,42 @@ async def test_skill_context_keeps_writes_inside_session_workspace():
 
 
 @pytest.mark.asyncio
+async def test_skill_context_rejects_workspace_script_writes():
+    create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
+
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-skill-script-write",
+        skill_name="bundled_skill",
+    ))
+
+    with pytest.raises(ModelRetry, match="Script file creation is not allowed"):
+        await FileToolkit.write_file(ctx, "analyze.py", "print('nope')\n")
+
+    with pytest.raises(ModelRetry, match="Script file creation is not allowed"):
+        await FileToolkit.write_file(ctx, "run_analysis", "#!/bin/sh\necho nope\n")
+
+
+@pytest.mark.asyncio
+async def test_skill_context_allows_deliverable_writes():
+    create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
+    kernel = FerrymanRuntime(create_test_settings())
+    kernel.skill_manager.scan_skills()
+
+    ctx = SimpleNamespace(deps=kernel.create_agent_deps(
+        session_id="skill-session",
+        run_id="run-skill-deliverable-write",
+        skill_name="bundled_skill",
+    ))
+
+    result = await FileToolkit.write_file(ctx, "reports/output.md", "# Report\n")
+
+    assert "Successfully wrote" in result
+
+
+@pytest.mark.asyncio
 async def test_skill_context_rejects_out_of_scope_read_with_model_retry():
     create_mock_skill_with_script("bundled_skill", "Bundled skill desc", TEST_BUNDLED_SKILLS)
     kernel = FerrymanRuntime(create_test_settings())

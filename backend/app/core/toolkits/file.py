@@ -17,6 +17,29 @@ class FileToolkit(Toolkit):
     skill's bundled resources.
     """
 
+    SCRIPT_SUFFIXES = {
+        ".bash",
+        ".bat",
+        ".cjs",
+        ".cmd",
+        ".fish",
+        ".js",
+        ".jsx",
+        ".lua",
+        ".mjs",
+        ".php",
+        ".pl",
+        ".ps1",
+        ".py",
+        ".pyw",
+        ".r",
+        ".rb",
+        ".sh",
+        ".ts",
+        ".tsx",
+        ".zsh",
+    }
+
     @staticmethod
     def get_tools():
         return [
@@ -58,6 +81,13 @@ class FileToolkit(Toolkit):
             raise ValueError(f"Path escapes session workspace: {raw_path}") from exc
 
         return candidate
+
+    @staticmethod
+    def _is_script_write(path: Path, content: str) -> bool:
+        """Return whether a write target looks like a runnable script."""
+        if path.suffix.lower() in FileToolkit.SCRIPT_SUFFIXES:
+            return True
+        return content.startswith("#!")
 
     @staticmethod
     def _resolve_current_skill_resource_path(
@@ -265,6 +295,12 @@ class FileToolkit(Toolkit):
                 f"Got: {file_path}"
             ) from exc
         else:
+            if ctx.deps.skill_name and FileToolkit._is_script_write(path, content):
+                raise ModelRetry(
+                    "Script file creation is not allowed while executing a skill. "
+                    "Use the skill's bundled scripts via run_skill_script, or write "
+                    "only final deliverables such as .md, .csv, .json, or .txt files."
+                )
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} characters to {normalized}"
