@@ -60,8 +60,16 @@ profile, a travel/place deck, or any image-led output:
 
 - Set `media_required=true` in `deck-spec.json`.
 - Use real images with provenance, not decorative placeholders.
-- At least the cover and 60% of non-appendix slides should include an image or
-  screenshot.
+- Register browser screenshots with `register_asset.py` so large black/white
+  browser padding can be detected and cropped before PPT embedding.
+- Use `fit: "cover"` for photo-led hero slots; use `fit: "contain"` only when
+  the full screenshot or diagram must stay visible.
+- At least the cover and roughly half of non-appendix slides should include an
+  image or screenshot for image-rich decks; raise the ratio only when the
+  reference deck or prompt is clearly visual-first.
+- A slide that declares image intent should give the image meaningful area;
+  avoid postage-stamp photos unless the layout is explicitly a dense evidence
+  grid.
 - Prefer one strong image plus a small evidence rail over repeated text cards.
 - If no verified image assets can be obtained, state the blocker rather than
   silently producing a text-only deck.

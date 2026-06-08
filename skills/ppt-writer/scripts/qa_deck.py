@@ -128,6 +128,28 @@ def _slide_expects_image(slide: dict[str, object]) -> bool:
     return bool(IMAGE_EXPECTING_RE.search(layout_text))
 
 
+def _min_picture_area_ratio(slide: dict[str, object]) -> float:
+    layout_text = " ".join(
+        _text(slide.get(field))
+        for field in ("layout", "layout_family", "type", "proof_object")
+    ).lower()
+    if re.search(r"(full-bleed|photo-caption|cover-photo|takeaway-photo|classroom)", layout_text):
+        return 0.30
+    if re.search(r"(image-grid|gallery)", layout_text):
+        return 0.10
+    if _slide_expects_image(slide):
+        return 0.10
+    return 0.0
+
+
+def _number_from_mapping(mapping: object, name: str, default: float) -> float:
+    if isinstance(mapping, dict):
+        value = mapping.get(name)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return default
+
+
 def validate_spec(spec: dict[str, object]) -> dict[str, object]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -148,6 +170,7 @@ def validate_spec(spec: dict[str, object]) -> dict[str, object]:
     elif primary_profile not in ALLOWED_PROFILES:
         errors.append(f"Unsupported primary_profile '{primary_profile}'.")
     secondary_gates = spec.get("secondary_gates", [])
+    constraints = spec.get("reference_constraints")
     if secondary_gates is None:
         secondary_gates = []
     if not isinstance(secondary_gates, list) or not all(isinstance(item, str) for item in secondary_gates):
@@ -274,7 +297,9 @@ def validate_spec(spec: dict[str, object]) -> dict[str, object]:
         if media_required is False:
             errors.append("classroom-sharing gate requires media_required=true.")
     if media_required:
-        required_image_slides = max(1, int((non_appendix_count * 0.6) + 0.999))
+        min_image_ratio = _number_from_mapping(constraints, "min_image_slide_ratio", 0.5)
+        min_image_ratio = max(0.3, min(0.8, min_image_ratio))
+        required_image_slides = max(1, int((non_appendix_count * min_image_ratio) + 0.999))
         if image_slide_count < required_image_slides:
             errors.append(
                 f"media_required=true needs images on at least {required_image_slides} non-appendix slides; found {image_slide_count}."
@@ -310,23 +335,40 @@ def validate_reference_constraints(
     slide_rows = [slide for slide in slides if isinstance(slide, dict)]
     text_counts = [int(slide.get("text_chars") or 0) for slide in slide_rows]
     picture_counts = [int(slide.get("pictures") or 0) for slide in slide_rows]
+    picture_area_by_slide = {
+        int(slide.get("slide") or 0): float(slide.get("picture_area_ratio") or 0)
+        for slide in slide_rows
+    }
+    max_picture_area_by_slide = {
+        int(slide.get("slide") or 0): float(slide.get("max_picture_area_ratio") or 0)
+        for slide in slide_rows
+    }
     picture_count_by_slide = {
         int(slide.get("slide") or 0): int(slide.get("pictures") or 0)
         for slide in slide_rows
     }
     image_slide_count = sum(1 for count in picture_counts if count > 0)
+    effective_image_slide_count = sum(
+        1 for value in max_picture_area_by_slide.values() if value >= 0.10
+    )
     picture_instances = sum(picture_counts)
     image_slide_ratio = round(image_slide_count / slide_count, 3) if slide_count else 0
+    effective_image_slide_ratio = round(effective_image_slide_count / slide_count, 3) if slide_count else 0
     media_per_slide = round(media_count / slide_count, 3) if slide_count else 0
     pictures_per_slide = round(picture_instances / slide_count, 3) if slide_count else 0
+    avg_picture_area_ratio = round(
+        sum(picture_area_by_slide.values()) / slide_count, 4
+    ) if slide_count else 0
     avg_text = round(sum(text_counts) / len(text_counts), 1) if text_counts else 0
     max_text = max(text_counts) if text_counts else 0
     metrics.update(
         {
             "image_slide_ratio": image_slide_ratio,
+            "effective_image_slide_ratio": effective_image_slide_ratio,
             "media_per_slide": media_per_slide,
             "pictures_per_slide": pictures_per_slide,
             "picture_instances": picture_instances,
+            "avg_picture_area_ratio": avg_picture_area_ratio,
             "avg_text_chars_per_slide": avg_text,
             "max_text_chars_per_slide": max_text,
             "naked_url_count": int(pptx_metrics.get("naked_url_count") or 0),
@@ -352,12 +394,40 @@ def validate_reference_constraints(
         for slide_number in expected_image_slides
         if picture_count_by_slide.get(slide_number, 0) <= 0
     ]
+    weak_expected_images: list[dict[str, object]] = []
+    for slide_number, slide in enumerate(spec_slides, start=1):
+        if not isinstance(slide, dict) or slide_number in missing_expected_images:
+            continue
+        if slide_number not in expected_image_slides:
+            continue
+        threshold = _min_picture_area_ratio(slide)
+        if threshold <= 0:
+            continue
+        max_area = max_picture_area_by_slide.get(slide_number, 0)
+        if max_area < threshold:
+            weak_expected_images.append(
+                {
+                    "slide": slide_number,
+                    "max_picture_area_ratio": round(max_area, 4),
+                    "min_required_area_ratio": threshold,
+                }
+            )
     metrics["expected_image_slides"] = expected_image_slides
     metrics["missing_expected_image_slides"] = missing_expected_images
+    metrics["weak_expected_image_slides"] = weak_expected_images
     if missing_expected_images:
         errors.append(
             "Slides expected to contain images rendered without pictures: "
             f"{', '.join(str(item) for item in missing_expected_images[:8])}."
+        )
+    if weak_expected_images:
+        formatted = ", ".join(
+            f"{item['slide']} ({item['max_picture_area_ratio']} < {item['min_required_area_ratio']})"
+            for item in weak_expected_images[:8]
+        )
+        errors.append(
+            "Slides expected to use images have too-small picture frames: "
+            f"{formatted}. Increase the image slot, use a more image-led layout, or mark the slide as text-only."
         )
 
     def number_constraint(name: str) -> float | None:
@@ -378,13 +448,28 @@ def validate_reference_constraints(
     min_media_per_slide = number_constraint("min_media_per_slide")
     if min_media_per_slide is not None and media_per_slide < min_media_per_slide:
         errors.append(f"Media per slide {media_per_slide} is below reference constraint {min_media_per_slide}.")
+    min_effective_image_ratio = number_constraint("min_effective_image_slide_ratio")
+    if min_effective_image_ratio is not None and effective_image_slide_ratio < min_effective_image_ratio:
+        errors.append(
+            f"Effective image slide ratio {effective_image_slide_ratio} is below reference constraint {min_effective_image_ratio}."
+        )
 
     primary_profile = _text(spec.get("primary_profile"))
     media_required = bool(spec.get("media_required"))
     secondary_gates = spec.get("secondary_gates") if isinstance(spec.get("secondary_gates"), list) else []
     if media_required:
-        if image_slide_ratio < 0.6:
-            errors.append(f"media_required=true output needs images on at least 60% of slides; found {image_slide_ratio}.")
+        min_required_image_ratio = _number_from_mapping(constraints, "min_image_slide_ratio", 0.5)
+        min_required_image_ratio = max(0.3, min(0.8, min_required_image_ratio))
+        min_required_effective_ratio = _number_from_mapping(constraints, "min_effective_image_slide_ratio", 0.5)
+        min_required_effective_ratio = max(0.3, min(0.8, min_required_effective_ratio))
+        if image_slide_ratio < min_required_image_ratio:
+            errors.append(
+                f"media_required=true output needs images on at least {min_required_image_ratio:.0%} of slides; found {image_slide_ratio}."
+            )
+        if effective_image_slide_ratio < min_required_effective_ratio:
+            errors.append(
+                f"media_required=true output needs effective images on at least {min_required_effective_ratio:.0%} of slides; found {effective_image_slide_ratio}."
+            )
         if max_text > 360:
             errors.append(f"media_required=true output has a report-like slide with {max_text} text chars; split or shorten it.")
         elif max_text > 240:
@@ -399,10 +484,12 @@ def validate_reference_constraints(
     if "classroom-sharing" in secondary_gates:
         if slide_count and not 3 <= slide_count <= 8:
             errors.append("classroom-sharing output should have 3-8 slides.")
-        if max_text > 110:
+        if max_text > 180:
             errors.append(f"classroom-sharing output is too text-heavy; max slide text chars is {max_text}.")
-        if image_slide_ratio < 0.8:
-            errors.append("classroom-sharing output needs images on at least 80% of slides.")
+        elif max_text > 120:
+            warnings.append(f"classroom-sharing output has a dense slide with {max_text} text chars; review readability.")
+        if media_required and effective_image_slide_ratio < 0.5:
+            errors.append("classroom-sharing output needs effective images on at least 50% of slides when media_required=true.")
 
     return {
         "ok": not errors,
@@ -439,12 +526,15 @@ def markdown_report(
         f"- Layout families: {', '.join(spec_report.get('metrics', {}).get('layout_families', [])) or 'n/a'}",
         f"- Package bytes: {pptx_report.get('metrics', {}).get('package_bytes', 'n/a')}",
         f"- Image slide ratio: {reference_report.get('metrics', {}).get('image_slide_ratio', 'n/a')}",
+        f"- Effective image slide ratio: {reference_report.get('metrics', {}).get('effective_image_slide_ratio', 'n/a')}",
         f"- Media per slide: {reference_report.get('metrics', {}).get('media_per_slide', 'n/a')}",
         f"- Pictures per slide: {reference_report.get('metrics', {}).get('pictures_per_slide', 'n/a')}",
+        f"- Avg picture area ratio: {reference_report.get('metrics', {}).get('avg_picture_area_ratio', 'n/a')}",
         f"- Avg text chars / slide: {reference_report.get('metrics', {}).get('avg_text_chars_per_slide', 'n/a')}",
         f"- Max text chars / slide: {reference_report.get('metrics', {}).get('max_text_chars_per_slide', 'n/a')}",
         f"- Naked URL slides: {reference_report.get('metrics', {}).get('naked_url_slides', [])}",
         f"- Missing expected image slides: {reference_report.get('metrics', {}).get('missing_expected_image_slides', [])}",
+        f"- Weak expected image slides: {reference_report.get('metrics', {}).get('weak_expected_image_slides', [])}",
         "",
         "## Errors",
         "",

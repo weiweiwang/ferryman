@@ -64,4 +64,4 @@ def test_audit_reference_extracts_slide_rhythm(tmp_path):
     assert report["summary"]["pictures_per_slide"] == 1
     assert report["slides"][0]["layout_label"] == "image-led"
     assert report["slides"][0]["dominant_text"]["max_font_pt"] == 36
-    assert report["recommended_constraints"]["min_image_slide_ratio"] >= 0.6
+    assert report["recommended_constraints"]["min_image_slide_ratio"] >= 0.5

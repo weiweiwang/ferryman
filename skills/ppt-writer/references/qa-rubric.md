@@ -26,8 +26,9 @@ Pass criteria:
   of repeating `image-led` on every slide.
 - Claims read as conclusions, not topic labels.
 - If the user asks for image-rich or "图文并茂" output, `media_required` must be
-  true and at least 60% of non-appendix slides should include `image`, `images`,
-  or `requires_image`.
+  true and the deck should set an explicit `min_image_slide_ratio`. Use 0.5 as
+  the normal baseline; raise it only when the prompt or reference deck is
+  strongly image-led.
 - `media_required=true` is a deck-level media promise, not a rule that every
   slide must have a picture. Ordinary analysis slides may be text-only when the
   overall deck still has enough image coverage.
@@ -38,8 +39,9 @@ Pass criteria:
 - If `reference_constraints` are present, final PPTX metrics must stay within
   the text density and media density thresholds.
 - `consumer-retail` requires media, provenance, and image-led rhythm.
-- `classroom-sharing` requires short copy, 3-8 slides, and images on most
-  slides.
+- `classroom-sharing` requires short copy and 3-8 slides. Images should be used
+  when they help the explanation; do not force every concept slide to carry a
+  picture.
 
 ## Visual QA
 
@@ -54,10 +56,13 @@ Pass criteria when rendering is available:
   `media_required=true` and zero media files fails QA.
 - Use `pictures_per_slide` to understand rendered image-instance density;
   `media_per_slide` only counts packaged media files.
+- Use `effective_image_slide_ratio` and `weak_expected_image_slides` to catch
+  slides where an image exists but is too small to carry the slide.
 - Any visible `http://`, `https://`, or `www.` URL on a slide fails QA; source
   URLs belong in provenance fields, not rendered text.
 - Slides that declare image intent through `requires_image`, `image`, `images`,
-  or image/photo/screenshot layouts must render at least one actual picture.
+  or image/photo/screenshot layouts must render at least one actual picture,
+  and the picture frame must meet the layout's minimum effective area.
 - For `media_required=true`, extremely dense report-like slides fail, while
   moderately dense slides produce warnings for visual review.
 
@@ -65,13 +70,27 @@ Pass criteria when rendering is available:
 
 Rebuild if any of these appear:
 
+- `contact-sheet-scorecard.md` is FAIL.
 - unsupported or invented metrics.
 - missing source notes for factual claims.
 - topic-only titles.
 - more than two consecutive same-family layouts.
 - tiny dense copy that relies on shrink-to-fit.
+- tiny image frames on slides that promised an image.
 - decorative boxes that do not encode structure.
 - "图文并茂" decks with no real images or screenshots.
 - reference-inspired decks that ignore the reference deck's text density, image
   density, or visual rhythm.
 - rendered slide defects, including clipped text, unreadable labels, floating arrows, or misaligned tables.
+
+## Comeback Scorecard
+
+After structural QA and render preview, run `score_deck.py`. The scorecard is a
+blocking delivery gate for serious decks:
+
+- dimensions: story, specificity, rhythm, whitespace, visual proof, asset
+  quality, precision, coherence.
+- pass requires no underlying QA errors, total score at or above threshold, no
+  dimension below 4, and no weak slides requiring iteration.
+- weak slides should be rebuilt in batches of 2-4 before rerunning build,
+  render, QA, and scorecard.

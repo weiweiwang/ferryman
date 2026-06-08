@@ -185,6 +185,7 @@ def test_validate_reference_constraints_blocks_text_heavy_output():
         "max_avg_text_chars_per_slide": 50,
         "max_text_chars_per_slide": 80,
         "min_image_slide_ratio": 0.8,
+        "min_effective_image_slide_ratio": 0.8,
         "min_media_per_slide": 1,
     }
     pptx_report = {
@@ -193,8 +194,8 @@ def test_validate_reference_constraints_blocks_text_heavy_output():
             "slide_count": 2,
             "media_count": 0,
             "slides": [
-                {"slide": 1, "text_chars": 120, "pictures": 0},
-                {"slide": 2, "text_chars": 90, "pictures": 0},
+                {"slide": 1, "text_chars": 120, "pictures": 0, "max_picture_area_ratio": 0},
+                {"slide": 2, "text_chars": 90, "pictures": 0, "max_picture_area_ratio": 0},
             ],
         },
     }
@@ -204,6 +205,7 @@ def test_validate_reference_constraints_blocks_text_heavy_output():
     assert report["ok"] is False
     assert any("Average text chars" in error for error in report["errors"])
     assert any("Image slide ratio" in error for error in report["errors"])
+    assert any("Effective image slide ratio" in error for error in report["errors"])
     assert report["metrics"]["pictures_per_slide"] == 0
 
 
@@ -251,9 +253,9 @@ def test_media_required_allows_some_non_image_slides_when_overall_coverage_is_go
             "media_count": 2,
             "naked_url_slides": [],
             "slides": [
-                {"slide": 1, "text_chars": 40, "pictures": 1},
-                {"slide": 2, "text_chars": 50, "pictures": 1},
-                {"slide": 3, "text_chars": 80, "pictures": 0},
+                {"slide": 1, "text_chars": 40, "pictures": 1, "picture_area_ratio": 0.45, "max_picture_area_ratio": 0.45},
+                {"slide": 2, "text_chars": 50, "pictures": 1, "picture_area_ratio": 0.18, "max_picture_area_ratio": 0.18},
+                {"slide": 3, "text_chars": 80, "pictures": 0, "picture_area_ratio": 0, "max_picture_area_ratio": 0},
             ],
         },
     }
@@ -300,8 +302,8 @@ def test_output_qa_blocks_naked_urls_and_missing_expected_images():
             "naked_url_slides": [1],
             "naked_url_count": 1,
             "slides": [
-                {"slide": 1, "text_chars": 80, "pictures": 0},
-                {"slide": 2, "text_chars": 80, "pictures": 0},
+                {"slide": 1, "text_chars": 80, "pictures": 0, "max_picture_area_ratio": 0},
+                {"slide": 2, "text_chars": 80, "pictures": 0, "max_picture_area_ratio": 0},
             ],
         },
     }
@@ -323,8 +325,8 @@ def test_media_required_blocks_extreme_report_like_slide_text():
             "media_count": 2,
             "naked_url_slides": [],
             "slides": [
-                {"slide": 1, "text_chars": 380, "pictures": 1},
-                {"slide": 2, "text_chars": 80, "pictures": 1},
+                {"slide": 1, "text_chars": 380, "pictures": 1, "picture_area_ratio": 0.45, "max_picture_area_ratio": 0.45},
+                {"slide": 2, "text_chars": 80, "pictures": 1, "picture_area_ratio": 0.20, "max_picture_area_ratio": 0.20},
             ],
         },
     }
@@ -333,6 +335,180 @@ def test_media_required_blocks_extreme_report_like_slide_text():
 
     assert report["ok"] is False
     assert any("report-like slide" in error for error in report["errors"])
+
+
+def test_output_qa_blocks_tiny_expected_image_frames():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "slides": [
+            {
+                "number": 1,
+                "type": "thesis",
+                "layout": "big-claim",
+                "layout_family": "thesis",
+                "claim": "A supporting image should be large enough to read.",
+                "proof_object": "evidence photo",
+                "support": "Fixture.",
+                "image": {"path": "assets/evidence.png", "source": "fixture"},
+            },
+            {
+                "number": 2,
+                "type": "thesis",
+                "layout": "big-claim",
+                "layout_family": "thesis",
+                "claim": "Text-only analysis remains allowed.",
+                "proof_object": "summary",
+                "support": "Fixture.",
+            },
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 2,
+            "media_count": 1,
+            "naked_url_slides": [],
+            "slides": [
+                {"slide": 1, "text_chars": 80, "pictures": 1, "picture_area_ratio": 0.075, "max_picture_area_ratio": 0.075},
+                {"slide": 2, "text_chars": 80, "pictures": 0, "picture_area_ratio": 0, "max_picture_area_ratio": 0},
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is False
+    assert any("too-small picture frames" in error for error in report["errors"])
+    assert report["metrics"]["weak_expected_image_slides"][0]["slide"] == 1
+
+
+def test_output_qa_allows_text_only_analysis_slide_with_media_required():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "media_required": True,
+        "slides": [
+            {
+                "number": 1,
+                "type": "cover",
+                "layout": "photo-caption",
+                "layout_family": "photo-caption",
+                "claim": "The first slide uses a large image.",
+                "proof_object": "cover photo",
+                "support": "Fixture.",
+                "image": {"path": "assets/cover.png", "source": "fixture"},
+            },
+            {
+                "number": 2,
+                "type": "generic",
+                "layout": "image-grid",
+                "layout_family": "topic-grid",
+                "claim": "The second slide uses a visual grid.",
+                "proof_object": "image grid",
+                "support": "Fixture.",
+                "images": [{"path": "assets/grid.png", "source": "fixture"}],
+            },
+            {
+                "number": 3,
+                "type": "thesis",
+                "layout": "big-claim",
+                "layout_family": "thesis",
+                "claim": "The final analysis slide can stay text-only.",
+                "proof_object": "decision summary",
+                "support": "Fixture.",
+            },
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 3,
+            "media_count": 2,
+            "naked_url_slides": [],
+            "slides": [
+                {"slide": 1, "text_chars": 50, "pictures": 1, "picture_area_ratio": 0.60, "max_picture_area_ratio": 0.60},
+                {"slide": 2, "text_chars": 70, "pictures": 1, "picture_area_ratio": 0.16, "max_picture_area_ratio": 0.16},
+                {"slide": 3, "text_chars": 95, "pictures": 0, "picture_area_ratio": 0, "max_picture_area_ratio": 0},
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is True
+    assert report["metrics"]["effective_image_slide_ratio"] == 0.667
+
+
+def test_output_qa_does_not_require_images_for_text_only_grid_families():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "media_required": True,
+        "reference_constraints": {
+            "min_image_slide_ratio": 0.5,
+            "min_effective_image_slide_ratio": 0.5,
+        },
+        "slides": [
+            {
+                "number": 1,
+                "type": "cover",
+                "layout": "photo-caption",
+                "layout_family": "photo-caption",
+                "claim": "The first slide uses a large image.",
+                "proof_object": "cover photo",
+                "support": "Fixture.",
+                "image": {"path": "assets/cover.png", "source": "fixture"},
+            },
+            {
+                "number": 2,
+                "type": "timeline",
+                "layout": "timeline",
+                "layout_family": "timeline-grid",
+                "claim": "A timeline page can be text-only.",
+                "proof_object": "timeline",
+                "support": "Fixture.",
+            },
+            {
+                "number": 3,
+                "type": "comparison",
+                "layout": "two-column-compare",
+                "layout_family": "topic-grid",
+                "claim": "A comparison page can be text-only.",
+                "proof_object": "two-column comparison",
+                "support": "Fixture.",
+            },
+            {
+                "number": 4,
+                "type": "takeaway",
+                "layout": "classroom-takeaway",
+                "layout_family": "takeaway-photo",
+                "claim": "The final slide uses a large image.",
+                "proof_object": "takeaway photo",
+                "support": "Fixture.",
+                "image": {"path": "assets/final.png", "source": "fixture"},
+            },
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 4,
+            "media_count": 2,
+            "naked_url_slides": [],
+            "slides": [
+                {"slide": 1, "text_chars": 50, "pictures": 1, "picture_area_ratio": 0.60, "max_picture_area_ratio": 0.60},
+                {"slide": 2, "text_chars": 95, "pictures": 0, "picture_area_ratio": 0, "max_picture_area_ratio": 0},
+                {"slide": 3, "text_chars": 110, "pictures": 0, "picture_area_ratio": 0, "max_picture_area_ratio": 0},
+                {"slide": 4, "text_chars": 55, "pictures": 1, "picture_area_ratio": 0.65, "max_picture_area_ratio": 0.65},
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is True
+    assert report["metrics"]["weak_expected_image_slides"] == []
 
 
 def test_qa_combines_spec_and_pptx(tmp_path):

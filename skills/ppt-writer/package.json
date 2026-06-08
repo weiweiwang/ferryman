@@ -5,6 +5,7 @@
   "type": "commonjs",
   "description": "Portable Ferryman PPTX builder for the ppt-writer skill.",
   "dependencies": {
+    "image-size": "1.2.1",
     "pptxgenjs": "3.12.0"
   }
 }

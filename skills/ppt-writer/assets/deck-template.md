@@ -36,7 +36,8 @@ Minimum structure:
     "target_slide_count": 6,
     "max_avg_text_chars_per_slide": 90,
     "max_text_chars_per_slide": 140,
-    "min_image_slide_ratio": 0.6,
+    "min_image_slide_ratio": 0.5,
+    "min_effective_image_slide_ratio": 0.5,
     "min_media_per_slide": 0.5
   },
   "source_summary": "One sentence about source basis.",
@@ -55,6 +56,7 @@ Minimum structure:
       "image": {
         "asset_id": "cover-hero",
         "path": "reports/<yyyy-mm-dd>/ppt-writer-<task_slug>/assets/source-image.jpg",
+        "fit": "cover",
         "alt": "Short image description",
         "source": "Where the image came from"
       },
@@ -98,11 +100,15 @@ Recommended slide fields:
 - `image`: one primary image object with workspace-relative `path`, `alt`, and
   `source`. Prefer paths returned by `register_asset.py`.
 - `images`: optional list of image objects for image-led layouts.
+- `fit`: optional image fit strategy, `cover` for photo-led hero slots and
+  `contain` for screenshots or diagrams that must remain fully visible.
 - `asset_id`: stable id from `asset-manifest.json`; optional but recommended.
 - `register_asset.py` records asset metadata in `asset-manifest.json`,
-  including `width`, `height`, `format`, `aspect_ratio`, and `bytes`. Use those
-  returned values to choose suitable screenshots or photos; do not create a
-  workspace script to inspect image files.
+  including `width`, `height`, `format`, `aspect_ratio`, `bytes`,
+  `content_bbox`, `content_area_ratio`, and whether a padding crop was applied.
+  Use those returned values to reject screenshots with huge empty borders or to
+  choose `cover`/`contain`; do not create a workspace script to inspect image
+  files.
 
 Unsupported image fields:
 

@@ -14,7 +14,17 @@ def load_module():
     return module
 
 
-def write_minimal_pptx(path: Path, *, slides: int = 2, empty_media: bool = False, url_text: bool = False) -> None:
+EMU = 914400
+
+
+def write_minimal_pptx(
+    path: Path,
+    *,
+    slides: int = 2,
+    empty_media: bool = False,
+    url_text: bool = False,
+    picture_on_first_slide: bool = False,
+) -> None:
     with zipfile.ZipFile(path, "w") as package:
         package.writestr(
             "[Content_Types].xml",
@@ -27,19 +37,32 @@ def write_minimal_pptx(path: Path, *, slides: int = 2, empty_media: bool = False
         package.writestr(
             "ppt/presentation.xml",
             """<?xml version="1.0" encoding="UTF-8"?>
-<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:sldSz cx="12192000" cy="6858000"/>
+</p:presentation>
 """,
         )
         for index in range(1, slides + 1):
             text = "Slide {index}".format(index=index)
             if url_text and index == 1:
                 text = "Image source https://example.test/image.jpg"
+            picture_xml = ""
+            if picture_on_first_slide and index == 1:
+                picture_xml = f"""
+  <p:pic>
+    <p:spPr>
+      <a:xfrm>
+        <a:off x="{int(1 * EMU)}" y="{int(1 * EMU)}"/>
+        <a:ext cx="{int(4 * EMU)}" cy="{int(2 * EMU)}"/>
+      </a:xfrm>
+    </p:spPr>
+  </p:pic>"""
             package.writestr(
                 f"ppt/slides/slide{index}.xml",
                 f"""<?xml version="1.0" encoding="UTF-8"?>
 <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>{picture_xml}</p:spTree></p:cSld>
 </p:sld>
 """,
             )
@@ -59,6 +82,21 @@ def test_inspect_valid_minimal_pptx(tmp_path):
     assert report["metrics"]["slide_text_chars"] > 0
     assert report["metrics"]["slides"][0]["text_chars"] > 0
     assert report["metrics"]["slides"][0]["shapes"] == 1
+
+
+def test_inspect_reports_picture_boxes_and_area(tmp_path):
+    module = load_module()
+    pptx = tmp_path / "deck.pptx"
+    write_minimal_pptx(pptx, slides=1, picture_on_first_slide=True)
+
+    report = module.inspect_pptx(pptx, expected_slides=1)
+
+    slide = report["metrics"]["slides"][0]
+    assert slide["pictures"] == 1
+    assert slide["picture_boxes"][0]["x"] == 1
+    assert slide["picture_boxes"][0]["w"] == 4
+    assert slide["max_picture_area_ratio"] > 0.07
+    assert report["metrics"]["slide_width_inches"] > 13
 
 
 def test_inspect_reports_slide_count_mismatch(tmp_path):

@@ -95,9 +95,10 @@ Allowed calls:
 - `run_skill_script(script_name="register_asset.py", args=["--source", "<workspace-relative screenshot-or-image>", "--id", "<asset-id>", "--asset-dir", "<task-dir>/assets", "--manifest", "<task-dir>/asset-manifest.json", "--source-note", "<url or provenance>", "--role", "<slide role>", "--alt", "<alt text>"])`
 - `run_skill_script(script_name="build_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--out", "<workspace-relative output.pptx>"])`
 - `run_skill_script(script_name="inspect_pptx.py", args=["--pptx", "<workspace-relative output.pptx>", "--expected-slides", "<n>"])`
-- `run_skill_script(script_name="qa_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--pptx", "<workspace-relative output.pptx>", "--out", "<workspace-relative qa-report.md>"])`
+- `run_skill_script(script_name="qa_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--pptx", "<workspace-relative output.pptx>", "--out", "<workspace-relative qa-report.md>", "--json-out", "<workspace-relative qa-report.json>"])`
 - `run_skill_script(script_name="render_deck.py", args=["--pptx", "<workspace-relative output.pptx>", "--out-dir", "<workspace-relative preview-dir>"])`
 - `run_skill_script(script_name="make_contact_sheet.py", args=["--output", "<workspace-relative contact-sheet.png>", "<slide png 1>", "<slide png 2>"])`
+- `run_skill_script(script_name="score_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--qa-json", "<workspace-relative qa-report.json>", "--preview-dir", "<workspace-relative preview-dir>", "--out", "<workspace-relative contact-sheet-scorecard.md>", "--json-out", "<workspace-relative contact-sheet-scorecard.json>"])`
 
 Forbidden calls:
 
@@ -124,9 +125,13 @@ Forbidden calls:
      - `profile-plan.md`
      - `claim-spine.md`
      - `design-system.md`
+     - `contact-sheet-plan.md`
      - `asset-manifest.json` when media is used
      - `deck-spec.json`
      - `qa-report.md`
+     - `qa-report.json`
+     - `contact-sheet-scorecard.md` and `contact-sheet-scorecard.json`
+     - `weak-slides.md` whenever scorecard fails
      - `output/<deck_title_slug>.pptx`
      - optional `preview/` and `contact-sheet.png` when rendering works.
 2. **Choose task mode and profile**
@@ -160,10 +165,13 @@ Forbidden calls:
    - For browser capture, navigate to the source, take a screenshot, list
   `screenshots/`, then register the chosen file. `register_asset.py` returns
   and records image metadata including `width`, `height`, `format`,
-  `aspect_ratio`, and `bytes`:
+  `aspect_ratio`, `bytes`, `content_bbox`, `content_area_ratio`, and whether
+  obvious flat padding was cropped:
      `run_skill_script(script_name="register_asset.py", args=["--source", "screenshots/<file>.jpg", "--id", "cover-hero", "--asset-dir", "<task-dir>/assets", "--manifest", "<task-dir>/asset-manifest.json", "--source-note", "<source URL>", "--role", "cover hero", "--alt", "<description>"])`
    - Use the returned `asset.path` in `deck-spec.json` as `image.path` or
      `images[].path`.
+   - Reject or recapture assets whose content area is tiny after registration;
+     avoid using full browser/search-result pages as hero imagery.
 6. **Write the claim spine**
    - Every non-appendix slide needs a claim title, a proof object, and a support
      note.
@@ -173,7 +181,14 @@ Forbidden calls:
      grammar, table grammar, and banned motifs.
    - Use [references/design-system.md](references/design-system.md) when the
      design direction is not already specified.
-8. **Create `deck-spec.json`**
+8. **Plan the contact sheet**
+   - Write `contact-sheet-plan.md` before building. It must name the intended
+     macro-layout rhythm, which slides are visual-led vs text-led, the proof
+     object on each slide, and the weak-slide failure modes to avoid.
+   - For 8+ slide decks, plan at least four distinct macro-layout families; for
+     10+ slide decks, aim for five or more. Avoid three consecutive slides with
+     the same visual cadence.
+9. **Create `deck-spec.json`**
    - Treat deck-spec as the deck blueprint: title, audience, theme, and slide
      objects with `claim`, `proof_object`, `layout`, and content fields.
    - Include `task_mode`, `primary_profile`, `secondary_gates`, and
@@ -184,9 +199,12 @@ Forbidden calls:
    - For image-led decks, set `media_required=true`; add slide-level `image`,
      `images`, or `requires_image` fields with source provenance. Store the
      actual image file in the workspace and point `image.path` at that file.
+   - On image objects, use `fit: "cover"` for photo-led hero slots and
+     `fit: "contain"` for screenshots, documents, or diagrams that must remain
+     fully visible.
    - Use [assets/deck-template.md](assets/deck-template.md) for the expected
      structure.
-9. **Build the PPTX**
+10. **Build the PPTX**
    - First check runtime readiness:
      `run_skill_script(script_name="check_deps.py", args=[])`
    - Use bundled `scripts/build_deck.py`, which invokes the Node
@@ -196,17 +214,22 @@ Forbidden calls:
      skill dependency with the checked-in lockfile, for example
      `npm ci --prefix skills/ppt-writer`, rather than switching to Codex
      internal runtimes.
-10. **Run QA**
+11. **Run QA**
    - Run structural/spec QA:
-     `run_skill_script(script_name="qa_deck.py", args=["--spec", "<deck-spec.json>", "--pptx", "<output.pptx>", "--out", "<qa-report.md>"])`
+     `run_skill_script(script_name="qa_deck.py", args=["--spec", "<deck-spec.json>", "--pptx", "<output.pptx>", "--out", "<qa-report.md>", "--json-out", "<qa-report.json>"])`
    - Run render QA when local render dependencies are available:
      `run_skill_script(script_name="render_deck.py", args=["--pptx", "<output.pptx>", "--out-dir", "preview"])`
    - Create a contact sheet when slide PNGs exist:
      `run_skill_script(script_name="make_contact_sheet.py", args=["--output", "contact-sheet.png", "preview/slide-01.png", "..."])`
-11. **Iterate**
-   - If QA finds structural errors, missing claims/proof objects, repeated
-     layouts, unreadable density, failed render, or obvious visual defects, fix
-     `deck-spec.json` or the generated build script and rebuild.
+   - Run the comeback scorecard:
+     `run_skill_script(script_name="score_deck.py", args=["--spec", "<deck-spec.json>", "--qa-json", "<qa-report.json>", "--preview-dir", "preview", "--out", "<contact-sheet-scorecard.md>", "--json-out", "<contact-sheet-scorecard.json>"])`
+12. **Iterate weak slides**
+   - If QA or scorecard fails, write `weak-slides.md` from the scorecard's weak
+     slide list, rebuild the weakest 2-4 slides first, then rerun build, render,
+     QA, and scorecard.
+   - Do not deliver just because a PPTX exists. Delivery requires structural QA
+     pass plus contact-sheet scorecard pass, unless render dependencies are
+     unavailable and that limitation is explicitly reported.
 
 ## Quality Gates
 
@@ -219,7 +242,14 @@ Before final delivery:
   report does not flag missing slide images, visible URLs, or report-like text
   density.
 - Media assets used by the deck are recorded in `asset-manifest.json`.
+- Slides that promise an image have meaningful rendered picture area; tiny
+  corner thumbnails fail QA even when the PPTX technically contains a picture.
 - `qa-report.md` exists and records pass/fail status.
+- `contact-sheet-plan.md` exists before build.
+- `contact-sheet-scorecard.md` exists after QA. It must PASS before final
+  delivery when rendering/scorecard inputs are available.
+- If `contact-sheet-scorecard.md` fails, `weak-slides.md` lists the slides to
+  rebuild and the deck is not final.
 - `task_mode` and `primary_profile` are present in `deck-spec.json`.
 - Each non-appendix slide has a claim, proof object, and support note.
 - Reference constraints pass when a reference audit is used.

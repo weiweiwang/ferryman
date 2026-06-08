@@ -19,6 +19,7 @@ def check_node_dependency() -> dict[str, object]:
     result: dict[str, object] = {
         "node": node,
         "pptxgenjs": False,
+        "image_size": False,
         "errors": [],
     }
     errors: list[str] = result["errors"]  # type: ignore[assignment]
@@ -30,7 +31,7 @@ def check_node_dependency() -> dict[str, object]:
         [
             node,
             "-e",
-            "const p=require.resolve('pptxgenjs'); const pkg=require('pptxgenjs/package.json'); console.log(JSON.stringify({path:p,version:pkg.version}))",
+            "const p=require.resolve('pptxgenjs'); const pkg=require('pptxgenjs/package.json'); const ip=require.resolve('image-size'); const ipkg=require('image-size/package.json'); console.log(JSON.stringify({pptxgenjs:{path:p,version:pkg.version},imageSize:{path:ip,version:ipkg.version}}))",
         ],
         cwd=SCRIPT_DIR,
         text=True,
@@ -50,7 +51,8 @@ def check_node_dependency() -> dict[str, object]:
     except json.JSONDecodeError:
         payload = {"raw": probe.stdout.strip()}
     result["pptxgenjs"] = True
-    result["pptxgenjs_info"] = payload
+    result["image_size"] = True
+    result["node_dependency_info"] = payload
     return result
 
 

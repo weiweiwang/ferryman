@@ -2,6 +2,8 @@ import importlib.util
 import base64
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "register_asset.py"
 PNG_1X1 = base64.b64decode(
@@ -67,3 +69,37 @@ def test_register_asset_rejects_workspace_escape(tmp_path):
         assert "escapes workspace" in str(exc)
     else:
         raise AssertionError("Expected workspace escape to be rejected.")
+
+
+def test_register_asset_crops_large_flat_padding(tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image, ImageDraw
+
+    module = load_module()
+    source_dir = tmp_path / "screenshots"
+    source_dir.mkdir()
+    source = source_dir / "padded.jpg"
+    image = Image.new("RGB", (400, 240), (8, 8, 8))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((80, 50, 280, 160), fill=(230, 230, 230))
+    image.save(source)
+
+    result = module.register_asset(
+        source="screenshots/padded.jpg",
+        asset_id="Padded News Photo",
+        asset_dir="reports/task/assets",
+        manifest_path="reports/task/asset-manifest.json",
+        source_note="browser screenshot",
+        role="supporting image",
+        alt="Padded image",
+        workspace=tmp_path,
+    )
+
+    assert result["ok"] is True
+    asset = result["asset"]
+    assert asset["content_crop_applied"] is True
+    assert asset["raw_width"] == 400
+    assert asset["raw_content_area_ratio"] < 0.6
+    assert asset["width"] < 260
+    assert asset["height"] < 160
+    assert asset["content_area_ratio"] > 0.8

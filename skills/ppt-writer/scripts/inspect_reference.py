@@ -202,7 +202,7 @@ def _recommended_constraints(summary: dict[str, object]) -> dict[str, object]:
         "target_slide_count": summary.get("slide_count", 0),
         "max_avg_text_chars_per_slide": max(40, int(avg_chars * 1.25)),
         "max_text_chars_per_slide": max(70, int(max_chars * 1.2)),
-        "min_image_slide_ratio": max(0.6, round(image_ratio * 0.9, 2)),
+        "min_image_slide_ratio": max(0.5, round(image_ratio * 0.9, 2)),
         "min_media_per_slide": round(max(0.5, media_per_slide * 0.75), 2),
     }
 

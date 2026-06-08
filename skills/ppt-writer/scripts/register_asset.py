@@ -12,11 +12,14 @@ import argparse
 import json
 import re
 import shutil
+from statistics import median
 from pathlib import Path
 from xml.etree import ElementTree
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}
+CONTENT_DIFF_THRESHOLD = 54
+AUTO_CROP_MAX_AREA_RATIO = 0.92
 
 
 def slugify(value: str) -> str:
@@ -85,6 +88,84 @@ def _svg_dimensions(path: Path) -> tuple[int | None, int | None]:
         return width, height
 
 
+def _detect_content_bbox(path: Path) -> dict[str, object]:
+    try:
+        from PIL import Image  # type: ignore
+
+        with Image.open(path) as raw_image:
+            image = raw_image.convert("RGB")
+            width, height = image.size
+            if width <= 0 or height <= 0:
+                return {}
+            max_side = 420
+            scale = min(1.0, max_side / max(width, height))
+            if scale < 1.0:
+                sample = image.resize((max(1, int(width * scale)), max(1, int(height * scale))))
+            else:
+                sample = image.copy()
+            sample_width, sample_height = sample.size
+            pixels = sample.load()
+            border_pixels: list[tuple[int, int, int]] = []
+            step_x = max(1, sample_width // 120)
+            step_y = max(1, sample_height // 120)
+            for x in range(0, sample_width, step_x):
+                border_pixels.append(pixels[x, 0])
+                border_pixels.append(pixels[x, sample_height - 1])
+            for y in range(0, sample_height, step_y):
+                border_pixels.append(pixels[0, y])
+                border_pixels.append(pixels[sample_width - 1, y])
+            if not border_pixels:
+                return {}
+            bg = tuple(int(median(channel)) for channel in zip(*border_pixels))
+
+            min_x = sample_width
+            min_y = sample_height
+            max_x = -1
+            max_y = -1
+            for y in range(sample_height):
+                for x in range(sample_width):
+                    pixel = pixels[x, y]
+                    diff = sum(abs(pixel[index] - bg[index]) for index in range(3))
+                    if diff >= CONTENT_DIFF_THRESHOLD:
+                        min_x = min(min_x, x)
+                        min_y = min(min_y, y)
+                        max_x = max(max_x, x)
+                        max_y = max(max_y, y)
+            if max_x < min_x or max_y < min_y:
+                return {
+                    "content_bbox": None,
+                    "content_area_ratio": 0,
+                    "content_background_rgb": list(bg),
+                }
+
+            # Expand slightly so cropped photos keep a little breathing room.
+            pad = max(2, int(0.012 * max(sample_width, sample_height)))
+            min_x = max(0, min_x - pad)
+            min_y = max(0, min_y - pad)
+            max_x = min(sample_width - 1, max_x + pad)
+            max_y = min(sample_height - 1, max_y + pad)
+            inv_scale = 1.0 / scale
+            x0 = int(min_x * inv_scale)
+            y0 = int(min_y * inv_scale)
+            x1 = min(width, int((max_x + 1) * inv_scale))
+            y1 = min(height, int((max_y + 1) * inv_scale))
+            bbox_width = max(0, x1 - x0)
+            bbox_height = max(0, y1 - y0)
+            area_ratio = round((bbox_width * bbox_height) / (width * height), 4)
+            return {
+                "content_bbox": {
+                    "x": x0,
+                    "y": y0,
+                    "width": bbox_width,
+                    "height": bbox_height,
+                },
+                "content_area_ratio": area_ratio,
+                "content_background_rgb": list(bg),
+            }
+    except Exception as exc:  # noqa: BLE001 - detection should not block registration.
+        return {"content_detection_error": str(exc)}
+
+
 def image_metadata(path: Path) -> dict[str, object]:
     metadata: dict[str, object] = {
         "bytes": path.stat().st_size,
@@ -118,9 +199,55 @@ def image_metadata(path: Path) -> dict[str, object]:
                     "aspect_ratio": _aspect_ratio(width, height),
                 }
             )
+            metadata.update(_detect_content_bbox(path))
     except Exception as exc:  # noqa: BLE001 - metadata should not block registration.
         metadata["metadata_error"] = str(exc)
     return metadata
+
+
+def _should_crop_padding(metadata: dict[str, object]) -> bool:
+    bbox = metadata.get("content_bbox")
+    ratio = metadata.get("content_area_ratio")
+    width = metadata.get("width")
+    height = metadata.get("height")
+    if not isinstance(bbox, dict) or not isinstance(ratio, (int, float)):
+        return False
+    if not isinstance(width, int) or not isinstance(height, int):
+        return False
+    if ratio <= 0 or ratio >= AUTO_CROP_MAX_AREA_RATIO:
+        return False
+    bbox_width = bbox.get("width")
+    bbox_height = bbox.get("height")
+    if not isinstance(bbox_width, int) or not isinstance(bbox_height, int):
+        return False
+    return bbox_width >= 120 and bbox_height >= 90
+
+
+def _copy_or_crop_image(source_path: Path, target_path: Path, raw_metadata: dict[str, object]) -> bool:
+    if not _should_crop_padding(raw_metadata):
+        shutil.copy2(source_path, target_path)
+        return False
+    try:
+        from PIL import Image  # type: ignore
+
+        bbox = raw_metadata["content_bbox"]
+        assert isinstance(bbox, dict)
+        with Image.open(source_path) as image:
+            crop_box = (
+                int(bbox["x"]),
+                int(bbox["y"]),
+                int(bbox["x"]) + int(bbox["width"]),
+                int(bbox["y"]) + int(bbox["height"]),
+            )
+            cropped = image.crop(crop_box)
+            save_kwargs = {}
+            if image.format:
+                save_kwargs["format"] = image.format
+            cropped.save(target_path, **save_kwargs)
+        return True
+    except Exception:
+        shutil.copy2(source_path, target_path)
+        return False
 
 
 def register_asset(
@@ -148,8 +275,10 @@ def register_asset(
     normalized_id = slugify(asset_id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / f"{normalized_id}{extension}"
+    raw_metadata = image_metadata(source_path)
+    cropped = False
     if source_path.resolve() != target_path.resolve():
-        shutil.copy2(source_path, target_path)
+        cropped = _copy_or_crop_image(source_path, target_path, raw_metadata)
     metadata = image_metadata(target_path)
 
     data = load_manifest(manifest)
@@ -161,6 +290,12 @@ def register_asset(
         "role": role,
         "alt": alt,
         "source_file": workspace_relative(source_path, workspace_dir),
+        "raw_width": raw_metadata.get("width"),
+        "raw_height": raw_metadata.get("height"),
+        "raw_aspect_ratio": raw_metadata.get("aspect_ratio"),
+        "raw_content_bbox": raw_metadata.get("content_bbox"),
+        "raw_content_area_ratio": raw_metadata.get("content_area_ratio"),
+        "content_crop_applied": cropped,
         **metadata,
     }
     assets.append(record)

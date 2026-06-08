@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const imageSize = require("image-size");
 
 const W = 13.333;
 const H = 7.5;
@@ -81,6 +82,24 @@ function normalizeImages(slideSpec) {
     });
   }
   return images;
+}
+
+function imageDimensionsInches(imagePath, fallbackW, fallbackH) {
+  try {
+    const dimensions = imageSize(imagePath);
+    if (dimensions && dimensions.width && dimensions.height) {
+      const ratio = dimensions.width / dimensions.height;
+      return ratio >= 1 ? { w: ratio, h: 1 } : { w: 1, h: 1 / ratio };
+    }
+  } catch {
+    // Fall back to the target box when image-size cannot read the asset.
+  }
+  return { w: fallbackW, h: fallbackH };
+}
+
+function normalizeImageFit(value, fallback = "cover") {
+  const fit = String(value || fallback).toLowerCase();
+  return ["cover", "contain", "crop"].includes(fit) ? fit : fallback;
 }
 
 function hasImage(slideSpec) {
@@ -194,13 +213,27 @@ function addImage(pptx, slide, imageSpec, x, y, w, h, colors, font, opt = {}) {
       line: { color: lineColor, transparency: 15 },
     });
   }
-  slide.addImage({
+  const fit = normalizeImageFit(imageSpec.fit || opt.fit, opt.fit || "cover");
+  const natural = imageDimensionsInches(imagePath, w, h);
+  const imageOptions = {
     path: imagePath,
     x,
     y,
-    w,
-    h,
-  });
+    w: natural.w,
+    h: natural.h,
+    altText: imageSpec.alt || imageSpec.caption || imageSpec.source || "",
+    sizing: { type: fit, w, h },
+  };
+  if (fit === "crop" && imageSpec.crop && typeof imageSpec.crop === "object") {
+    imageOptions.sizing = {
+      type: "crop",
+      w,
+      h,
+      x: imageSpec.crop.x || 0,
+      y: imageSpec.crop.y || 0,
+    };
+  }
+  slide.addImage(imageOptions);
   const caption = imageSpec.caption || imageSpec.source;
   if (caption && opt.caption !== false) {
     addText(slide, caption, x, y + h + 0.08, w, 0.16, {
@@ -307,6 +340,7 @@ function coverProcess(pptx, deck, slideSpec, colors, font, index) {
     addImage(pptx, slide, coverImages[0], 8.55, 0.82, 3.92, 3.05, colors, font, {
       frame: false,
       captionColor: "A9B8AE",
+      fit: "cover",
     });
   }
   const items = normalizeItems(slideSpec.items).slice(0, 3);
@@ -429,6 +463,7 @@ function twoColumnCompare(pptx, deck, slideSpec, colors, font, index) {
     if (itemImages.length) {
       addImage(pptx, slide, itemImages[0], x + 0.34, 4.22, 2.1, 0.92, colors, font, {
         caption: false,
+        fit: "contain",
       });
     }
     const metrics = normalizeItems(item.metrics).slice(0, 3);
@@ -506,29 +541,29 @@ function metricRail(pptx, deck, slideSpec, colors, font, index) {
   addTitleBlock(pptx, slide, slideSpec, colors, font);
   const items = normalizeItems(slideSpec.items).slice(0, 5);
   const count = Math.max(items.length, 1);
-  const panelW = Math.min(2.15, 11.2 / count);
+  const panelW = Math.min(2.35, 11.2 / count);
   const gap = count > 1 ? (11.2 - panelW * count) / (count - 1) : 0;
   items.forEach((item, itemIndex) => {
     const x = 0.95 + itemIndex * (panelW + gap);
-    addPanel(pptx, slide, x, 2.55, panelW, 2.35, colors, { fill: colors.white });
-    addText(slide, item.value || item.label || "", x + 0.12, 3.0, panelW - 0.24, 0.42, {
-      size: 24,
+    addPanel(pptx, slide, x, 2.35, panelW, 3.05, colors, { fill: colors.white });
+    addText(slide, item.value || item.label || "", x + 0.12, 2.92, panelW - 0.24, 0.48, {
+      size: 27,
       bold: true,
       color: [colors.green, colors.blue, colors.amber, colors.red, colors.ink][itemIndex % 5],
       margin: 0,
       align: "center",
       fontFace: font.head,
     });
-    addText(slide, item.label || item.text || "", x + 0.18, 3.62, panelW - 0.36, 0.36, {
-      size: 10.5,
+    addText(slide, item.label || item.text || "", x + 0.18, 3.68, panelW - 0.36, 0.34, {
+      size: 11.5,
       bold: true,
       color: colors.ink,
       margin: 0,
       align: "center",
       fontFace: font.body,
     });
-    addText(slide, item.text || item.note || "", x + 0.2, 4.12, panelW - 0.4, 0.38, {
-      size: 8.6,
+    addText(slide, item.text || item.note || "", x + 0.22, 4.22, panelW - 0.44, 0.62, {
+      size: 9.2,
       color: colors.muted,
       margin: 0,
       align: "center",
@@ -680,6 +715,7 @@ function imageLedSlide(pptx, deck, slideSpec, colors, font, index) {
     addImage(pptx, slide, images[0], 0, 0, W, H, colors, font, {
       frame: false,
       caption: false,
+      fit: "cover",
     });
     slide.addShape(pptx.ShapeType.rect, {
       x: 0,
@@ -755,16 +791,32 @@ function imageGridSlide(pptx, deck, slideSpec, colors, font, index) {
   const images = normalizeImages(slideSpec).slice(0, 4);
   if (!images.length) return genericSlide(pptx, deck, slideSpec, colors, font, index);
   const items = normalizeItems(slideSpec.items).slice(0, images.length);
-  const slots = [
-    { x: 0.9, y: 2.02, w: 5.0, h: 2.04 },
-    { x: 6.14, y: 2.02, w: 5.0, h: 2.04 },
-    { x: 0.9, y: 4.55, w: 5.0, h: 1.45 },
-    { x: 6.14, y: 4.55, w: 5.0, h: 1.45 },
-  ];
+  const slotsByCount = {
+    1: [
+      { x: 0.9, y: 2.02, w: 10.55, h: 4.0 },
+    ],
+    2: [
+      { x: 0.9, y: 2.02, w: 5.25, h: 3.82 },
+      { x: 6.38, y: 2.02, w: 5.25, h: 3.82 },
+    ],
+    3: [
+      { x: 0.9, y: 2.02, w: 5.72, h: 3.94 },
+      { x: 6.88, y: 2.02, w: 4.78, h: 1.86 },
+      { x: 6.88, y: 4.10, w: 4.78, h: 1.86 },
+    ],
+    4: [
+      { x: 0.9, y: 2.02, w: 5.0, h: 2.04 },
+      { x: 6.14, y: 2.02, w: 5.0, h: 2.04 },
+      { x: 0.9, y: 4.55, w: 5.0, h: 1.45 },
+      { x: 6.14, y: 4.55, w: 5.0, h: 1.45 },
+    ],
+  };
+  const slots = slotsByCount[images.length] || slotsByCount[4];
   images.forEach((image, imageIndex) => {
     const slot = slots[imageIndex];
     addImage(pptx, slide, image, slot.x, slot.y, slot.w, slot.h, colors, font, {
       caption: false,
+      fit: image.fit || "cover",
     });
     const label = String(items[imageIndex]?.label || "").trim();
     if (label) {
@@ -797,7 +849,9 @@ function genericSlide(pptx, deck, slideSpec, colors, font, index) {
   addTitleBlock(pptx, slide, slideSpec, colors, font);
   const images = normalizeImages(slideSpec);
   if (images.length) {
-    addImage(pptx, slide, images[0], 0.9, 2.04, 4.9, 3.6, colors, font);
+    addImage(pptx, slide, images[0], 0.9, 2.04, 4.9, 3.6, colors, font, {
+      fit: images[0].fit || "cover",
+    });
   }
   const items = normalizeItems(slideSpec.items).slice(0, 6);
   items.forEach((item, itemIndex) => {
