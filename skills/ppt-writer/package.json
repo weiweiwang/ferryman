@@ -1,0 +1,10 @@
+{
+  "name": "@ferryman/ppt-writer-skill",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Portable Ferryman PPTX builder for the ppt-writer skill.",
+  "dependencies": {
+    "pptxgenjs": "3.12.0"
+  }
+}

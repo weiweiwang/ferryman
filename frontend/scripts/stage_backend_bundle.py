@@ -76,6 +76,7 @@ def copy_tree(src: Path, dst: Path) -> None:
             "*.sqlite",
             "*.sqlite3",
             ".git",
+            "node_modules",
         ),
     )
 
@@ -115,6 +116,27 @@ def copy_skills() -> None:
         copy_tree(SKILLS_SRC, SKILLS_DST)
 
 
+def install_skill_node_dependencies() -> None:
+    skill_package_dirs = sorted(path.parent for path in SKILLS_DST.glob("*/package-lock.json"))
+    if not skill_package_dirs:
+        return
+
+    npm = shutil.which("npm")
+    if not npm:
+        skill_names = ", ".join(path.name for path in skill_package_dirs)
+        raise RuntimeError(f"npm is required to install Node dependencies for skills: {skill_names}")
+
+    for skill_dir in skill_package_dirs:
+        try:
+            subprocess.run(
+                [npm, "ci", "--omit=dev", "--ignore-scripts"],
+                check=True,
+                cwd=skill_dir,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"Failed to install Node dependencies for skill: {skill_dir.name}") from exc
+
+
 def ensure_no_forbidden_files(root: Path) -> None:
     forbidden = [path for path in root.rglob("*") if path.name in FORBIDDEN_PROMPT_FILES]
     if forbidden:
@@ -126,6 +148,7 @@ def main() -> None:
     reset_destination()
     build_backend_sidecar()
     copy_skills()
+    install_skill_node_dependencies()
     ensure_no_forbidden_files(GEN_ROOT)
 
 

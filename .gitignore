@@ -59,5 +59,8 @@ AGENTS.md
 CLAUDE.md
 GEMINI.md
 
+# Skill dependencies
+skills/*/node_modules/
+
 dist
 outputs

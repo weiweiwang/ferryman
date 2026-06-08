@@ -50,6 +50,53 @@ def test_stage_backend_copy_skills_does_not_inject_smoke_skill(tmp_path, monkeyp
     assert not (skills_dst / smoke_skill_name).exists()
 
 
+def test_stage_backend_copy_skills_excludes_local_node_modules(tmp_path, monkeypatch):
+    stage_module = load_module("stage_backend_bundle_test_node_modules", STAGE_SCRIPT_PATH)
+    skills_src = tmp_path / "skills-src"
+    skills_dst = tmp_path / "skills-dst"
+    write_skill(skills_src, "node-skill")
+    node_modules = skills_src / "node-skill" / "node_modules" / "pptxgenjs"
+    node_modules.mkdir(parents=True)
+    (node_modules / "package.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(stage_module, "SKILLS_SRC", skills_src)
+    monkeypatch.setattr(stage_module, "SKILLS_DST", skills_dst)
+
+    stage_module.copy_skills()
+
+    assert (skills_dst / "node-skill" / "SKILL.md").exists()
+    assert not (skills_dst / "node-skill" / "node_modules").exists()
+
+
+def test_stage_backend_installs_node_dependencies_for_lockfile_skills(tmp_path, monkeypatch):
+    stage_module = load_module("stage_backend_bundle_test_install_node", STAGE_SCRIPT_PATH)
+    skills_dst = tmp_path / "skills-dst"
+    node_skill = skills_dst / "node-skill"
+    plain_skill = skills_dst / "plain-skill"
+    node_skill.mkdir(parents=True)
+    plain_skill.mkdir(parents=True)
+    (node_skill / "package-lock.json").write_text("{}", encoding="utf-8")
+    (plain_skill / "SKILL.md").write_text("---\nname: plain-skill\n---\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(cmd, *, check, cwd):
+        calls.append((cmd, check, cwd))
+
+    monkeypatch.setattr(stage_module, "SKILLS_DST", skills_dst)
+    monkeypatch.setattr(stage_module.shutil, "which", lambda name: "/usr/bin/npm" if name == "npm" else None)
+    monkeypatch.setattr(stage_module.subprocess, "run", fake_run)
+
+    stage_module.install_skill_node_dependencies()
+
+    assert calls == [
+        (
+            ["/usr/bin/npm", "ci", "--omit=dev", "--ignore-scripts"],
+            True,
+            node_skill,
+        )
+    ]
+
+
 def test_pyinstaller_spec_bundles_tiktoken_cache_and_keeps_tiktoken():
     spec_text = (REPO_ROOT / "backend" / "ferryman_backend.spec").read_text(encoding="utf-8")
 

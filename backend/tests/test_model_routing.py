@@ -45,7 +45,7 @@ async def test_routing_model_keeps_agent_usage_to_final_request(tmp_path, monkey
 
     classifier = function_model(
         "gemini-3.1-flash-lite",
-        '{"classifier_reasoning":"Routine task.","classifier_score":34}',
+        '{"reasoning":"Routine task.","score":34}',
         RequestUsage(input_tokens=10, output_tokens=2),
     )
     flash = function_model(
@@ -223,7 +223,7 @@ async def test_router_uses_gemini_flash_fallback_when_deepseek_flash_unavailable
     manager = ModelManager(settings)
     classifier = function_model(
         "gemini-3.1-flash-lite",
-        '{"classifier_reasoning":"Routine task.","classifier_score":34}',
+        '{"reasoning":"Routine task.","score":34}',
         RequestUsage(input_tokens=10, output_tokens=2),
     )
     gemini_flash = function_model(
@@ -274,7 +274,7 @@ async def test_router_uses_active_model_when_all_flash_models_unavailable(tmp_pa
     manager = ModelManager(settings)
     classifier = function_model(
         "gemini-3.1-flash-lite",
-        '{"classifier_reasoning":"Routine task.","classifier_score":34}',
+        '{"reasoning":"Routine task.","score":34}',
         RequestUsage(input_tokens=10, output_tokens=2),
     )
 
@@ -420,7 +420,7 @@ def test_classifier_input_filters_leading_system_prompt_and_keeps_current_reques
     assert isinstance(classifier_messages[0].parts[0], SystemPromptPart)
     assert "Task Routing AI" in classifier_messages[0].parts[0].content
     assert "# Decision" not in classifier_messages[0].parts[0].content
-    assert "classifier_score <" not in classifier_messages[0].parts[0].content
+    assert "score <" not in classifier_messages[0].parts[0].content
     assert isinstance(classifier_messages[1], ModelRequest)
     assert isinstance(classifier_messages[2], ModelRequest)
     assert isinstance(classifier_messages[3], ModelRequest)
@@ -475,7 +475,7 @@ def test_classifier_input_keeps_single_message_without_system_prompt(tmp_path):
 
 def test_classifier_prompt_treats_explicit_pro_request_as_hard_rule():
     assert "explicitly asks for a Pro/high-quality model" in CLASSIFIER_PROMPT
-    assert "assign classifier_score 100" in CLASSIFIER_PROMPT
+    assert "assign score 100" in CLASSIFIER_PROMPT
     assert "rejects Flash/Lite models" in CLASSIFIER_PROMPT
 
 

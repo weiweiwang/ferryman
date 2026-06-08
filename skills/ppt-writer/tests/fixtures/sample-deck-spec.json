@@ -1,0 +1,58 @@
+{
+  "title": "AI Sales Agent Plan",
+  "subtitle": "Portable PPT writer smoke fixture",
+  "language": "en-US",
+  "audience": "Management team",
+  "theme": {
+    "colors": {
+      "bg": "F5F2EA",
+      "ink": "141A17",
+      "accent": "944B3D",
+      "accent2": "255D78",
+      "gold": "B8791E"
+    },
+    "font": {
+      "heading": "Aptos Display",
+      "body": "Aptos"
+    }
+  },
+  "task_mode": "create",
+  "primary_profile": "product-platform",
+  "secondary_gates": [],
+  "source_summary": "Synthetic fixture for ppt-writer build and QA smoke tests.",
+  "slides": [
+    {
+      "number": 1,
+      "type": "cover",
+      "layout": "cover-process",
+      "layout_family": "cover",
+      "kicker": "AI SALES",
+      "claim": "Structure sales expertise before automating conversations.",
+      "proof_object": "three-stage process",
+      "support": "The workflow separates source extraction, SOP design, and agent handoff.",
+      "body": "A portable deck generation fixture for Ferryman.",
+      "items": [
+        { "label": "Input", "text": "Calls and chats" },
+        { "label": "System", "text": "Sales SOP" },
+        { "label": "Output", "text": "Clean leads" }
+      ],
+      "sources": ["Synthetic fixture"]
+    },
+    {
+      "number": 2,
+      "type": "thesis",
+      "layout": "big-claim",
+      "layout_family": "thesis",
+      "kicker": "WHY NOW",
+      "claim": "The lead-cleaning layer converts messy customer language into sales-ready handoffs.",
+      "proof_object": "three-driver diagnosis",
+      "support": "Each driver maps to a real operating bottleneck.",
+      "items": [
+        { "label": "Customer language", "text": "Intent, product, budget, and timing arrive as unstructured text." },
+        { "label": "Sales expertise", "text": "Experienced sellers know what to ask but their judgment is rarely codified." },
+        { "label": "Business systems", "text": "SKU and pricing systems need a conversational decision layer in front." }
+      ],
+      "sources": ["Synthetic fixture"]
+    }
+  ]
+}
