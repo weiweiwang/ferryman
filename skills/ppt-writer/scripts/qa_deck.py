@@ -57,6 +57,14 @@ ALLOWED_PROFILES = {
     "targeted-edit-media",
     "appendix-heavy",
 }
+PATTERN_IMAGE_RULES = {
+    "science-cover": {"min_area": 0.30, "media_warn_without_image": True},
+    "chapter-spread": {"min_area": 0.24, "media_warn_without_image": True},
+    "mechanism-light": {"min_area": 0.22},
+    "impact-reset": {"expects_image": True, "min_area": 0.30},
+    "evidence-triptych": {"expects_image": True, "min_area": 0.09, "min_count": 3},
+    "closing-awe": {"min_area": 0.46, "media_warn_without_image": True},
+}
 
 
 def load_spec(spec_path: str | Path) -> dict[str, object]:
@@ -125,7 +133,21 @@ def _slide_expects_image(slide: dict[str, object]) -> bool:
         _text(slide.get(field))
         for field in ("layout", "layout_family", "type", "proof_object")
     )
+    rule = _pattern_image_rule(slide)
+    if bool(rule.get("expects_image")):
+        return True
     return bool(IMAGE_EXPECTING_RE.search(layout_text))
+
+
+def _pattern_image_rule(slide: dict[str, object]) -> dict[str, object]:
+    layout_text = " ".join(
+        _text(slide.get(field))
+        for field in ("layout", "layout_family", "type", "proof_object")
+    ).lower()
+    for key, rule in PATTERN_IMAGE_RULES.items():
+        if key in layout_text:
+            return rule
+    return {}
 
 
 def _min_picture_area_ratio(slide: dict[str, object]) -> float:
@@ -133,6 +155,9 @@ def _min_picture_area_ratio(slide: dict[str, object]) -> float:
         _text(slide.get(field))
         for field in ("layout", "layout_family", "type", "proof_object")
     ).lower()
+    rule = _pattern_image_rule(slide)
+    if isinstance(rule.get("min_area"), (int, float)) and (_slide_expects_image(slide) or _images_for_slide(slide)):
+        return float(rule["min_area"])
     if re.search(r"(full-bleed|photo-caption|cover-photo|takeaway-photo|classroom)", layout_text):
         return 0.30
     if re.search(r"(image-grid|gallery)", layout_text):
@@ -140,6 +165,13 @@ def _min_picture_area_ratio(slide: dict[str, object]) -> float:
     if _slide_expects_image(slide):
         return 0.10
     return 0.0
+
+
+def _min_picture_count(slide: dict[str, object]) -> int:
+    rule = _pattern_image_rule(slide)
+    if isinstance(rule.get("min_count"), (int, float)):
+        return int(rule["min_count"])
+    return 1 if _slide_expects_image(slide) else 0
 
 
 def _number_from_mapping(mapping: object, name: str, default: float) -> float:
@@ -229,12 +261,22 @@ def validate_spec(spec: dict[str, object]) -> dict[str, object]:
                     f"Slide {index} contains a visible URL. Put URLs in sources/source provenance, not rendered slide text."
                 )
         images = _images_for_slide(raw_slide)
+        pattern_rule = _pattern_image_rule(raw_slide)
         if images or bool(raw_slide.get("requires_image")):
             image_slide_count += 1
         if _slide_expects_image(raw_slide):
             expected_image_slide_numbers.append(index)
         if bool(raw_slide.get("requires_image")) and not images:
             errors.append(f"Slide {index} sets requires_image but does not include image/images.")
+        if bool(pattern_rule.get("expects_image")) and not images:
+            errors.append(f"Slide {index} layout expects image/images but none were provided.")
+        min_image_count = int(pattern_rule.get("min_count") or 0)
+        if min_image_count and len(images) < min_image_count:
+            errors.append(
+                f"Slide {index} layout expects at least {min_image_count} images; found {len(images)}."
+            )
+        if media_required and bool(pattern_rule.get("media_warn_without_image")) and not images:
+            warnings.append(f"Slide {index} uses an image-led pattern but has no image/images; verify the abstract fallback is intentional.")
         for image_index, image in enumerate(images, start=1):
             unsupported_fields = sorted(field for field in image if field in UNSUPPORTED_IMAGE_FIELDS)
             for field in unsupported_fields:
@@ -332,19 +374,40 @@ def validate_reference_constraints(
     slides = pptx_metrics.get("slides", [])
     slide_count = int(pptx_metrics.get("slide_count") or 0)
     media_count = int(pptx_metrics.get("media_count") or 0)
+    hybrid_background_count = int(pptx_metrics.get("hybrid_background_count") or 0)
     slide_rows = [slide for slide in slides if isinstance(slide, dict)]
     text_counts = [int(slide.get("text_chars") or 0) for slide in slide_rows]
-    picture_counts = [int(slide.get("pictures") or 0) for slide in slide_rows]
+    has_content_picture_metrics = any("content_pictures" in slide for slide in slide_rows)
+
+    def picture_count(slide: dict[str, object]) -> int:
+        if has_content_picture_metrics:
+            return int(slide.get("content_pictures") or 0) + int(slide.get("visual_content_images") or 0)
+        return int(slide.get("pictures") or 0)
+
+    def picture_area(slide: dict[str, object]) -> float:
+        if has_content_picture_metrics:
+            return float(slide.get("content_picture_area_ratio") or 0) + float(slide.get("visual_content_image_area_ratio") or 0)
+        return float(slide.get("picture_area_ratio") or 0)
+
+    def max_picture_area(slide: dict[str, object]) -> float:
+        if has_content_picture_metrics:
+            return max(
+                float(slide.get("max_content_picture_area_ratio") or 0),
+                float(slide.get("visual_max_content_image_area_ratio") or 0),
+            )
+        return float(slide.get("max_picture_area_ratio") or 0)
+
+    picture_counts = [picture_count(slide) for slide in slide_rows]
     picture_area_by_slide = {
-        int(slide.get("slide") or 0): float(slide.get("picture_area_ratio") or 0)
+        int(slide.get("slide") or 0): picture_area(slide)
         for slide in slide_rows
     }
     max_picture_area_by_slide = {
-        int(slide.get("slide") or 0): float(slide.get("max_picture_area_ratio") or 0)
+        int(slide.get("slide") or 0): max_picture_area(slide)
         for slide in slide_rows
     }
     picture_count_by_slide = {
-        int(slide.get("slide") or 0): int(slide.get("pictures") or 0)
+        int(slide.get("slide") or 0): picture_count(slide)
         for slide in slide_rows
     }
     image_slide_count = sum(1 for count in picture_counts if count > 0)
@@ -354,7 +417,13 @@ def validate_reference_constraints(
     picture_instances = sum(picture_counts)
     image_slide_ratio = round(image_slide_count / slide_count, 3) if slide_count else 0
     effective_image_slide_ratio = round(effective_image_slide_count / slide_count, 3) if slide_count else 0
-    media_per_slide = round(media_count / slide_count, 3) if slide_count else 0
+    # In hybrid decks, each slide carries a full-slide raster background. That
+    # background is useful for visual fidelity but must not satisfy media QA.
+    media_per_slide = round(
+        (picture_instances if hybrid_background_count else media_count) / slide_count,
+        3,
+    ) if slide_count else 0
+    raw_media_per_slide = round(media_count / slide_count, 3) if slide_count else 0
     pictures_per_slide = round(picture_instances / slide_count, 3) if slide_count else 0
     avg_picture_area_ratio = round(
         sum(picture_area_by_slide.values()) / slide_count, 4
@@ -366,8 +435,12 @@ def validate_reference_constraints(
             "image_slide_ratio": image_slide_ratio,
             "effective_image_slide_ratio": effective_image_slide_ratio,
             "media_per_slide": media_per_slide,
+            "raw_media_per_slide": raw_media_per_slide,
             "pictures_per_slide": pictures_per_slide,
             "picture_instances": picture_instances,
+            "hybrid_background_count": hybrid_background_count,
+            "visual_content_image_count": int(pptx_metrics.get("visual_content_image_count") or 0),
+            "content_picture_metrics": has_content_picture_metrics,
             "avg_picture_area_ratio": avg_picture_area_ratio,
             "avg_text_chars_per_slide": avg_text,
             "max_text_chars_per_slide": max_text,
@@ -394,6 +467,22 @@ def validate_reference_constraints(
         for slide_number in expected_image_slides
         if picture_count_by_slide.get(slide_number, 0) <= 0
     ]
+    insufficient_expected_image_counts: list[dict[str, object]] = []
+    for slide_number, slide in enumerate(spec_slides, start=1):
+        if not isinstance(slide, dict):
+            continue
+        min_count = _min_picture_count(slide)
+        if min_count <= 1:
+            continue
+        actual_count = picture_count_by_slide.get(slide_number, 0)
+        if actual_count < min_count:
+            insufficient_expected_image_counts.append(
+                {
+                    "slide": slide_number,
+                    "picture_count": actual_count,
+                    "min_required_pictures": min_count,
+                }
+            )
     weak_expected_images: list[dict[str, object]] = []
     for slide_number, slide in enumerate(spec_slides, start=1):
         if not isinstance(slide, dict) or slide_number in missing_expected_images:
@@ -414,6 +503,7 @@ def validate_reference_constraints(
             )
     metrics["expected_image_slides"] = expected_image_slides
     metrics["missing_expected_image_slides"] = missing_expected_images
+    metrics["insufficient_expected_image_counts"] = insufficient_expected_image_counts
     metrics["weak_expected_image_slides"] = weak_expected_images
     if missing_expected_images:
         errors.append(
@@ -428,6 +518,15 @@ def validate_reference_constraints(
         errors.append(
             "Slides expected to use images have too-small picture frames: "
             f"{formatted}. Increase the image slot, use a more image-led layout, or mark the slide as text-only."
+        )
+    if insufficient_expected_image_counts:
+        formatted = ", ".join(
+            f"{item['slide']} ({item['picture_count']} < {item['min_required_pictures']})"
+            for item in insufficient_expected_image_counts[:8]
+        )
+        errors.append(
+            "Slides expected to use multiple images rendered too few pictures: "
+            f"{formatted}. Use the intended image set or choose a single-image pattern."
         )
 
     def number_constraint(name: str) -> float | None:
@@ -528,12 +627,15 @@ def markdown_report(
         f"- Image slide ratio: {reference_report.get('metrics', {}).get('image_slide_ratio', 'n/a')}",
         f"- Effective image slide ratio: {reference_report.get('metrics', {}).get('effective_image_slide_ratio', 'n/a')}",
         f"- Media per slide: {reference_report.get('metrics', {}).get('media_per_slide', 'n/a')}",
+        f"- Raw media per slide: {reference_report.get('metrics', {}).get('raw_media_per_slide', 'n/a')}",
         f"- Pictures per slide: {reference_report.get('metrics', {}).get('pictures_per_slide', 'n/a')}",
+        f"- Hybrid background pictures: {reference_report.get('metrics', {}).get('hybrid_background_count', 'n/a')}",
         f"- Avg picture area ratio: {reference_report.get('metrics', {}).get('avg_picture_area_ratio', 'n/a')}",
         f"- Avg text chars / slide: {reference_report.get('metrics', {}).get('avg_text_chars_per_slide', 'n/a')}",
         f"- Max text chars / slide: {reference_report.get('metrics', {}).get('max_text_chars_per_slide', 'n/a')}",
         f"- Naked URL slides: {reference_report.get('metrics', {}).get('naked_url_slides', [])}",
         f"- Missing expected image slides: {reference_report.get('metrics', {}).get('missing_expected_image_slides', [])}",
+        f"- Insufficient expected image counts: {reference_report.get('metrics', {}).get('insufficient_expected_image_counts', [])}",
         f"- Weak expected image slides: {reference_report.get('metrics', {}).get('weak_expected_image_slides', [])}",
         "",
         "## Errors",

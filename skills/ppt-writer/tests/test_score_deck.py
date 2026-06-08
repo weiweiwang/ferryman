@@ -2,6 +2,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "score_deck.py"
 
@@ -132,6 +134,22 @@ def test_score_deck_blocks_weak_slides_and_underlying_qa_errors():
     assert "underlying QA has errors" in report["blocking_reasons"]
     assert any(item["slide"] == 2 for item in report["weak_slides"])
     assert report["dimension_scores"]["visual_proof"] < 5
+
+
+def test_score_deck_blocks_blank_looking_preview(tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    module = load_module()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    Image.new("RGB", (320, 180), (248, 248, 248)).save(preview / "slide-01.png")
+
+    report = module.score_deck(valid_spec(), valid_qa(), preview)
+
+    assert report["ok"] is False
+    assert any(item["slide"] == 1 for item in report["weak_slides"])
+    assert any("empty surface" in warning["reason"] or "low visual variation" in warning["reason"] for warning in report["render_warnings"])
 
 
 def test_score_deck_cli_writes_markdown_and_json(tmp_path):

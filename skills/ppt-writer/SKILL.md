@@ -22,14 +22,15 @@ available, visual QA, and iteration.
 ## Non-Negotiables
 
 - Do not rely on `@oai/artifact-tool`, `artifact_tool_utils.mjs`, or Codex
-  internal runtimes. The portable build path is `pptxgenjs`.
+  internal runtimes. Portable build paths are the native `pptxgenjs` builder
+  and the preferred HTML-first hybrid builder.
 - Ferryman's `run_skill_script` can only execute files bundled under this
   skill's `scripts/` directory. Do not create ad hoc executable scripts in the
   workspace and try to run them. Workspace files are inputs and outputs, passed
   to bundled scripts as arguments.
 - Use Python wrapper scripts for execution. In particular, call
-  `build_deck.py`; do not call `build_deck.js` directly through
-  `run_skill_script`.
+  `build_deck.py` or `build_hybrid_deck.py`; do not call `.js` builders
+  directly through `run_skill_script`.
 - Write all generated files inside the current Ferryman session workspace.
   Use workspace-relative paths in plans and scripts. Bundled scripts reject
   paths that escape the workspace.
@@ -45,6 +46,19 @@ available, visual QA, and iteration.
 - Prefer editable PowerPoint primitives: text boxes, shapes, lines, tables, and
   chart-like shape systems. Use raster images only when they are actual source
   images, screenshots, generated illustrations, or visual references.
+- For visually polished, Codex-like decks, prefer HTML-first hybrid mode:
+  controlled HTML plans the composition, a skeleton background is rendered, and
+  visible native PPTX text/image/shape layers are placed over it. This is the
+  default. Pure screenshot output is optional, not the default.
+- Hybrid mode has only two valid mode pairs:
+  `--background-mode skeleton --editable-layer visible` for editable decks, or
+  `--background-mode visual --editable-layer none` for screenshot-only visual
+  ceiling tests. Do not mix visual backgrounds with visible native overlays.
+- For documentary, classroom, science, history, or storybook-style topics,
+  prefer the `science-storybook` hybrid pattern library instead of applying
+  generic business/report templates. Use concrete page patterns such as
+  `science-cover`, `time-river`, `scale-day`, `chapter-spread`,
+  `mechanism-light`, `impact-reset`, `evidence-triptych`, and `closing-awe`.
 - If the user asks for "图文并茂", image-rich, introduction, profile, venue,
   travel, product, or news/event decks, set `media_required=true` in
   `deck-spec.json` and include real image assets with provenance. This is a
@@ -91,9 +105,16 @@ workspace.
 Allowed calls:
 
 - `run_skill_script(script_name="check_deps.py", args=[])`
+- `run_skill_script(script_name="check_deps.py", args=["--require-hybrid"])` when the task needs the HTML-first hybrid path.
 - `run_skill_script(script_name="inspect_reference.py", args=["--pptx", "<reference.pptx>", "--out", "<workspace-relative reference-audit.md>", "--json-out", "<workspace-relative reference-audit.json>"])`
 - `run_skill_script(script_name="register_asset.py", args=["--source", "<workspace-relative screenshot-or-image>", "--id", "<asset-id>", "--asset-dir", "<task-dir>/assets", "--manifest", "<task-dir>/asset-manifest.json", "--source-note", "<url or provenance>", "--role", "<slide role>", "--alt", "<alt text>"])`
 - `run_skill_script(script_name="build_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--out", "<workspace-relative output.pptx>"])`
+- `run_skill_script(script_name="build_hybrid_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--out", "<workspace-relative output.pptx>"])`
+- Optional pure screenshot mode for visual ceiling tests only:
+  `run_skill_script(script_name="build_hybrid_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--out", "<workspace-relative output.pptx>", "--background-mode", "visual", "--editable-layer", "none"])`
+- For hybrid debugging only: `build_html_deck.py`, `render_html_deck.py`, and
+  `build_hybrid_pptx.py` may be run individually with workspace-relative
+  inputs/outputs. Do not replace them with workspace scripts.
 - `run_skill_script(script_name="inspect_pptx.py", args=["--pptx", "<workspace-relative output.pptx>", "--expected-slides", "<n>"])`
 - `run_skill_script(script_name="qa_deck.py", args=["--spec", "<workspace-relative deck-spec.json>", "--pptx", "<workspace-relative output.pptx>", "--out", "<workspace-relative qa-report.md>", "--json-out", "<workspace-relative qa-report.json>"])`
 - `run_skill_script(script_name="render_deck.py", args=["--pptx", "<workspace-relative output.pptx>", "--out-dir", "<workspace-relative preview-dir>"])`
@@ -163,10 +184,10 @@ Forbidden calls:
      or generated images. Do not download images through ad hoc workspace
      scripts.
    - For browser capture, navigate to the source, take a screenshot, list
-  `screenshots/`, then register the chosen file. `register_asset.py` returns
-  and records image metadata including `width`, `height`, `format`,
-  `aspect_ratio`, `bytes`, `content_bbox`, `content_area_ratio`, and whether
-  obvious flat padding was cropped:
+     `screenshots/`, then register the chosen file. `register_asset.py`
+     returns and records image metadata including `width`, `height`, `format`,
+     `aspect_ratio`, `bytes`, `content_bbox`, `content_area_ratio`, and whether
+     obvious flat padding was cropped:
      `run_skill_script(script_name="register_asset.py", args=["--source", "screenshots/<file>.jpg", "--id", "cover-hero", "--asset-dir", "<task-dir>/assets", "--manifest", "<task-dir>/asset-manifest.json", "--source-note", "<source URL>", "--role", "cover hero", "--alt", "<description>"])`
    - Use the returned `asset.path` in `deck-spec.json` as `image.path` or
      `images[].path`.
@@ -199,6 +220,14 @@ Forbidden calls:
    - For image-led decks, set `media_required=true`; add slide-level `image`,
      `images`, or `requires_image` fields with source provenance. Store the
      actual image file in the workspace and point `image.path` at that file.
+   - Set `render_mode: "hybrid"` for visual-first, Codex-like, image-rich,
+     reference-inspired, or consumer-facing decks. Use the native builder for
+     simple internal decks where maximum native editability is more important
+     than visual finish.
+   - `media_required=true` is a deck-level coverage target, not a command to
+     put images on every slide. Mark only truly image-led slides with
+     `requires_image`, `image`, `images`, or photo/screenshot layouts; ordinary
+     timeline, comparison, metric, and analysis slides may be text/shape-only.
    - On image objects, use `fit: "cover"` for photo-led hero slots and
      `fit: "contain"` for screenshots, documents, or diagrams that must remain
      fully visible.
@@ -207,8 +236,20 @@ Forbidden calls:
 10. **Build the PPTX**
    - First check runtime readiness:
      `run_skill_script(script_name="check_deps.py", args=[])`
-   - Use bundled `scripts/build_deck.py`, which invokes the Node
-     `pptxgenjs` builder:
+   - For high-visual decks, check hybrid readiness and use the default hybrid
+     pipeline:
+     `run_skill_script(script_name="check_deps.py", args=["--require-hybrid"])`
+     `run_skill_script(script_name="build_hybrid_deck.py", args=["--spec", "<deck-spec.json>", "--out", "<output.pptx>"])`
+     This creates `html/`, `preview-hybrid/`, and `layout.json` next to the
+     spec unless explicit workspace-relative paths are provided. The default is
+     `--background-mode skeleton --editable-layer visible`.
+     The hybrid builder stops when rendered HTML text boxes overflow; revise the
+     slide copy/layout instead of forcing delivery.
+   - Use pure screenshot output only when explicitly testing the visual ceiling
+     or when the user does not need editable PPTX layers:
+     `--background-mode visual --editable-layer none`.
+   - For simple native decks, use bundled `scripts/build_deck.py`, which
+     invokes the Node `pptxgenjs` builder:
      `run_skill_script(script_name="build_deck.py", args=["--spec", "<deck-spec.json>", "--out", "<output.pptx>"])`
    - If `pptxgenjs` is not installed in the skill package, install/package the
      skill dependency with the checked-in lockfile, for example
@@ -244,6 +285,12 @@ Before final delivery:
 - Media assets used by the deck are recorded in `asset-manifest.json`.
 - Slides that promise an image have meaningful rendered picture area; tiny
   corner thumbnails fail QA even when the PPTX technically contains a picture.
+- Pattern-specific media gates apply. For example, `impact-reset` expects a
+  large visual, and `evidence-triptych` expects three rendered images. Timeline,
+  scale, comparison, and analysis slides may remain text/shape-led when the
+  deck-level image coverage is strong.
+- In hybrid decks, full-slide raster backgrounds do not count as proof/media
+  coverage. QA only counts content pictures layered over the background.
 - `qa-report.md` exists and records pass/fail status.
 - `contact-sheet-plan.md` exists before build.
 - `contact-sheet-scorecard.md` exists after QA. It must PASS before final

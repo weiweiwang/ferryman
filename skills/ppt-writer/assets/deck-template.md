@@ -31,6 +31,12 @@ Minimum structure:
   "primary_profile": "product-platform",
   "secondary_gates": [],
   "slide_size": "wide",
+  "render_mode": "hybrid",
+  "hybrid": {
+    "raster_background": true,
+    "background_mode": "skeleton",
+    "editable_layer": "visible"
+  },
   "media_required": false,
   "reference_constraints": {
     "target_slide_count": 6,
@@ -80,10 +86,26 @@ Recommended slide fields:
   `current-event`, or `template-inspired`.
 - `reference_constraints`: optional thresholds copied from
   `reference-audit.json.recommended_constraints`.
+- `render_mode`: use `hybrid` for visual-first/Codex-like decks; omit it or use
+  `native` for simpler fully native decks.
+  - `hybrid`: optional builder hint. In hybrid mode, bundled scripts generate
+    controlled slide HTML and render it into PPTX. Default `background_mode:
+    "skeleton"` plus `editable_layer: "visible"` keeps native PPTX layers while
+    using HTML for composition. Pure screenshot output is available with
+    `background_mode: "visual"` plus `editable_layer: "none"` for visual ceiling
+    tests. These are the only valid mode pairs. Do not hand-write workspace HTML
+    or scripts.
+- `theme.template` or `visual_style`: optional visual pattern library. Current
+  high-polish hybrid libraries include `premium-editorial` for strategy and
+  `science-storybook` for documentary/science/classroom narratives.
 - `number`: 1-based slide number.
 - `type`: `cover`, `thesis`, `section`, `comparison`, `flow`, `timeline`,
   `metrics`, `table`, `quote`, `appendix`, or `generic`.
 - `layout`: a concrete layout name from `references/slide-patterns.md`.
+  For `science-storybook`, use page-level patterns such as
+  `science-cover`, `time-river`, `scale-day`, `chapter-spread`,
+  `mechanism-light`, `impact-reset`, `evidence-triptych`, and
+  `closing-awe`.
 - `layout_family`: concrete rhythm family used for QA, such as `cover-photo`,
   `photo-caption`, `timeline-grid`, `topic-grid`, `metric-rail`, or
   `takeaway-photo`. Do not use only a generic media label such as `image-led`
@@ -96,12 +118,18 @@ Recommended slide fields:
 - `sources`: source names, URLs, or provenance notes.
 - `media_required`: set to `true` at deck level when the user asks for
   image-rich, visual-first, news/event, profile, or "图文并茂" output.
-- `requires_image`: set to `true` when the slide must include a real image.
+  This is a deck-level coverage target. Not every slide needs media.
+  - `requires_image`: set to `true` when the slide must include a real image.
+    Use this only for image-led slides. Do not set it on every slide just
+    because the deck is `media_required=true`.
 - `image`: one primary image object with workspace-relative `path`, `alt`, and
   `source`. Prefer paths returned by `register_asset.py`.
 - `images`: optional list of image objects for image-led layouts.
-- `fit`: optional image fit strategy, `cover` for photo-led hero slots and
-  `contain` for screenshots or diagrams that must remain fully visible.
+  - `fit`: optional image fit strategy, `cover` for photo-led hero slots and
+    `contain` for screenshots or diagrams that must remain fully visible.
+  - Pattern-specific media gates apply in QA. `impact-reset` expects a large
+    visual; `evidence-triptych` expects three image instances; `time-river` and
+    `scale-day` can be shape-led.
 - `asset_id`: stable id from `asset-manifest.json`; optional but recommended.
 - `register_asset.py` records asset metadata in `asset-manifest.json`,
   including `width`, `height`, `format`, `aspect_ratio`, `bytes`,

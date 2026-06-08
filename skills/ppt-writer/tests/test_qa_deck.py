@@ -315,6 +315,131 @@ def test_output_qa_blocks_naked_urls_and_missing_expected_images():
     assert any("rendered without pictures: 1" in error for error in report["errors"])
 
 
+def test_output_qa_does_not_count_hybrid_background_as_slide_media():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "media_required": True,
+        "slides": [
+            {
+                "number": 1,
+                "type": "cover",
+                "layout": "photo-caption",
+                "layout_family": "photo-caption",
+                "claim": "A photo-led cover needs a real content image.",
+                "proof_object": "cover photo",
+                "support": "Fixture.",
+                "image": {"path": "assets/cover.png", "source": "fixture"},
+            },
+            {
+                "number": 2,
+                "type": "thesis",
+                "layout": "big-claim",
+                "layout_family": "thesis",
+                "claim": "Text-only analysis remains allowed.",
+                "proof_object": "summary",
+                "support": "Fixture.",
+            },
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 2,
+            "media_count": 2,
+            "hybrid_background_count": 2,
+            "naked_url_slides": [],
+            "slides": [
+                {
+                    "slide": 1,
+                    "text_chars": 80,
+                    "pictures": 1,
+                    "content_pictures": 0,
+                    "hybrid_background_pictures": 1,
+                    "picture_area_ratio": 1.0,
+                    "max_picture_area_ratio": 1.0,
+                    "content_picture_area_ratio": 0,
+                    "max_content_picture_area_ratio": 0,
+                },
+                {
+                    "slide": 2,
+                    "text_chars": 80,
+                    "pictures": 1,
+                    "content_pictures": 0,
+                    "hybrid_background_pictures": 1,
+                    "picture_area_ratio": 1.0,
+                    "max_picture_area_ratio": 1.0,
+                    "content_picture_area_ratio": 0,
+                    "max_content_picture_area_ratio": 0,
+                },
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is False
+    assert report["metrics"]["media_per_slide"] == 0
+    assert report["metrics"]["raw_media_per_slide"] == 1
+    assert report["metrics"]["pictures_per_slide"] == 0
+    assert report["metrics"]["hybrid_background_count"] == 2
+    assert any("rendered without pictures: 1" in error for error in report["errors"])
+
+
+def test_output_qa_counts_visual_background_image_metadata():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "media_required": True,
+        "slides": [
+            {
+                "number": 1,
+                "type": "cover",
+                "layout": "cover-photo",
+                "layout_family": "cover-photo",
+                "claim": "A visual-first cover can satisfy image proof through the rendered HTML screenshot.",
+                "proof_object": "cover photo",
+                "support": "Fixture.",
+                "image": {"path": "assets/cover.png", "source": "fixture"},
+            }
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 1,
+            "media_count": 1,
+            "hybrid_background_count": 1,
+            "visual_content_image_count": 1,
+            "naked_url_slides": [],
+            "slides": [
+                {
+                    "slide": 1,
+                    "text_chars": 80,
+                    "pictures": 1,
+                    "content_pictures": 0,
+                    "hybrid_background_pictures": 1,
+                    "visual_content_images": 1,
+                    "picture_area_ratio": 1.0,
+                    "max_picture_area_ratio": 1.0,
+                    "content_picture_area_ratio": 0,
+                    "max_content_picture_area_ratio": 0,
+                    "visual_content_image_area_ratio": 0.4609,
+                    "visual_max_content_image_area_ratio": 0.4609,
+                }
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is True
+    assert report["metrics"]["media_per_slide"] == 1
+    assert report["metrics"]["pictures_per_slide"] == 1
+    assert report["metrics"]["avg_picture_area_ratio"] == 0.4609
+    assert report["metrics"]["weak_expected_image_slides"] == []
+
+
 def test_media_required_blocks_extreme_report_like_slide_text():
     module = load_module()
     spec = {**valid_spec(), "media_required": True}
@@ -381,6 +506,139 @@ def test_output_qa_blocks_tiny_expected_image_frames():
     assert report["ok"] is False
     assert any("too-small picture frames" in error for error in report["errors"])
     assert report["metrics"]["weak_expected_image_slides"][0]["slide"] == 1
+
+
+def test_validate_spec_blocks_science_patterns_that_require_images():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "media_required": True,
+        "theme": {"template": "science-storybook"},
+        "slides": [
+            {
+                "number": 1,
+                "type": "evidence",
+                "layout": "evidence-triptych",
+                "layout_family": "evidence-triptych",
+                "claim": "关键证据需要多张图像对照。",
+                "proof_object": "evidence triptych",
+                "support": "Fixture.",
+            },
+            {
+                "number": 2,
+                "type": "impact",
+                "layout": "impact-reset",
+                "layout_family": "impact-reset",
+                "claim": "大灭绝之后生命重新打开舞台。",
+                "proof_object": "impact visual",
+                "support": "Fixture.",
+            },
+        ],
+    }
+
+    report = module.validate_spec(spec)
+
+    assert report["ok"] is False
+    assert any("layout expects image/images" in error for error in report["errors"])
+
+
+def test_validate_spec_blocks_science_triptych_with_too_few_planned_images():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "slides": [
+            {
+                "number": 1,
+                "type": "evidence",
+                "layout": "evidence-triptych",
+                "layout_family": "evidence-triptych",
+                "claim": "三张证据图共同说明生命重启。",
+                "proof_object": "evidence triptych",
+                "support": "Fixture.",
+                "images": [{"path": "assets/a.png", "source": "fixture"}],
+            }
+        ],
+    }
+
+    report = module.validate_spec(spec)
+
+    assert report["ok"] is False
+    assert any("expects at least 3 images" in error for error in report["errors"])
+
+
+def test_output_qa_blocks_science_impact_when_image_area_is_too_small():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "slides": [
+            {
+                "number": 1,
+                "type": "impact",
+                "layout": "impact-reset",
+                "layout_family": "impact-reset",
+                "claim": "灾难之后，生命重新打开舞台。",
+                "proof_object": "impact visual",
+                "support": "Fixture.",
+                "image": {"path": "assets/impact.png", "source": "fixture"},
+            }
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 1,
+            "media_count": 1,
+            "naked_url_slides": [],
+            "slides": [
+                {"slide": 1, "text_chars": 80, "pictures": 1, "picture_area_ratio": 0.12, "max_picture_area_ratio": 0.12},
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is False
+    assert report["metrics"]["weak_expected_image_slides"][0]["min_required_area_ratio"] == 0.30
+
+
+def test_output_qa_blocks_science_triptych_with_too_few_images():
+    module = load_module()
+    spec = {
+        **valid_spec(),
+        "slides": [
+            {
+                "number": 1,
+                "type": "evidence",
+                "layout": "evidence-triptych",
+                "layout_family": "evidence-triptych",
+                "claim": "三张证据图共同说明生命重启。",
+                "proof_object": "evidence triptych",
+                "support": "Fixture.",
+                "images": [
+                    {"path": "assets/a.png", "source": "fixture"},
+                    {"path": "assets/b.png", "source": "fixture"},
+                    {"path": "assets/c.png", "source": "fixture"},
+                ],
+            }
+        ],
+    }
+    pptx_report = {
+        "ok": True,
+        "metrics": {
+            "slide_count": 1,
+            "media_count": 1,
+            "naked_url_slides": [],
+            "slides": [
+                {"slide": 1, "text_chars": 80, "pictures": 1, "picture_area_ratio": 0.12, "max_picture_area_ratio": 0.12},
+            ],
+        },
+    }
+
+    report = module.validate_reference_constraints(spec, pptx_report)
+
+    assert report["ok"] is False
+    assert report["metrics"]["insufficient_expected_image_counts"][0]["min_required_pictures"] == 3
+    assert any("too few pictures" in error for error in report["errors"])
 
 
 def test_output_qa_allows_text_only_analysis_slide_with_media_required():

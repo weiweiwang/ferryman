@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 from statistics import median
@@ -110,7 +111,7 @@ def _repeated_layout_runs(families: list[str]) -> list[int]:
     return repeated
 
 
-def _preview_light_surface_warnings(preview_dir: Path | None) -> list[dict[str, object]]:
+def _preview_visual_warnings(preview_dir: Path | None) -> list[dict[str, object]]:
     if not preview_dir or not preview_dir.exists():
         return []
     try:
@@ -138,18 +139,58 @@ def _preview_light_surface_warnings(preview_dir: Path | None) -> list[dict[str, 
             border.append(image.getpixel((width - 1, y)))
         bg = tuple(int(median(channel)) for channel in zip(*border)) if border else (0, 0, 0)
         bg_brightness = sum(bg) / 3
+        brightness_values = [
+            (raw_pixels[index] + raw_pixels[index + 1] + raw_pixels[index + 2]) / 3
+            for index in range(0, len(raw_pixels), 3)
+        ]
+        avg_brightness = sum(brightness_values) / max(1, len(brightness_values))
+        variation = math.sqrt(
+            sum((value - avg_brightness) ** 2 for value in brightness_values) / max(1, len(brightness_values))
+        )
         light_pixels = sum(
             1
             for index in range(0, len(raw_pixels), 3)
             if raw_pixels[index] > 238 and raw_pixels[index + 1] > 238 and raw_pixels[index + 2] > 238
         )
+        dark_pixels = sum(
+            1
+            for index in range(0, len(raw_pixels), 3)
+            if raw_pixels[index] < 24 and raw_pixels[index + 1] < 24 and raw_pixels[index + 2] < 24
+        )
         light_ratio = round(light_pixels / max(1, width * height), 4)
+        dark_ratio = round(dark_pixels / max(1, width * height), 4)
         if bg_brightness < 100 and light_ratio > 0.18:
             warnings.append(
                 {
                     "slide": slide_number,
                     "light_surface_ratio": light_ratio,
                     "reason": "large light surfaces on a dark slide; verify these panels contain visible content",
+                }
+            )
+        if variation < 14:
+            warnings.append(
+                {
+                    "slide": slide_number,
+                    "variation": round(variation, 2),
+                    "reason": "preview has very low visual variation; slide may read as blank or underdesigned",
+                }
+            )
+        if light_ratio > 0.70 and variation < 32:
+            warnings.append(
+                {
+                    "slide": slide_number,
+                    "light_surface_ratio": light_ratio,
+                    "variation": round(variation, 2),
+                    "reason": "preview is dominated by light empty surface",
+                }
+            )
+        if dark_ratio > 0.78 and variation < 28:
+            warnings.append(
+                {
+                    "slide": slide_number,
+                    "dark_surface_ratio": dark_ratio,
+                    "variation": round(variation, 2),
+                    "reason": "preview is dominated by dark empty surface",
                 }
             )
     return warnings
@@ -182,10 +223,13 @@ def _dimension_scores(spec: dict[str, object], qa: dict[str, object], render_war
     max_text = float(metrics.get("max_text_chars_per_slide") or 0)
     weak_images = metrics.get("weak_expected_image_slides")
     missing_images = metrics.get("missing_expected_image_slides")
+    insufficient_images = metrics.get("insufficient_expected_image_counts")
     weak_image_count = len(weak_images) if isinstance(weak_images, list) else 0
     missing_image_count = len(missing_images) if isinstance(missing_images, list) else 0
+    insufficient_image_count = len(insufficient_images) if isinstance(insufficient_images, list) else 0
     naked_urls = int(metrics.get("naked_url_count") or 0)
     dense_slide_count = sum(1 for slide in text_rows if int(slide.get("text_chars") or 0) > 240)
+    render_warning_count = len(render_warnings)
 
     story = 5 * min(claim_count, proof_count, support_count) / required
     specificity = 5 - min(2, topic_like) - (0 if sourced == required else 1)
@@ -203,9 +247,11 @@ def _dimension_scores(spec: dict[str, object], qa: dict[str, object], render_war
     if dense_slide_count >= 2:
         whitespace -= 1
     if render_warnings:
-        whitespace -= 1
-    visual_proof = 5 - min(3, weak_image_count + missing_image_count * 2)
+        whitespace -= min(2, max(1, render_warning_count // 2))
+    visual_proof = 5 - min(3, weak_image_count + missing_image_count * 2 + insufficient_image_count)
     if bool(spec.get("media_required")) and effective_image_slide_ratio < min_effective_image_ratio:
+        visual_proof -= 1
+    if render_warning_count >= 2:
         visual_proof -= 1
     asset_quality = 5
     if bool(spec.get("media_required")) and image_slide_ratio < min_image_ratio:
@@ -213,6 +259,10 @@ def _dimension_scores(spec: dict[str, object], qa: dict[str, object], render_war
     if bool(spec.get("media_required")) and effective_image_slide_ratio < min_effective_image_ratio:
         asset_quality -= 1
     if weak_image_count:
+        asset_quality -= 1
+    if insufficient_image_count:
+        asset_quality -= 1
+    if any("empty surface" in str(item.get("reason", "")) for item in render_warnings if isinstance(item, dict)):
         asset_quality -= 1
     precision = 5
     if naked_urls:
@@ -256,6 +306,11 @@ def _weak_slides(spec: dict[str, object], qa: dict[str, object], render_warnings
             weak.setdefault(int(slide), set()).add("expected image is missing")
         except (TypeError, ValueError):
             pass
+    for item in metrics.get("insufficient_expected_image_counts", []) if isinstance(metrics.get("insufficient_expected_image_counts"), list) else []:
+        if isinstance(item, dict):
+            slide = int(item.get("slide") or 0)
+            if slide:
+                weak.setdefault(slide, set()).add("expected image set has too few rendered pictures")
     for row in _slide_text_rows(qa):
         slide = int(row.get("slide") or 0)
         text_chars = int(row.get("text_chars") or 0)
@@ -277,7 +332,7 @@ def _weak_slides(spec: dict[str, object], qa: dict[str, object], render_warnings
 
 
 def score_deck(spec: dict[str, object], qa: dict[str, object], preview_dir: str | Path | None = None) -> dict[str, object]:
-    render_warnings = _preview_light_surface_warnings(Path(preview_dir) if preview_dir else None)
+    render_warnings = _preview_visual_warnings(Path(preview_dir) if preview_dir else None)
     dimensions = _dimension_scores(spec, qa, render_warnings)
     errors = _qa_errors(qa)
     weak_slides = _weak_slides(spec, qa, render_warnings)
@@ -338,7 +393,12 @@ def markdown_report(spec_path: Path, qa_path: Path, report: dict[str, object]) -
     if isinstance(render_warnings, list) and render_warnings:
         lines.extend(["", "## Render Warnings", ""])
         for item in render_warnings:
-            lines.append(f"- Slide {item.get('slide')}: {item.get('reason')} ({item.get('light_surface_ratio')})")
+            details = ", ".join(
+                f"{key}={value}"
+                for key, value in item.items()
+                if key not in {"slide", "reason"}
+            )
+            lines.append(f"- Slide {item.get('slide')}: {item.get('reason')}" + (f" ({details})" if details else ""))
     lines.extend(
         [
             "",

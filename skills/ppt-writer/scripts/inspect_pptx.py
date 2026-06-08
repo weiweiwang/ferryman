@@ -26,6 +26,8 @@ NS = {
     "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
 }
 URL_IN_TEXT_RE = re.compile(r"(?:https?://|www\.)[^\s\u4e00-\u9fff]+", re.IGNORECASE)
+HYBRID_BACKGROUND_MARKER = "FERRYMAN_HYBRID_BACKGROUND"
+HYBRID_VISUAL_BACKGROUND_MARKER = "FERRYMAN_HYBRID_VISUAL_BACKGROUND"
 
 
 def _slide_number(name: str) -> int:
@@ -59,14 +61,55 @@ def _emu_to_inches(value: int) -> float:
     return round(value / EMU_PER_INCH, 3)
 
 
+def _background_metadata(text: str) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    for part in text.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key == "content_images":
+            try:
+                metadata["visual_content_images"] = int(value)
+            except ValueError:
+                pass
+        elif key in {"content_image_area", "max_content_image_area"}:
+            try:
+                metadata_key = {
+                    "content_image_area": "visual_content_image_area_ratio",
+                    "max_content_image_area": "visual_max_content_image_area_ratio",
+                }[key]
+                metadata[metadata_key] = float(value)
+            except ValueError:
+                pass
+    return metadata
+
+
 def _picture_boxes(root: ElementTree.Element, slide_cx: int, slide_cy: int) -> list[dict[str, object]]:
     slide_area = max(1, slide_cx * slide_cy)
     boxes: list[dict[str, object]] = []
     for picture_index, picture in enumerate(root.findall(".//p:pic", NS), start=1):
+        c_nv_pr = picture.find(".//p:nvPicPr/p:cNvPr", NS)
+        name = c_nv_pr.get("name") if c_nv_pr is not None else ""
+        descr = c_nv_pr.get("descr") if c_nv_pr is not None else ""
+        metadata_text = f"{name} {descr}"
+        is_visual_background = HYBRID_VISUAL_BACKGROUND_MARKER in metadata_text
+        is_hybrid_background = is_visual_background or HYBRID_BACKGROUND_MARKER in metadata_text
+        background_metadata = _background_metadata(metadata_text) if is_hybrid_background else {}
         off = picture.find(".//a:xfrm/a:off", NS)
         ext = picture.find(".//a:xfrm/a:ext", NS)
         if off is None or ext is None:
-            boxes.append({"index": picture_index})
+            boxes.append(
+                {
+                    "index": picture_index,
+                    "name": name or "",
+                    "descr": descr or "",
+                    "is_hybrid_background": is_hybrid_background,
+                    "is_hybrid_visual_background": is_visual_background,
+                    **background_metadata,
+                }
+            )
             continue
         try:
             x = int(off.get("x") or 0)
@@ -80,6 +123,11 @@ def _picture_boxes(root: ElementTree.Element, slide_cx: int, slide_cy: int) -> l
         boxes.append(
             {
                 "index": picture_index,
+                "name": name or "",
+                "descr": descr or "",
+                "is_hybrid_background": is_hybrid_background,
+                "is_hybrid_visual_background": is_visual_background,
+                **background_metadata,
                 "x": _emu_to_inches(x),
                 "y": _emu_to_inches(y),
                 "w": _emu_to_inches(w),
@@ -99,13 +147,54 @@ def _slide_metrics(root: ElementTree.Element, slide_number: int, slide_cx: int, 
         for box in picture_boxes
         if isinstance(box, dict)
     ]
+    content_picture_boxes = [
+        box
+        for box in picture_boxes
+        if isinstance(box, dict) and not bool(box.get("is_hybrid_background"))
+    ]
+    content_picture_area_ratios = [
+        float(box.get("area_ratio") or 0)
+        for box in content_picture_boxes
+        if isinstance(box, dict)
+    ]
+    visual_content_images = sum(
+        int(box.get("visual_content_images") or 0)
+        for box in picture_boxes
+        if isinstance(box, dict) and bool(box.get("is_hybrid_visual_background"))
+    )
+    visual_content_image_area_ratio = round(
+        sum(
+            float(box.get("visual_content_image_area_ratio") or 0)
+            for box in picture_boxes
+            if isinstance(box, dict) and bool(box.get("is_hybrid_visual_background"))
+        ),
+        4,
+    )
+    visual_max_content_image_area_ratio = round(
+        max(
+            [
+                float(box.get("visual_max_content_image_area_ratio") or 0)
+                for box in picture_boxes
+                if isinstance(box, dict) and bool(box.get("is_hybrid_visual_background"))
+            ]
+            or [0]
+        ),
+        4,
+    )
     return {
         "slide": slide_number,
         "text_chars": len(text),
         "pictures": len(picture_boxes),
+        "content_pictures": len(content_picture_boxes),
+        "hybrid_background_pictures": len(picture_boxes) - len(content_picture_boxes),
+        "visual_content_images": visual_content_images,
         "picture_boxes": picture_boxes,
         "picture_area_ratio": round(sum(picture_area_ratios), 4),
         "max_picture_area_ratio": round(max(picture_area_ratios), 4) if picture_area_ratios else 0,
+        "content_picture_area_ratio": round(sum(content_picture_area_ratios), 4),
+        "max_content_picture_area_ratio": round(max(content_picture_area_ratios), 4) if content_picture_area_ratios else 0,
+        "visual_content_image_area_ratio": visual_content_image_area_ratio,
+        "visual_max_content_image_area_ratio": visual_max_content_image_area_ratio,
         "shapes": len(root.findall(".//p:sp", NS)),
         "graphic_frames": len(root.findall(".//p:graphicFrame", NS)),
         "naked_urls": urls[:5],
@@ -215,7 +304,15 @@ def inspect_pptx(pptx_path: str | Path, expected_slides: int | None = None) -> d
                 for slide in slide_metrics
                 if int(slide.get("naked_url_count") or 0) > 0
             ]
-            if slide_names and slide_text_chars == 0:
+            metrics["hybrid_background_count"] = sum(
+                int(slide.get("hybrid_background_pictures") or 0)
+                for slide in slide_metrics
+            )
+            metrics["visual_content_image_count"] = sum(
+                int(slide.get("visual_content_images") or 0)
+                for slide in slide_metrics
+            )
+            if slide_names and slide_text_chars == 0 and int(metrics.get("hybrid_background_count") or 0) == 0:
                 warnings.append("Slides contain no extractable text; verify this is intentional.")
 
     except zipfile.BadZipFile:

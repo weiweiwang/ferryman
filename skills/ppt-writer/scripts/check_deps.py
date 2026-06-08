@@ -20,6 +20,9 @@ def check_node_dependency() -> dict[str, object]:
         "node": node,
         "pptxgenjs": False,
         "image_size": False,
+        "playwright_core": False,
+        "browser_executable": None,
+        "hybrid_available": False,
         "errors": [],
     }
     errors: list[str] = result["errors"]  # type: ignore[assignment]
@@ -53,6 +56,29 @@ def check_node_dependency() -> dict[str, object]:
     result["pptxgenjs"] = True
     result["image_size"] = True
     result["node_dependency_info"] = payload
+    hybrid_probe = subprocess.run(
+        [
+            node,
+            "-e",
+            "const fs=require('fs'); const candidates=[process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,process.env.CHROME_BIN,'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge','/Applications/Chromium.app/Contents/MacOS/Chromium','/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'].filter(Boolean); const browser=candidates.find((p)=>fs.existsSync(p)) || null; const pw=require.resolve('playwright-core'); const pkg=require('playwright-core/package.json'); console.log(JSON.stringify({playwrightCore:{path:pw,version:pkg.version},browserExecutable:browser}))",
+        ],
+        cwd=SCRIPT_DIR,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if hybrid_probe.returncode == 0:
+        try:
+            hybrid_payload = json.loads(hybrid_probe.stdout.strip())
+        except json.JSONDecodeError:
+            hybrid_payload = {"raw": hybrid_probe.stdout.strip()}
+        result["playwright_core"] = True
+        result["browser_executable"] = hybrid_payload.get("browserExecutable")
+        result["hybrid_dependency_info"] = hybrid_payload
+        result["hybrid_available"] = bool(hybrid_payload.get("browserExecutable"))
+    else:
+        result["hybrid_stderr"] = hybrid_probe.stderr.strip()
     return result
 
 
@@ -77,6 +103,7 @@ def check_render_dependencies() -> dict[str, object]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Check ppt-writer runtime dependencies.")
     parser.add_argument("--require-render", action="store_true", help="Fail when render QA dependencies are missing.")
+    parser.add_argument("--require-hybrid", action="store_true", help="Fail when HTML-first hybrid dependencies are missing.")
     return parser
 
 
@@ -86,6 +113,15 @@ def main(argv: list[str] | None = None) -> int:
     render_report = check_render_dependencies()
     errors = list(node_report.get("errors", []))
     warnings: list[str] = []
+    if not node_report.get("hybrid_available"):
+        message = (
+            "Hybrid HTML-first build is unavailable; install playwright-core for the skill "
+            "and ensure Chrome/Edge/Chromium is available, or use the native pptxgenjs builder."
+        )
+        if args.require_hybrid:
+            errors.append(message)
+        else:
+            warnings.append(message)
     if not render_report["render_available"]:
         message = "Render QA is unavailable; install LibreOffice plus PyMuPDF or pdftoppm for slide PNG previews."
         if args.require_render:
