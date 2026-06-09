@@ -25,7 +25,23 @@ from app.core.toolkits.pricing import PricingToolkit
 
 def test_pricing_parsers_extract_supported_model_prices():
     gemini_prices = parse_gemini_prices("""
+    gemini-3.5-flash
+    Standard
+    Input price
+    Free of charge
+    $1.50
+    Output price (including thinking tokens)
+    Free of charge
+    $9.00
+    Batch
+    Input price
+    Not available
+    $0.75
+    Output price (including thinking tokens)
+    Not available
+    $4.50
     gemini-3.1-flash-lite
+    Standard
     Input price
     Free of charge
     $0.25 (text / image / video)
@@ -33,6 +49,7 @@ def test_pricing_parsers_extract_supported_model_prices():
     Free of charge
     $1.50
     gemini-3-flash-preview
+    Standard
     Input price
     Free of charge
     $0.50 (text / image / video)
@@ -40,6 +57,7 @@ def test_pricing_parsers_extract_supported_model_prices():
     Free of charge
     $3.00
     gemini-3.1-pro-preview
+    Standard
     Input price
     Not available
     $2.00, prompts
@@ -49,11 +67,12 @@ def test_pricing_parsers_extract_supported_model_prices():
     $12.00, prompts
     """)
     assert {price.model_id: price.input_per_million for price in gemini_prices} == {
+        "gemini:gemini-3.5-flash": 1.5,
         "gemini:gemini-3.1-flash-lite": 0.25,
         "gemini:gemini-3-flash-preview": 0.5,
         "gemini:gemini-3.1-pro-preview": 2.0,
     }
-    assert gemini_prices[0].output_per_million == 1.5
+    assert {price.model_id: price.output_per_million for price in gemini_prices}["gemini:gemini-3.5-flash"] == 9.0
 
     claude_prices = parse_claude_prices("""
     Claude Opus 4.6  | $5 / MTok  | $6.25 / MTok  | $10 / MTok  | $0.50 / MTok  | $25 / MTok
@@ -78,18 +97,11 @@ def test_pricing_parsers_extract_supported_model_prices():
 
     deepseek_prices = parse_deepseek_prices("""
     PRICING
-    1M INPUT TOKENS (CACHE HIT)
-    $0.0028
-    $0.003625 (75% off)
-    $0.0145
-    1M INPUT TOKENS (CACHE MISS)
-    $0.14
-    $0.435 (75% off)
-    $1.74
-    1M OUTPUT TOKENS
-    $0.28
-    $0.87 (75% off)
-    $3.48
+    MODEL deepseek-v4-flash(1)deepseek-v4-pro
+    BASE URL (OpenAI Format)
+    PRICING 1M INPUT TOKENS (CACHE HIT)$0.0028$0.003625
+    1M INPUT TOKENS (CACHE MISS)$0.14$0.435
+    1M OUTPUT TOKENS$0.28$0.87
     """)
     assert deepseek_prices[0].model_id == "deepseek:deepseek-v4-flash"
     assert deepseek_prices[0].input_per_million == 0.14
@@ -131,17 +143,26 @@ def test_refresh_converts_qwen_cny_prices_to_usd():
     pages = {
         CNY_USD_FX_URL: json.dumps({"date": "2026-05-13", "rates": {"USD": 0.14}}),
         GEMINI_PRICING_URL: """
+        gemini-3.5-flash
+        Standard
+        Input price
+        $1.50
+        Output price
+        $9.00
         gemini-3.1-flash-lite
+        Standard
         Input price
         $0.25
         Output price
         $1.50
         gemini-3-flash-preview
+        Standard
         Input price
         $0.50
         Output price
         $3.00
         gemini-3.1-pro-preview
+        Standard
         Input price
         $2.00
         Output price
@@ -150,7 +171,13 @@ def test_refresh_converts_qwen_cny_prices_to_usd():
         CLAUDE_PRICING_URL: "Claude Sonnet 4.6 | $3 / MTok | $3.75 / MTok | $6 / MTok | $0.30 / MTok | $15 / MTok",
         KIMI_K26_PRICING_URL: 'rows: [["kimi-k2.6", "1M tokens", "¥1.10", "¥6.50", "¥27.00", "262,144 tokens"]]',
         KIMI_K25_PRICING_URL: 'rows: [["kimi-k2.5", "1M tokens", "¥0.70", "¥4.00", "¥21.00", "262,144 tokens"]]',
-        DEEPSEEK_PRICING_URL: "PRICING $0.0028 $0.003625 $0.0145 $0.14 $0.435 $1.74 $0.28 $0.87 $3.48",
+        DEEPSEEK_PRICING_URL: """
+        MODEL deepseek-v4-flash(1)deepseek-v4-pro
+        BASE URL (OpenAI Format)
+        PRICING 1M INPUT TOKENS (CACHE HIT)$0.0028$0.003625
+        1M INPUT TOKENS (CACHE MISS)$0.14$0.435
+        1M OUTPUT TOKENS$0.28$0.87
+        """,
         QWEN_PRICING_URL: "qwen3.6-plus\n2\n元\n12\n元\nqwen-plus\n0.8\n元\n2\n元\nqwen-max\n2.4\n元\n9.6\n元",
     }
     service = ModelPricingService(fetch_text=lambda url: pages[url])
@@ -170,6 +197,8 @@ def test_refresh_converts_qwen_cny_prices_to_usd():
     assert kimi_price.input_per_million == 0.91
     assert kimi_price.output_per_million == 3.78
     assert kimi_price.source_url == KIMI_K26_PRICING_URL
+    assert catalog.models["gemini:gemini-3.5-flash"].input_per_million == 1.5
+    assert catalog.models["deepseek:deepseek-v4-flash"].output_per_million == 0.28
 
 
 def test_calculate_cost_marks_missing_pricing_incomplete():
@@ -232,16 +261,19 @@ async def test_start_waits_for_initial_refresh_before_returning():
         CNY_USD_FX_URL: json.dumps({"date": "2026-05-13", "rates": {"USD": 0.14}}),
         GEMINI_PRICING_URL: """
         gemini-3.1-flash-lite
+        Standard
         Input price
         $0.25
         Output price
         $1.50
         gemini-3-flash-preview
+        Standard
         Input price
         $0.50
         Output price
         $3.00
         gemini-3.1-pro-preview
+        Standard
         Input price
         $2.00
         Output price

@@ -414,16 +414,12 @@ def parse_gemini_prices(raw_html: str) -> list[RawPrice]:
     text = _html_to_text(raw_html)
     lines = text.splitlines()
     results: list[RawPrice] = []
-    for model_name in [
-        "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview",
-    ]:
-        window = _window_after_exact_line(lines, model_name, 80)
+    for model_name, index in _gemini_model_anchors(lines):
+        window = _gemini_standard_price_window(lines[index : index + 100])
         input_price = _first_price_after_label(window, "Input price", "$")
         output_price = _first_price_after_label(window, "Output price", "$")
         if input_price is None or output_price is None:
-            raise ValueError(f"Could not parse Gemini pricing for {model_name}")
+            continue
         results.append(
             RawPrice(
                 model_id=f"gemini:{model_name}",
@@ -434,6 +430,8 @@ def parse_gemini_prices(raw_html: str) -> list[RawPrice]:
                 pricing_note="standard text tier; pro uses the first <=200k tier",
             )
         )
+    if not results:
+        raise ValueError("Could not parse any Gemini pricing rows")
     return results
 
 
@@ -503,28 +501,28 @@ def parse_kimi_prices(raw_html: str) -> list[RawPrice]:
 
 def parse_deepseek_prices(raw_html: str) -> list[RawPrice]:
     text = _html_to_text(raw_html)
-    amounts = _prices_after("PRICING", text, "$")
-    if len(amounts) < 9:
+    lines = text.splitlines()
+    model_names = _deepseek_pricing_model_names(text)
+    if not model_names:
         raise ValueError("Could not parse DeepSeek pricing table")
+
+    cache_hit_prices = _deepseek_prices_for_row(lines, "CACHE HIT", len(model_names))
+    cache_miss_prices = _deepseek_prices_for_row(lines, "CACHE MISS", len(model_names))
+    output_prices = _deepseek_prices_for_row(lines, "OUTPUT TOKENS", len(model_names))
+    if cache_hit_prices is None or cache_miss_prices is None or output_prices is None:
+        raise ValueError("Could not parse DeepSeek pricing table")
+
     return [
         RawPrice(
-            model_id="deepseek:deepseek-v4-flash",
-            input_per_million=amounts[3],
-            output_per_million=amounts[6],
-            cache_hit_input_per_million=amounts[0],
+            model_id=f"deepseek:{model_name}",
+            input_per_million=cache_miss_prices[index],
+            output_per_million=output_prices[index],
+            cache_hit_input_per_million=cache_hit_prices[index],
             currency="USD",
             source_url=DEEPSEEK_PRICING_URL,
             pricing_note="cache miss input price is used as default input price",
-        ),
-        RawPrice(
-            model_id="deepseek:deepseek-v4-pro",
-            input_per_million=amounts[4],
-            output_per_million=amounts[7],
-            cache_hit_input_per_million=amounts[1],
-            currency="USD",
-            source_url=DEEPSEEK_PRICING_URL,
-            pricing_note="discounted official price if present on page",
-        ),
+        )
+        for index, model_name in enumerate(model_names)
     ]
 
 
@@ -600,7 +598,72 @@ def _prices_after(label: str, text: str, currency: str) -> list[float]:
     if index < 0:
         return []
     window = text[index : index + 5000]
-    return [float(value) for value in re.findall(rf"{re.escape(currency)}\s*(\d+(?:\.\d+)?)", window)]
+    return _prices_in_text(window, currency)
+
+
+def _prices_in_text(text: str, currency: str) -> list[float]:
+    return [float(value) for value in re.findall(rf"{re.escape(currency)}\s*(\d+(?:\.\d+)?)", text)]
+
+
+def _gemini_model_anchors(lines: list[str]) -> list[tuple[str, int]]:
+    anchors: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for index, line in enumerate(lines):
+        model_names = re.findall(r"\bgemini-[a-z0-9][a-z0-9.-]*\b", line, re.I)
+        for model_name in model_names:
+            model_name = model_name.lower()
+            if model_name in seen:
+                continue
+            seen.add(model_name)
+            anchors.append((model_name, index))
+    return anchors
+
+
+def _gemini_standard_price_window(lines: list[str]) -> list[str]:
+    start = next((index for index, line in enumerate(lines) if line == "Standard"), 0)
+    stop_labels = {"Batch", "Flex", "Priority"}
+    stop = next(
+        (index for index, line in enumerate(lines[start + 1 :], start + 1) if line in stop_labels),
+        len(lines),
+    )
+    return lines[start:stop]
+
+
+def _deepseek_pricing_model_names(text: str) -> list[str]:
+    start = text.find("MODEL")
+    stop = text.find("BASE URL", start)
+    if start < 0:
+        start = 0
+    if stop < 0:
+        stop = text.find("PRICING", start)
+    window = text[start:stop] if stop >= 0 else text[start : start + 1000]
+    return _unique_strings(re.findall(r"\bdeepseek-v[0-9][a-z0-9.-]*\b", window, re.I))
+
+
+def _deepseek_prices_for_row(lines: list[str], label: str, expected_count: int) -> list[float] | None:
+    try:
+        pricing_index = next(index for index, line in enumerate(lines) if "PRICING" in line)
+    except StopIteration:
+        pricing_index = 0
+    for index, line in enumerate(lines[pricing_index : pricing_index + 40], pricing_index):
+        if label not in line:
+            continue
+        prices = _prices_in_text(" ".join(lines[index : index + expected_count + 2]), "$")
+        if len(prices) >= expected_count:
+            return prices[:expected_count]
+    return None
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        normalized = value.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(normalized)
+    return unique
 
 
 def _kimi_cny_prices_for_model(raw_html: str, model_name: str) -> tuple[float, float, float] | None:

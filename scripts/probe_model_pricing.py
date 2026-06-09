@@ -52,8 +52,12 @@ def prices_after(label: str, text: str, currency: str = "$") -> list[float]:
     if index < 0:
         return []
     window = text[index : index + 5000]
+    return price_values_in_text(window, currency)
+
+
+def price_values_in_text(text: str, currency: str = "$") -> list[float]:
     escaped = re.escape(currency)
-    return [float(value) for value in re.findall(rf"{escaped}\s*(\d+(?:\.\d+)?)", window)]
+    return [float(value) for value in re.findall(rf"{escaped}\s*(\d+(?:\.\d+)?)", text)]
 
 
 def price_on_line(line: str, currency: str = "$") -> float | None:
@@ -75,24 +79,13 @@ def first_price_after_label(lines: list[str], label: str, currency: str = "$") -
 
 def parse_gemini(text: str) -> list[PriceProbeResult]:
     url = "https://ai.google.dev/gemini-api/docs/pricing"
-    targets = [
-        "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview",
-    ]
     results: list[PriceProbeResult] = []
     lines = text.splitlines()
-    for model in targets:
-        try:
-            index = next(i for i, line in enumerate(lines) if line == model)
-        except StopIteration:
-            results.append(PriceProbeResult("gemini", model, url, False, error="model or prices not found"))
-            continue
-        window = lines[index : index + 80]
+    for model, index in gemini_model_anchors(lines):
+        window = gemini_standard_price_window(lines[index : index + 100])
         input_price = first_price_after_label(window, "Input price")
         output_price = first_price_after_label(window, "Output price")
         if input_price is None or output_price is None:
-            results.append(PriceProbeResult("gemini", model, url, False, error="prices not found"))
             continue
         results.append(
             PriceProbeResult(
@@ -106,6 +99,8 @@ def parse_gemini(text: str) -> list[PriceProbeResult]:
                 note="standard text tier; pro uses the first <=200k tier",
             )
         )
+    if not results:
+        results.append(PriceProbeResult("gemini", "*", url, False, error="prices not found"))
     return results
 
 
@@ -180,36 +175,88 @@ def parse_kimi(text: str) -> list[PriceProbeResult]:
 
 def parse_deepseek(text: str) -> list[PriceProbeResult]:
     url = "https://api-docs.deepseek.com/quick_start/pricing/"
-    amounts = prices_after("PRICING", text, "$")
-    if len(amounts) < 9:
-        return [
-            PriceProbeResult("deepseek", "deepseek-v4-flash", url, False, error="prices not found"),
-            PriceProbeResult("deepseek", "deepseek-v4-pro", url, False, error="prices not found"),
-        ]
+    lines = text.splitlines()
+    models = deepseek_model_names(text)
+    if not models:
+        return [PriceProbeResult("deepseek", "*", url, False, error="model names not found")]
+    cache_hit_prices = deepseek_prices_for_row(lines, "CACHE HIT", len(models))
+    cache_miss_prices = deepseek_prices_for_row(lines, "CACHE MISS", len(models))
+    output_prices = deepseek_prices_for_row(lines, "OUTPUT TOKENS", len(models))
+    if cache_hit_prices is None or cache_miss_prices is None or output_prices is None:
+        return [PriceProbeResult("deepseek", "*", url, False, error="prices not found")]
     return [
         PriceProbeResult(
             provider="deepseek",
-            model="deepseek-v4-flash",
+            model=model,
             source_url=url,
             ok=True,
             currency="USD",
-            input_per_million=amounts[3],
-            output_per_million=amounts[6],
-            cache_hit_input_per_million=amounts[0],
+            input_per_million=cache_miss_prices[index],
+            output_per_million=output_prices[index],
+            cache_hit_input_per_million=cache_hit_prices[index],
             note="cache miss input price is used as default input price",
-        ),
-        PriceProbeResult(
-            provider="deepseek",
-            model="deepseek-v4-pro",
-            source_url=url,
-            ok=True,
-            currency="USD",
-            input_per_million=amounts[4],
-            output_per_million=amounts[7],
-            cache_hit_input_per_million=amounts[1],
-            note="discounted official price if present on page",
-        ),
+        )
+        for index, model in enumerate(models)
     ]
+
+
+def gemini_model_anchors(lines: list[str]) -> list[tuple[str, int]]:
+    anchors: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for index, line in enumerate(lines):
+        for model in re.findall(r"\bgemini-[a-z0-9][a-z0-9.-]*\b", line, re.I):
+            model = model.lower()
+            if model in seen:
+                continue
+            seen.add(model)
+            anchors.append((model, index))
+    return anchors
+
+
+def gemini_standard_price_window(lines: list[str]) -> list[str]:
+    start = next((index for index, line in enumerate(lines) if line == "Standard"), 0)
+    stop = next(
+        (
+            index
+            for index, line in enumerate(lines[start + 1 :], start + 1)
+            if line in {"Batch", "Flex", "Priority"}
+        ),
+        len(lines),
+    )
+    return lines[start:stop]
+
+
+def deepseek_model_names(text: str) -> list[str]:
+    start = text.find("MODEL")
+    stop = text.find("BASE URL", start)
+    if start < 0:
+        start = 0
+    if stop < 0:
+        stop = text.find("PRICING", start)
+    window = text[start:stop] if stop >= 0 else text[start : start + 1000]
+    seen: set[str] = set()
+    models: list[str] = []
+    for model in re.findall(r"\bdeepseek-v[0-9][a-z0-9.-]*\b", window, re.I):
+        model = model.lower()
+        if model in seen:
+            continue
+        seen.add(model)
+        models.append(model)
+    return models
+
+
+def deepseek_prices_for_row(lines: list[str], label: str, expected_count: int) -> list[float] | None:
+    try:
+        pricing_index = next(index for index, line in enumerate(lines) if "PRICING" in line)
+    except StopIteration:
+        pricing_index = 0
+    for index, line in enumerate(lines[pricing_index : pricing_index + 40], pricing_index):
+        if label not in line:
+            continue
+        values = price_values_in_text(" ".join(lines[index : index + expected_count + 2]), "$")
+        if len(values) >= expected_count:
+            return values[:expected_count]
+    return None
 
 
 def price_values_from_lines(lines: list[str]) -> list[float]:
