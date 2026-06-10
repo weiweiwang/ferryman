@@ -201,6 +201,72 @@ def test_refresh_converts_qwen_cny_prices_to_usd():
     assert catalog.models["deepseek:deepseek-v4-flash"].output_per_million == 0.28
 
 
+def test_refresh_does_not_create_static_gemini_prices_when_live_pricing_fetch_fails():
+    pages = {
+        CNY_USD_FX_URL: json.dumps({"date": "2026-06-08", "rates": {"USD": 0.14745}}),
+        CLAUDE_PRICING_URL: "",
+        KIMI_K26_PRICING_URL: "",
+        KIMI_K25_PRICING_URL: "",
+        DEEPSEEK_PRICING_URL: """
+        MODEL deepseek-v4-flash(1)deepseek-v4-pro
+        BASE URL (OpenAI Format)
+        PRICING 1M INPUT TOKENS (CACHE HIT)$0.0028$0.003625
+        1M INPUT TOKENS (CACHE MISS)$0.14$0.435
+        1M OUTPUT TOKENS$0.28$0.87
+        """,
+        QWEN_PRICING_URL: "qwen3.6-plus\n2\n元\n12\n元\nqwen-plus\n0.8\n元\n2\n元\nqwen-max\n2.4\n元\n9.6\n元",
+    }
+
+    def fetch_text(url: str) -> str:
+        if url == GEMINI_PRICING_URL:
+            raise TimeoutError("Gemini pricing timed out")
+        return pages[url]
+
+    catalog = ModelPricingService(fetch_text=fetch_text)._refresh_sync()
+
+    assert "gemini:gemini-3.1-flash-lite" not in catalog.models
+    assert catalog.models["deepseek:deepseek-v4-flash"].output_per_million == 0.28
+    assert any(error["provider"] == "gemini" for error in catalog.refresh_errors)
+
+
+def test_refresh_preserves_previous_provider_prices_when_live_pricing_fetch_fails():
+    service = ModelPricingService(fetch_text=lambda url: "")
+    service._catalog = PricingCatalog(
+        status="ready",
+        refreshed_at="2026-06-08T00:00:00Z",
+        models={
+            "gemini:gemini-experimental": ModelPrice(
+                currency="USD",
+                input_per_million=0.42,
+                output_per_million=2.4,
+                source_currency="USD",
+                source_input_per_million=0.42,
+                source_output_per_million=2.4,
+                source_url=GEMINI_PRICING_URL,
+            )
+        },
+    )
+    pages = {
+        CNY_USD_FX_URL: json.dumps({"date": "2026-06-08", "rates": {"USD": 0.14745}}),
+        CLAUDE_PRICING_URL: "",
+        KIMI_K26_PRICING_URL: "",
+        KIMI_K25_PRICING_URL: "",
+        DEEPSEEK_PRICING_URL: "",
+        QWEN_PRICING_URL: "",
+    }
+
+    def fetch_text(url: str) -> str:
+        if url == GEMINI_PRICING_URL:
+            raise TimeoutError("Gemini pricing timed out")
+        return pages[url]
+
+    service._fetch_text = fetch_text
+    catalog = service._refresh_sync()
+
+    assert catalog.models["gemini:gemini-experimental"].input_per_million == 0.42
+    assert "gemini:gemini-3.1-flash-lite" not in catalog.models
+
+
 def test_calculate_cost_marks_missing_pricing_incomplete():
     service = ModelPricingService(enabled=False)
     service._catalog = PricingCatalog(

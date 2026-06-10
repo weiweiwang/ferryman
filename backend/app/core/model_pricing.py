@@ -97,6 +97,15 @@ class RawPrice:
     pricing_note: str | None = None
 
 
+PROVIDER_MODEL_PREFIXES = {
+    "claude": "anthropic",
+    "deepseek": "deepseek",
+    "gemini": "gemini",
+    "kimi": "kimi",
+    "qwen": "qwen",
+}
+
+
 class ModelPricingService:
     """Maintain an in-memory model pricing catalog and estimate run costs."""
 
@@ -220,6 +229,7 @@ class ModelPricingService:
             fx["CNY_USD"] = cny_usd
 
         raw_prices: list[RawPrice] = []
+        failed_providers: set[str] = set()
         parser_specs: list[tuple[str, str, Callable[[str], list[RawPrice]]]] = [
             ("gemini", GEMINI_PRICING_URL, parse_gemini_prices),
             ("claude", CLAUDE_PRICING_URL, parse_claude_prices),
@@ -232,6 +242,7 @@ class ModelPricingService:
             try:
                 raw_prices.extend(parser(self._fetch_text(url)))
             except Exception as exc:
+                failed_providers.add(provider)
                 errors.append({
                     "provider": provider,
                     "source_url": url,
@@ -251,6 +262,8 @@ class ModelPricingService:
                 })
                 continue
             models[raw_price.model_id] = price
+        for provider in failed_providers:
+            self._add_previous_provider_prices(models, provider)
 
         status = "ready" if models else "empty"
         return PricingCatalog(
@@ -261,6 +274,14 @@ class ModelPricingService:
             models=models,
             refresh_errors=errors,
         )
+
+    def _add_previous_provider_prices(self, models: dict[str, ModelPrice], provider: str) -> None:
+        prefix = PROVIDER_MODEL_PREFIXES.get(provider)
+        if not prefix:
+            return
+        for model_id, price in self._catalog.models.items():
+            if model_id.startswith(f"{prefix}:"):
+                models.setdefault(model_id, price)
 
     def _fetch_cny_usd_fx(self, *, previous: FxRate | None, errors: list[dict[str, object]]) -> FxRate | None:
         try:
