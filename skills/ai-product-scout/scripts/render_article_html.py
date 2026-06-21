@@ -22,7 +22,7 @@ FORBIDDEN_SOURCE_PATTERNS = (
     re.compile(r"^\s*#{2,6}\s+fact check notes(?:\s*/\s*source notes)?\s*$", re.I | re.M),
     re.compile(r"^\s*\*\*(?:date|publication / channel|brand name)\*\*\s*:", re.I | re.M),
 )
-MARKDOWN = MarkdownIt("commonmark", {"html": False})
+MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable("table")
 
 
 ARTICLE_STYLE = (
@@ -71,6 +71,16 @@ CODE_STYLE = (
     "'Cascadia Code','Roboto Mono',Consolas,monospace;font-size:14px;"
 )
 A_STYLE = "color:#07c160;text-decoration:none;border-bottom:1px solid #07c160;font-weight:500;"
+TABLE_WRAP_STYLE = "margin:16px 0 22px;overflow-x:auto;-webkit-overflow-scrolling:touch;"
+TABLE_STYLE = (
+    "width:100%;border-collapse:collapse;color:#34495e;font-size:14px;"
+    "line-height:1.65;letter-spacing:0;"
+)
+TH_STYLE = (
+    "padding:9px 10px;border:1px solid #dbe7ef;background:#f6f8fa;"
+    "color:#2c3e50;font-weight:600;text-align:left;vertical-align:top;"
+)
+TD_STYLE = "padding:9px 10px;border:1px solid #dbe7ef;text-align:left;vertical-align:top;"
 
 
 @dataclass(frozen=True)
@@ -175,6 +185,11 @@ def render_body_html(markdown_body: str) -> str:
             rendered.append(list_html)
             continue
 
+        if token.type == "table_open":
+            table_html, index = _render_table(tokens, index)
+            rendered.append(table_html)
+            continue
+
         if token.type == "hr":
             rendered.append(f'<hr style="{HR_STYLE}">')
 
@@ -238,6 +253,47 @@ def _render_list_item(tokens: list[Token], start: int) -> tuple[str, int]:
             continue
         index += 1
     return f'<li style="{LI_STYLE}">{" ".join(parts)}</li>', index + 1
+
+
+def _render_table(tokens: list[Token], start: int) -> tuple[str, int]:
+    parts: list[str] = [f'<div style="{TABLE_WRAP_STYLE}">']
+    index = start
+    while index < len(tokens):
+        token = tokens[index]
+        if token.type == "table_open":
+            parts.append(f'<table style="{TABLE_STYLE}">')
+        elif token.type == "table_close":
+            parts.append("</table></div>")
+            return "".join(parts), index + 1
+        elif token.type == "thead_open":
+            parts.append("<thead>")
+        elif token.type == "thead_close":
+            parts.append("</thead>")
+        elif token.type == "tbody_open":
+            parts.append("<tbody>")
+        elif token.type == "tbody_close":
+            parts.append("</tbody>")
+        elif token.type == "tr_open":
+            parts.append("<tr>")
+        elif token.type == "tr_close":
+            parts.append("</tr>")
+        elif token.type in {"th_open", "td_open"}:
+            inline = _next_inline(tokens, index)
+            content = render_inline_tokens(inline.children or []) if inline else ""
+            tag = "th" if token.type == "th_open" else "td"
+            style = _table_cell_style(token, TH_STYLE if tag == "th" else TD_STYLE)
+            parts.append(f'<{tag} style="{style}">{content}</{tag}>')
+            index += 3
+            continue
+        index += 1
+    return "".join(parts), index
+
+
+def _table_cell_style(token: Token, base_style: str) -> str:
+    align_style = token.attrGet("style") or ""
+    if "text-align" not in align_style:
+        return base_style
+    return f"{base_style}{align_style}"
 
 
 def render_inline(markdown_text: str) -> str:

@@ -103,6 +103,29 @@ def test_markdown_it_handles_links_and_code_literals():
     assert "a*b" in code
 
 
+def test_renders_markdown_tables_as_html_tables():
+    html = render_article_html.render_full_html(
+        render_article_html.Article(
+            title="标题",
+            body=(
+                "正文\n\n"
+                "| 竞品 | 核心定位 | 排名 |\n"
+                "|------|---------|------|\n"
+                "| Otter AI | 通用会议笔记+转录 | #1 |\n"
+                "| Fathom | 团队会议工作流+CRM集成 | #2 |\n"
+            ),
+        )
+    )
+
+    assert "<table" in html
+    assert "<thead>" in html
+    assert "<tbody>" in html
+    assert "<th" in html
+    assert "<td" in html
+    assert "Otter AI" in html
+    assert "| 竞品 |" not in html
+
+
 def test_render_file_uses_article_html_filename(tmp_path):
     source = tmp_path / "ai-product-case-article-demo.md"
     source.write_text("# 标题\n\n正文", encoding="utf-8")
