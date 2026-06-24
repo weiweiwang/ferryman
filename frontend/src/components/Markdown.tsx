@@ -7,9 +7,31 @@ import { invoke } from '@tauri-apps/api/core';
 import { Check, Copy } from 'lucide-react';
 
 import { useI18n } from '../hooks/useI18n';
+import { cn } from '../utils/cn';
 
 interface MarkdownProps {
   content: string;
+}
+
+const SAFE_RED_SPAN_PATTERN = /<span\b(?=[^>]*\bstyle\s*=\s*(['"])[^'"]*\bcolor\s*:\s*red\b[^'"]*\1)[^>]*>([\s\S]*?)<\/span>/gi;
+const FENCED_CODE_BLOCK_PATTERN = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
+const SAFE_RED_LINK_HREF = 'ferryman-red:';
+
+function escapeMarkdownLinkLabel(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/]/g, '\\]');
+}
+
+function replaceSafeInlineHtml(value: string) {
+  return value.replace(SAFE_RED_SPAN_PATTERN, (_match, _quote, inner) => {
+    return `[${escapeMarkdownLinkLabel(inner)}](${SAFE_RED_LINK_HREF})`;
+  });
+}
+
+function normalizeSafeInlineHtml(content: string) {
+  return content
+    .split(FENCED_CODE_BLOCK_PATTERN)
+    .map((part) => part.startsWith('```') || part.startsWith('~~~') ? part : replaceSafeInlineHtml(part))
+    .join('');
 }
 
 function CopyCodeButton({ text, t }: { text: string; t: (key: string) => string }) {
@@ -70,12 +92,57 @@ export const Markdown = ({ content }: MarkdownProps) => {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         urlTransform={(url) => {
+          if (url === SAFE_RED_LINK_HREF) {
+            return url;
+          }
           if (url.startsWith('file://')) {
             return url;
           }
           return defaultUrlTransform(url);
         }}
         components={{
+        table({ node, className, children, ...props }: any) {
+          return (
+            <div className="my-5 w-fit max-w-full overflow-x-auto rounded-xl border border-white/10 bg-white/[0.025] [overflow-wrap:normal]">
+              <table className={cn("w-max border-collapse text-left text-[0.95em] leading-6", className)} {...props}>
+                {children}
+              </table>
+            </div>
+          );
+        },
+        thead({ node, className, children, ...props }: any) {
+          return (
+            <thead className={cn("bg-white/[0.06] text-white", className)} {...props}>
+              {children}
+            </thead>
+          );
+        },
+        th({ node, className, children, ...props }: any) {
+          return (
+            <th
+              className={cn(
+                "whitespace-nowrap border-b border-white/12 px-3 py-2.5 text-sm font-black text-white",
+                className
+              )}
+              {...props}
+            >
+              {children}
+            </th>
+          );
+        },
+        td({ node, className, children, ...props }: any) {
+          return (
+            <td
+              className={cn(
+                "border-t border-white/[0.06] px-3 py-2.5 align-top text-white/78 first:whitespace-nowrap",
+                className
+              )}
+              {...props}
+            >
+              {children}
+            </td>
+          );
+        },
         code({ node, inline, className, children, ...props }: any) {
           const match = /language-(\w+)/.exec(className || '');
           // Deep extract string from React children array if needed.
@@ -138,6 +205,14 @@ export const Markdown = ({ content }: MarkdownProps) => {
           );
         },
         a({ node, children, href, ...props }: any) {
+          if (href === SAFE_RED_LINK_HREF) {
+            return (
+              <span className="font-semibold text-red-300 [&_strong]:text-red-200">
+                {children}
+              </span>
+            );
+          }
+
           const isFileUrl = href?.startsWith('file://');
           const isLocalPath = isAbsoluteLocalPath(href);
           if (isFileUrl || isLocalPath) {
@@ -168,7 +243,7 @@ export const Markdown = ({ content }: MarkdownProps) => {
 
       }}
     >
-      {content}
+      {normalizeSafeInlineHtml(content)}
     </ReactMarkdown>
     </div>
   );

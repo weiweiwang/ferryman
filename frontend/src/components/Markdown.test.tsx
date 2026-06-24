@@ -101,4 +101,37 @@ describe('Markdown', () => {
     expect(container.firstElementChild).toHaveClass('[overflow-wrap:anywhere]');
     expect(screen.getByRole('link')).toHaveClass('break-words', '[overflow-wrap:anywhere]');
   });
+
+  it('renders GFM tables with scroll-safe chat styling', () => {
+    const content = [
+      '| 股票 | 当前价 | 触发价 | 状态 |',
+      '|:---|---:|:---:|:---:|',
+      '| 🔴 **3690.HK 美团** | **71.30** | < 75.0 | 🔴 **跌破止损！** |',
+      '| 9992.HK 泡泡玛特 | 158.4 | < 140.0 | 🟢 |',
+    ].join('\n');
+
+    const { container } = render(<Markdown content={content} />);
+    const table = screen.getByRole('table');
+    const tableWrapper = table.parentElement;
+
+    expect(tableWrapper).toHaveClass('w-fit', 'max-w-full', 'overflow-x-auto', '[overflow-wrap:normal]');
+    expect(table).toHaveClass('w-max', 'border-collapse');
+    expect(container.querySelector('th')).toHaveClass('whitespace-nowrap', 'px-3');
+    expect(container.querySelector('td')).toHaveClass('first:whitespace-nowrap', 'px-3');
+  });
+
+  it('renders safe red inline spans without exposing raw HTML text', () => {
+    const content = [
+      '| 股票 | 触发/止损情况 |',
+      '|:---|:---|',
+      '| 9988 阿里巴巴 | 跌破触发价110 ✅ <span style="color:red">**跌破止损100**</span> |',
+    ].join('\n');
+
+    const { container } = render(<Markdown content={content} />);
+    const highlightedText = screen.getByText('跌破止损100');
+
+    expect(container).toHaveTextContent('跌破触发价110 ✅ 跌破止损100');
+    expect(container).not.toHaveTextContent('<span style="color:red">');
+    expect(highlightedText.closest('span')).toHaveClass('text-red-300', '[&_strong]:text-red-200');
+  });
 });
