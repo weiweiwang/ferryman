@@ -252,7 +252,6 @@ def fetch_stock_data(ticker: str) -> dict[str, Any]:
         },
         "historical_financials": {
             "currency": financial_currency,
-            "perShareCurrency": financial_currency,
             "rows": get_5y_financials(stock),
         },
         "price_history": {

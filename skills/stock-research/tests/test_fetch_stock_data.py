@@ -161,7 +161,6 @@ def test_fetch_stock_data_returns_currency_annotated_structures(monkeypatch):
     assert result["ttm_metrics"]["fcf"] == {"value": 300, "currency": "CNY"}
     assert result["ttm_metrics"]["eps"] == {"value": 2, "currency": "HKD"}
     assert result["historical_financials"]["currency"] == "CNY"
-    assert result["historical_financials"]["perShareCurrency"] == "CNY"
     assert result["historical_financials"]["rows"][0]["Revenue"] == 1000
     assert result["price_history"]["currency"] == "HKD"
     assert result["price_history"]["rows"][0]["close"] == 12
