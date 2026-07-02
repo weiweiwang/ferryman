@@ -105,13 +105,13 @@ class AgentManager:
         return agent
 
     def _get_request_limit(self) -> int:
-        value = self._settings.get("system.llm.request_limit", 100)
+        value = self._settings.get("system.llm.request_limit", self._settings.llm_request_limit)
         if isinstance(value, int):
             return value
         try:
             return int(str(value))
         except (TypeError, ValueError):
-            return 100
+            return self._settings.llm_request_limit
 
     async def run_master_agent(
         self,

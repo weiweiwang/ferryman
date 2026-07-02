@@ -22,13 +22,13 @@ from app.core.toolkits.base import Toolkit
 logger = logging.getLogger(__name__)
 
 
-def _coerce_request_limit(value: object) -> int:
+def _coerce_request_limit(value: object, default: int) -> int:
     if isinstance(value, int):
         return value
     try:
         return int(str(value))
     except (TypeError, ValueError):
-        return 100
+        return default
 
 
 class SkillToolkit(Toolkit):
@@ -71,7 +71,11 @@ class SkillToolkit(Toolkit):
                 run_id=ctx.deps.run_id,
                 usage_tracker=ctx.deps.model_usage_tracker,
             )
-            request_limit = _coerce_request_limit(get_setting_value(ctx.deps, "system.llm.request_limit", 100))
+            default_request_limit = ctx.deps.settings.llm_request_limit
+            request_limit = _coerce_request_limit(
+                get_setting_value(ctx.deps, "system.llm.request_limit", default_request_limit),
+                default_request_limit,
+            )
             augmented_instruction = prompt_builder.build_runtime_augmented_instruction(
                 instruction,
                 session_id,

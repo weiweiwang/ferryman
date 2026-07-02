@@ -46,6 +46,10 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="FERRYMAN_MODEL_PRICING_REFRESH_ENABLED",
     )
+    llm_request_limit: int = Field(
+        default=200,
+        validation_alias=AliasChoices("FERRYMAN_LLM_REQUEST_LIMIT", "LLM_REQUEST_LIMIT"),
+    )
 
     @property
     def user_dir(self) -> Path:

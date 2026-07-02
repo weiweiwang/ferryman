@@ -40,7 +40,7 @@ from app.core.model_manager import LLMConfigurationError, ModelManager
 from app.core.runtime import FerrymanRuntime
 from app.core.tool_errors import RetryableToolError
 from app.core.toolkits.base import Toolkit
-from app.core.toolkits.skill import SkillToolkit
+from app.core.toolkits.skill import SkillToolkit, _coerce_request_limit
 from app.core.toolkits.web import WebToolkit
 from app.models.database import MessageModel, SessionModel
 from app.models.events import FerrymanEventEnvelope, EventNamespace, ToolPhase, ToolActivityPayload
@@ -1292,6 +1292,20 @@ async def test_skill_run_uses_shared_usage_and_request_limit(monkeypatch):
     assert "Session Workspace:" in captured["instruction"]
     assert "Do the skill work" in captured["instruction"]
     assert captured["kwargs"]["deps"].emit_event_cb is ctx.deps.emit_event_cb
+
+
+def test_skill_request_limit_falls_back_to_default():
+    assert _coerce_request_limit(None, 200) == 200
+    assert _coerce_request_limit("not-a-number", 200) == 200
+    assert _coerce_request_limit("42", 200) == 42
+
+
+def test_settings_exposes_llm_request_limit(monkeypatch):
+    assert Settings(root_dir=TEST_ROOT).llm_request_limit == 200
+
+    monkeypatch.setenv("FERRYMAN_LLM_REQUEST_LIMIT", "256")
+
+    assert Settings(root_dir=TEST_ROOT).llm_request_limit == 256
 
 
 @pytest.mark.asyncio

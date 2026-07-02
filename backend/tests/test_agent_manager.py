@@ -141,7 +141,7 @@ async def test_agent_manager_run_master_agent_persists_success(session, tmp_path
     runtime.context_manager.maybe_compact_session.assert_awaited_once_with("s1")
     assert mock_agent.calls
     assert "hello" in mock_agent.calls[0][0]
-    assert mock_agent.calls[0][1]["usage_limits"].request_limit == 100
+    assert mock_agent.calls[0][1]["usage_limits"].request_limit == 200
 
 
 def test_agent_manager_final_payload_includes_model_usage():
