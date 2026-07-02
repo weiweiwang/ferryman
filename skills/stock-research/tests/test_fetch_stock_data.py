@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
 from pathlib import Path
 
 
@@ -21,6 +23,8 @@ def test_stock_fetcher_keeps_runtime_dependencies_lightweight():
 
     assert "import yfinance" in source
     assert "import pandas" in source
+    assert "--json-out" in source
+    assert "--output-dir" not in source
     for heavy_import in ("openpyxl", "plotly", "kaleido"):
         assert heavy_import not in source
 
@@ -97,10 +101,34 @@ def test_price_history_rows_and_financials_from_yfinance_frames():
     assert row["ROE"] == 0.4
     assert row["ROIC"] == 0.208
     assert row["FCF Margin"] == 0.18
-    assert row["Cash Conversion"] == 1.25
+    assert row["OCF / Net Income"] == 1.25
+    assert row["FCF / Net Income"] == 0.9
     assert row["Goodwill To Equity"] == 0.1
     assert row["Receivables To Revenue"] == 0.08
     assert row["EPS"] == 2.5
+
+
+def test_financial_rows_keep_missing_cash_flow_as_null():
+    module = load_fetch_module()
+    pd = module.pd
+    year = pd.Timestamp("2025-12-31")
+
+    class FakeStock:
+        financials = pd.DataFrame({year: {"Total Revenue": 1000, "Net Income": 100}})
+        cashflow = pd.DataFrame()
+        balance_sheet = pd.DataFrame({year: {"Stockholders Equity": 500}})
+
+    rows = module.get_5y_financials(FakeStock())
+
+    assert rows[0]["Operating Cash Flow"] is None
+    assert rows[0]["Free Cash Flow"] is None
+    limits = module.financial_data_limits(rows)
+    assert limits["completeFcfYearCount"] == 0
+    assert limits["needsPrimarySourceForFiveYearNormalization"] is True
+    assert limits["confidenceCapIfNotSupplemented"] == 80
+    assert limits["missingFieldsByYear"] == {
+        "2025": ["Operating Cash Flow", "Free Cash Flow"],
+    }
 
 
 def test_fetch_stock_data_returns_currency_annotated_structures(monkeypatch):
@@ -164,6 +192,11 @@ def test_fetch_stock_data_returns_currency_annotated_structures(monkeypatch):
     assert result["historical_financials"]["rows"][0]["Revenue"] == 1000
     assert result["price_history"]["currency"] == "HKD"
     assert result["price_history"]["rows"][0]["close"] == 12
+    assert result["dataLimits"]["provider"] == "yfinance"
+    assert result["dataLimits"]["annualRowsReturned"] == 1
+    assert result["dataLimits"]["completeFcfYearCount"] == 1
+    assert result["dataLimits"]["minimumCompleteFcfYearsFor90Confidence"] == 5
+    assert result["dataLimits"]["needsPrimarySourceForFiveYearNormalization"] is True
 
 
 def test_fetch_stock_data_does_not_invent_missing_currencies(monkeypatch):
@@ -203,6 +236,8 @@ def test_fetch_stock_data_does_not_invent_missing_currencies(monkeypatch):
     assert result["ttm_metrics"]["eps"]["currency"] is None
     assert result["historical_financials"]["currency"] is None
     assert result["price_history"]["currency"] is None
+    assert result["dataLimits"]["annualRowsReturned"] == 0
+    assert result["dataLimits"]["needsPrimarySourceForFiveYearNormalization"] is True
 
 
 def test_fx_rate_uses_identity_for_matching_currencies():
@@ -215,3 +250,37 @@ def test_fx_rate_uses_identity_for_matching_currencies():
     assert rate["to"] == "HKD"
     assert rate["source"] == "identity"
     assert rate["symbol"] is None
+
+
+def test_main_can_write_explicit_json_out(monkeypatch, tmp_path, capsys):
+    module = load_fetch_module()
+    output_path = tmp_path / "stock-data.json"
+
+    monkeypatch.setattr(module, "fetch_stock_data", lambda ticker: {"ticker": ticker, "value": 1})
+    monkeypatch.setattr(sys, "argv", ["fetch_stock_data.py", "--ticker", "aapl", "--json-out", str(output_path)])
+
+    assert module.main() == 0
+
+    stdout_payload = json.loads(capsys.readouterr().out)
+    file_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert stdout_payload == {"ticker": "AAPL", "value": 1}
+    assert file_payload == stdout_payload
+
+
+def test_main_returns_stable_error_payload(monkeypatch, capsys):
+    module = load_fetch_module()
+
+    def fail_fetch(ticker):
+        raise module.StockDataError("Info fetch failed: boom", phase="info")
+
+    monkeypatch.setattr(module, "fetch_stock_data", fail_fetch)
+    monkeypatch.setattr(sys, "argv", ["fetch_stock_data.py", "--ticker", "bad"])
+
+    assert module.main() == 1
+
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "phase": "info",
+        "ticker": "BAD",
+        "error": "Info fetch failed: boom",
+    }

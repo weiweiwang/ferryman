@@ -1,70 +1,129 @@
-# Stock Analysis Report: [NAME] ([TICKER])
-
-**Fetched At**: [YYYY-MM-DD HH:MM UTC]
-**Audit Grade**: [Score/10]
-**Final Signal**: [STRONG_BUY | BUY | SPECULATIVE_BUY | HOLD | WAIT | AVOID]
-
+---
+ticker: "[Ticker]"
+company: "[公司名]"
+exchange: "[交易所]"
+report_date: "[YYYY-MM-DD]"
+fetched_at: "[YYYY-MM-DD HH:MM UTC]"
+signal: "[STRONG_BUY | BUY | WATCHLIST | TACTICAL_BUY | WAIT | AVOID]"
+quality_score: 0
+confidence_pct: 0
+summary: "[一句话结论]"
+current_price:
+  value: 0
+  currency: "[报价币种]"
+fair_value:
+  conservative: 0
+  base: 0
+  currency: "[报价币种]"
+tags:
+  - stock-research
 ---
 
-## Executive Summary
-[Brief thesis, most-likely scenario, fair value range, and one-line reason the signal is not higher/lower.]
+# [公司中文名] 股票研究：[公司名]（[Ticker]）
 
----
+**数据时间**：[YYYY-MM-DD HH:MM UTC]
+**候选来源**：[如来自 `screen_stock_candidates.py`，记录 ticker、status、screen_score、flags、data_gaps；否则 N/A]
+**质量评分**：[x/100]
+**安全边际信心**：[xx%]
+**最终信号**：[STRONG_BUY|BUY|WATCHLIST|TACTICAL_BUY|WAIT|AVOID]
 
-## Financial Data Audit
+## 核心结论
 
-**Data Limits**: [Provider/source, years returned, missing fields, and whether company filings were used for abnormal items.]
+**结论**：[一句话说明信号和动作。]
 
-| Year | Revenue | Net Income | FCF | ROE | ROIC | FCF Margin | Cash Conversion |
-|:---|:---|:---|:---|:---|:---|:---|:---|
-| 2025 | $xxxB | $xxxB | $xxxB | xx% | xx% / N/A | xx% | xx |
-| ... | ... | ... | ... | ... | ... | ... | ... |
+- **质量**：[一句话说明它是不是好公司，为什么。]
+- **价格**：[当前价格和市值；保守/基准每股公允价。]
+- **不直接上调信号的原因**：[一句话说明最大阻碍，例如没有 2x 安全边际、异常利润、杠杆、证据不足。]
 
-**Quality Read**: [Cash-backed earnings, leverage/cash, goodwill/equity or N/A, receivables/revenue or N/A, and whether growth is durable/cyclical.]
+## 质量与错杀检查
 
-### Abnormal Scenario Check
-
-| Scenario | Key Assumption | EPS/FCF or Margin | Fair Value | Confidence | Confirm / Refute |
-|:---|:---|:---|:---|:---|:---|
-| Reported / Structural | [Abnormal item persists] | [$xxx / xx%] | [$xxx] | [High/Med/Low] | [Future evidence] |
-| Partial Recovery | [Some normalization] | [$xxx / xx%] | [$xxx] | [High/Med/Low] | [Future evidence] |
-| Full Normalization | [Abnormal item reverses] | [$xxx / xx%] | [$xxx] | [High/Med/Low] | [Future evidence] |
-
----
-
-## Business Moat & Capital Allocation
-- **Moat**: [Network effects, brand, switching costs, scale, regulation, or lack thereof.]
-- **Capital Discipline**: [Reinvestment quality, buybacks/dividends, dilution, balance sheet.]
-
----
-
-## Intrinsic Valuation
-[Describe valuation anchors and why the base case is the most likely or probability-weighted case.]
-
-| Method | Key Inputs | Value / Share |
+| 检查项 | 结果 | 证据 |
 |:---|:---|:---|
-| DCF / FCF yield | [FCF, growth, discount/rate] | [$xxx] |
-| PE / EV multiple | [EPS/EBITDA/FCF and multiple] | [$xxx] |
-| Asset / PB floor | [BVPS/net cash/PB, if relevant] | [$xxx] |
+| 好生意质量 | 通过/观察/不通过 | [商业模式、护城河、ROIC/ROE、FCF、资产负债表] |
+| 错杀逻辑 | 通过/部分通过/不通过 | [市场担忧是什么，为什么可能是暂时或过度反应] |
+| 保守公允价值 >= 当前价格 2x | 通过/不通过 | [公允市值、每股公允价、相对现价倍数] |
+| 安全边际信心 >= 90% | 通过/不通过 | [xx%] |
+| 价值陷阱检查 | 通过/观察/不通过 | [主要否决风险] |
 
-**Fair Value Range**: **$[Lower] - $[Upper]**
-**Target Buy Zone**: **< $[Buy Price]**
-**Signal Check**: [Final signal anchored to the probability-weighted or most likely scenario; state what evidence would change it.]
+## 好公司评分：[x/100]
 
----
+| 维度 | 得分 | 证据 | 扣分点 |
+|:---|---:|:---|:---|
+| 商业模式质量 | [x/10] | [盈利模式、可重复性、单位经济、是否容易验证真实经济性] | [主要弱点或不确定性] |
+| 护城河 | [x/20] | [客户粘性、供应商依赖、难复制优势] | [竞争或监管风险] |
+| 现金流 | [x/20] | [多年 FCF、FCF/净利润、OCF/净利润] | [营运资本或周期性风险] |
+| 资本回报 | [x/15] | [正常化 ROIC/ROE] | [杠杆、周期或一次性收益支撑] |
+| 资产负债表 | [x/10] | [现金、债务、流动性] | [隐性负债] |
+| 增长质量 | [x/10] | [内生复利 vs 修复、补贴、并购或周期反弹] | [增长风险] |
+| 管理层与会计 | [x/15] | [回购、激励、关联方、会计质量] | [未验证或薄弱项] |
+| **总分** | **[x/100]** | [>=80 优秀；65-79 好公司观察；<65 不算好公司] | [分数不能更高的主因] |
 
-## Price/Volume Timing
+## 财务审计
 
-- **Current Phase**: [Accumulation / Markup / Distribution / Markdown]
-- **Key Levels**: Support at **$[Price]**, Resistance at **$[Price]**.
-- **Action Trigger**: [Specific condition for entry, e.g., "Wait for a successful test of the $xxx level"].
-- **Risk Control**: **Stop-Loss at $[Price]**. Technicals affect timing only, not intrinsic value.
+**数据限制**：[数据源、年度行数、完整 FCF 年数 vs 5 年要求、缺失字段、币种、汇率、无风险利率来源、使用的一手来源]
 
----
+| 年份 | 收入 | 净利润 | FCF | ROE | ROIC | FCF/营收 | FCF/净利润 |
+|:---|---:|---:|---:|---:|---:|---:|---:|
+| 2025 | [金额] | [金额] | [金额] | [xx%] | [xx%/N/A] | [xx%] | [x.xx] |
 
-## Bear Case Inversion
-[What permanently kills this business model? Regulatory risk, disruption, or demographic shifts?]
+**质量解读**：[FCF/营收、FCF/净利润、OCF/净利润、现金和债务、商誉/权益、应收/收入，以及经济性是否耐久。]
 
----
+## 主要证据
 
-*Research only, not investment advice.*
+| 来源 | 日期 | 使用证据 | 支持/反驳 |
+|:---|:---|:---|:---|
+| [公告/年报/transcript] | [日期] | [指标或说明] | [支持的场景或风险] |
+
+## 必查证据清单
+
+| 检查项 | 主要证据 | 结果 |
+|:---|:---|:---|
+| 异常项目与利润正常化 | [年报注释/业绩公告] | 通过/不通过/未验证 |
+| 可重复 FCF | [现金流量表/管理层解释] | 通过/不通过/未验证 |
+| 稀释与回购质量 | [股本/股权激励/回购披露] | 通过/不通过/未验证 |
+| 隐性负债 | [债务/租赁/养老金/担保注释] | 通过/不通过/未验证 |
+| 营运资本与资产风险 | [应收/存货/商誉注释] | 通过/不通过/未验证 |
+| 分部利润与关联方 | [分部注释/关联交易披露] | 通过/不通过/未验证 |
+| 管理层激励 | [薪酬报告/年报] | 通过/不通过/未验证 |
+
+## 估值
+
+**无风险利率**：[现金流币种 10Y 国债收益率，来源，日期，置信度/是否过期]
+**倍数上限**：[min(20x, 100/(n * 无风险利率%))；保守 n=2.0；强质量基准场景才用 n=1.5]
+**当前基准**：[当前价格、当前市值、估算股本、估值币种、报价币种、汇率]
+
+| 场景 | 核心假设 | 公允市值 | 每股公允价 | 相对现价 | 情景权重 | 后续验证 |
+|:---|:---|:---|---:|---:|---:|:---|
+| 保守 | [较低且已验证的锚；不依赖激进增长] | [估值币种和报价币种] | [报价币种/股] | [x.x] | [xx%] | [未来证据] |
+| 基准 | [最可能情形] | [估值币种和报价币种] | [报价币种/股] | [x.x] | [xx%] | [未来证据] |
+| 乐观 | [质量重估或业务超预期] | [估值币种和报价币种] | [报价币种/股] | [x.x] | [xx%] | [未来证据] |
+
+**锚点核对**:
+- **FCF**：[正常化 FCF x 倍数 + 资产负债表调整；是否支持 2x]
+- **利润**：[正常化利润 x 倍数 + 资产负债表调整；是否支持 2x]
+- **反向 DCF**：[当前价格隐含什么增长和利润率]
+- **资产负债表**：[现金 - 债务 - 稀释/表外风险折价]
+
+**资产负债表调整明细**:
+
+| 项目 | 账面值 | 计入比例 | 计入价值 | 理由 |
+|:---|---:|---:|---:|:---|
+| 现金及现金等价物 | [金额] | [xx%] | [金额] | [是否可自由分配/是否经营必需/是否受限] |
+| 定期存款和短久期理财 | [金额] | [xx%] | [金额] | [久期、信用、币种、流动性] |
+| 上市股权投资 | [金额] | [xx%] | [金额] | [流动性、税负、锁定、大额持仓折价] |
+| 非上市股权投资 | [金额] | [xx%] | [金额] | [估值透明度、退出路径、减值风险] |
+| 联营/JV | [金额] | [xx%] | [金额] | [分红、盈利质量、控制权、账面值可靠性] |
+| 借款/票据/租赁/优先权 | [金额] | -100% | [金额] | [普通股之前的求偿权] |
+| 少数股东/递延税/稀释/或有负债 | [金额] | [xx%] | [金额] | [重大性和归母价值影响] |
+| **合计** |  |  | **[金额]** | [资产负债表调整合计] |
+
+**信心上限**：[5 年 FCF 证据、锚点一致性、证据质量、会计或杠杆上限]
+
+**买入观察区**：**< [价格]**
+**逻辑破坏点**：**[价格或基本面触发条件]**
+
+## 风险控制
+
+- **价值陷阱风险**：[护城河衰退、杠杆、会计、稀释、周期高点利润，或 N/A]
+- **市场时点**：[支撑/阻力/动作触发；只做时点，不升级基本面信号]
+- **研究声明**：本报告仅作个人研究，不是个性化投资建议。

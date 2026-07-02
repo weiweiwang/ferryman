@@ -1,0 +1,6 @@
+pandas
+yfinance
+requests
+xlrd
+openpyxl
+PyYAML

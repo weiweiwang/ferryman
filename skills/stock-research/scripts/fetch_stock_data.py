@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 class StockDataError(RuntimeError):
     """Raised when yfinance cannot return usable stock data."""
 
+    def __init__(self, message: str, phase: str = "stock_data") -> None:
+        super().__init__(message)
+        self.phase = phase
+
+
+MIN_COMPLETE_FCF_YEARS_FOR_90_CONFIDENCE = 5
+
 
 def json_safe(value: Any) -> Any:
     if value is None:
@@ -136,7 +143,7 @@ def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
         cashflow = stock.cashflow
         balance = stock.balance_sheet
     except Exception as exc:
-        raise StockDataError(f"Financial statements fetch failed: {exc}") from exc
+        raise StockDataError(f"Financial statements fetch failed: {exc}", phase="financial_statements") from exc
 
     if financials.empty and cashflow.empty and balance.empty:
         return []
@@ -173,21 +180,23 @@ def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
         if all(value is None for value in (revenue, net_income, equity, operating_cash_flow)):
             continue
 
-        net_income_value = numeric_value(net_income, 0) or 0
-        equity_value = numeric_value(equity, 0) or 0
-        operating_cash_flow_value = numeric_value(operating_cash_flow, 0) or 0
-        capital_expenditure_value = numeric_value(capital_expenditure, 0) or 0
+        revenue_value = numeric_value(revenue, None)
+        net_income_value = numeric_value(net_income, None)
+        operating_cash_flow_value = numeric_value(operating_cash_flow, None)
+        capital_expenditure_value = numeric_value(capital_expenditure, None)
         effective_tax_rate = numeric_value(tax_rate, None)
         if effective_tax_rate is None:
             effective_tax_rate = safe_ratio(tax_provision, pretax_income)
         nopat = None
         if ebit is not None:
             nopat = ebit * (1 - (effective_tax_rate or 0))
-        free_cash_flow = operating_cash_flow_value + capital_expenditure_value
+        free_cash_flow = None
+        if operating_cash_flow_value is not None and capital_expenditure_value is not None:
+            free_cash_flow = operating_cash_flow_value + capital_expenditure_value
         data.append(
             {
                 "Year": year.strftime("%Y") if hasattr(year, "strftime") else str(year),
-                "Revenue": numeric_value(revenue, 0),
+                "Revenue": revenue_value,
                 "Net Income": net_income_value,
                 "Normalized Income": numeric_value(normalized_income, None),
                 "Total Unusual Items": numeric_value(unusual_items, None),
@@ -195,11 +204,12 @@ def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
                 "NOPAT": numeric_value(nopat, None),
                 "Operating Cash Flow": operating_cash_flow_value,
                 "Free Cash Flow": free_cash_flow,
-                "ROE": net_income_value / equity_value if equity_value else 0,
+                "ROE": safe_ratio(net_income, equity),
                 "ROIC": safe_ratio(nopat, invested_capital),
                 "Net Margin": safe_ratio(net_income, revenue),
                 "FCF Margin": safe_ratio(free_cash_flow, revenue),
-                "Cash Conversion": safe_ratio(operating_cash_flow, net_income),
+                "OCF / Net Income": safe_ratio(operating_cash_flow, net_income),
+                "FCF / Net Income": safe_ratio(free_cash_flow, net_income),
                 "EPS": dataframe_row_value(financials, "Diluted EPS", year, default=None),
                 "Invested Capital": numeric_value(invested_capital, None),
                 "Stockholders Equity": numeric_value(equity, None),
@@ -219,18 +229,53 @@ def get_5y_financials(stock: yf.Ticker) -> list[dict[str, Any]]:
     return data
 
 
+def financial_data_limits(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    fcf_years = [
+        row.get("Year")
+        for row in rows
+        if row.get("Operating Cash Flow") is not None and row.get("Free Cash Flow") is not None
+    ]
+    missing_fields_by_year: dict[str, list[str]] = {}
+    required_fields = ("Revenue", "Net Income", "Operating Cash Flow", "Free Cash Flow")
+    for row in rows:
+        missing = [field for field in required_fields if row.get(field) is None]
+        if missing:
+            missing_fields_by_year[str(row.get("Year"))] = missing
+
+    has_five_years = len(fcf_years) >= MIN_COMPLETE_FCF_YEARS_FOR_90_CONFIDENCE
+    return {
+        "provider": "yfinance",
+        "annualRowsReturned": len(rows),
+        "annualYearsReturned": [row.get("Year") for row in rows],
+        "completeFcfYearCount": len(fcf_years),
+        "completeFcfYearsReturned": fcf_years,
+        "minimumCompleteFcfYearsFor90Confidence": MIN_COMPLETE_FCF_YEARS_FOR_90_CONFIDENCE,
+        "meetsFiveYearFcfRequirement": has_five_years,
+        "needsPrimarySourceForFiveYearNormalization": not has_five_years,
+        "confidenceCapIfNotSupplemented": None if has_five_years else 80,
+        "missingFieldsByYear": missing_fields_by_year,
+    }
+
+
 def fetch_stock_data(ticker: str) -> dict[str, Any]:
     stock = yf.Ticker(ticker)
-    history = stock.history(period="1y")
+    try:
+        history = stock.history(period="1y")
+    except Exception as exc:
+        raise StockDataError(f"Price history fetch failed: {exc}", phase="price_history") from exc
     if history.empty:
-        raise StockDataError(f"Ticker {ticker} not found or returned no price history.")
+        raise StockDataError(f"Ticker {ticker} not found or returned no price history.", phase="price_history")
 
-    info = stock.info
+    try:
+        info = stock.info
+    except Exception as exc:
+        raise StockDataError(f"Info fetch failed: {exc}", phase="info") from exc
     if not isinstance(info, dict):
         info = {}
 
     price_currency = info.get("currency")
     financial_currency = info.get("financialCurrency")
+    financial_rows = get_5y_financials(stock)
     return {
         "ticker": ticker,
         "name": info.get("longName") or info.get("shortName") or ticker,
@@ -252,33 +297,42 @@ def fetch_stock_data(ticker: str) -> dict[str, Any]:
         },
         "historical_financials": {
             "currency": financial_currency,
-            "rows": get_5y_financials(stock),
+            "rows": financial_rows,
         },
         "price_history": {
             "currency": price_currency,
             "rows": price_history_rows(history),
         },
+        "dataLimits": financial_data_limits(financial_rows),
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ticker", required=True)
-    parser.add_argument("--output-dir", default=".")
+    parser.add_argument("--json-out", help="Optional path to write the stdout JSON payload.")
     args = parser.parse_args()
 
     ticker = args.ticker.upper()
-    output_dir = Path(args.output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Fetching data for %s...", ticker)
     try:
         result = fetch_stock_data(ticker)
     except StockDataError as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"ok": False, "phase": exc.phase, "ticker": ticker, "error": str(exc)},
+                ensure_ascii=False,
+            )
+        )
         return 1
 
-    print(json.dumps(json_safe(result), ensure_ascii=False, indent=2))
+    payload = json.dumps(json_safe(result), ensure_ascii=False, indent=2)
+    if args.json_out:
+        output_path = Path(args.json_out).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(payload + "\n", encoding="utf-8")
+    print(payload)
     return 0
 
 
