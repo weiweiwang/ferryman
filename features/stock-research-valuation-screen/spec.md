@@ -47,11 +47,12 @@ Notes:
 - R10: 银行、保险、地产、周期资源、SaaS、生物医药等行业不得硬套同一 FCF/PE 规则；V1 可先 `INSUFFICIENT_DATA` 或 `INDUSTRY_REVIEW_REQUIRED`，但必须在输出中说明。
 - R11: 筛选评分必须分离为 `quality_score`、`valuation_score` 和 `screen_score`；字段名不得暗示已完成好公司评分或安全边际结论。
 - R12: 风险利率必须使用现金流/财务口径币种对应的 10Y 主权债收益率；HKD 应使用 HKMA Section 10 HKD Government Bond benchmark yield，不得使用 USD proxy。
-- R13: 候选结果必须能被后续单票流程消费，字段统一使用 snake_case；每条候选至少包含 `ticker`、`name`、`market`、`currency`、`financial_currency`、`price`、`market_cap`、`industry`、`metrics`、`quality_flags`、`valuation_flags`、`reject_reasons`、`data_gaps`。
+- R13: 候选结果必须能被后续单票流程消费，字段统一使用 snake_case；每条候选至少包含 `ticker`、`name`、`market`、`currency`、`financial_currency`、`price`、`market_cap`、`market_cap_rank`、`market_cap_percentile`、`analyzed`、`industry`、`metrics`、`quality_flags`、`valuation_flags`、`reject_reasons`、`data_gaps`。
 - R14: 批量筛选时 JSON 是机器可读 source of truth，Excel 是人工扫描视图；若需要落盘，agent 必须显式传入 `--json-out reports/stock-screen-<date>.json` 和/或 `--xlsx-out reports/stock-screen-<date>.xlsx`，且两者的候选行数与排序必须一致。
 - R15: `metrics` 内的指标字段也必须使用 snake_case；例如 `pe` 表示默认 TTM PE，`roe_mean`、`roe_std`、`roe_stability`、`roic_mean`、`ocf_to_profit`、`fcf_to_profit`、`market_cap_to_avg_profit`、`market_cap_to_avg_fcf`、`expected_return`、`debt_to_assets`、`goodwill_to_equity`、`risk_free_multiple_cap`。
 - R16: `quality_flags` 和 `valuation_flags` 只记录通过的正向、可计算标签；缺陷、失败和跳过原因必须进入 `reject_reasons` 或 `data_gaps`。默认不输出 `next_research_checks` 顶层字段；单票研究需要核验的事项从 `data_gaps` 和固定 primary-source workflow 推导。
 - R17: `valuation_flags` V1 只允许 `cheap_pe`、`cheap_profit`、`cheap_fcf`、`reasonable_pb`。`expected_return` 保留在 `metrics` 并可参与排序加分，但不得作为 `valuation_flags`，因为它混合了估值、ROE 和分红政策，不是纯便宜证据。
+- R18: 东方财富快照必须按总市值降序抓取；`--max-count` 按每个市场限制原始快照池；财务补充和候选评分只作用于每个市场市值排名前 20% 的股票。不要暴露单独 enrichment limit 参数；市值排名 20% 以外的股票保留快照并标记 `outside_top_20_percent_by_market_cap`。
 
 ## Open Questions
 
@@ -65,7 +66,7 @@ Notes:
 |---|---|---|
 | A1 | R1-R3 被落实：筛选器只输出候选，不输出最终投资信号。 | `SKILL.md` review；mock test 验证没有 BUY / Safety Margin Confidence 字段。 |
 | A2 | R4-R6 被落实：脚本可在 `stock-research` skill 内独立运行，不依赖 Django/Celery/DB。 | `python -m py_compile`；单元测试；源码 import 检查。 |
-| A3 | R7-R17 被落实：候选 JSON 使用 snake_case，包含 `metrics`、质量代理、估值代理、screen score、flags、reject reasons 和 data gaps。 | `tests/test_screen_stock_candidates.py` 使用 mock 东方财富响应覆盖 pass/reject/insufficient data。 |
+| A3 | R7-R18 被落实：候选 JSON 使用 snake_case，包含 `metrics`、质量代理、估值代理、screen score、flags、reject reasons、data gaps 和市值排名字段。 | `tests/test_screen_stock_candidates.py` 使用 mock 东方财富响应覆盖 pass/reject/insufficient data/top-20% analysis。 |
 | A4 | R12 被落实：HKD 筛选使用 HKMA Section 10 风险利率路径；无 HKD rate 时只降级候选，不使用 USD proxy。 | `tests/test_fetch_risk_free_rate.py` 新增 HKMA `.xls` parser mock；live test gated by `STOCK_RESEARCH_RUN_LIVE_TESTS=1`。 |
 | A5 | R13 被落实：输出候选可直接作为单票研究输入。 | fixture JSON 中每条候选可映射到 `fetch_stock_data.py --ticker <ticker>` 的 ticker 格式。 |
 | A6 | 文档明确候选筛选和深度研究的关系，避免把 secondary data 当 primary evidence。 | `SKILL.md` 和 `assets/report-template.md` diff review。 |

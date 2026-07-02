@@ -87,6 +87,11 @@ research pool. It may output `CANDIDATE`, `REJECTED`, `INSUFFICIENT_DATA`, or
 `INDUSTRY_REVIEW_REQUIRED`; it must not create `BUY`, `STRONG_BUY`, or
 `Safety Margin Confidence`.
 
+The screener fetches market snapshots from Eastmoney in descending market-cap
+order and analyzes only the top 20% by market-cap rank for each requested
+market. `--max-count` limits the raw snapshot pool per market; it is not an
+analysis-count knob. Do not pass or invent a separate enrichment limit.
+
 Use stdout as the primary summary. Persist only when explicitly needed with
 `--json-out <path>` and/or `--xlsx-out <path>`. JSON is the machine-readable
 source; Excel is only an analyst scanning view.
@@ -95,7 +100,9 @@ Candidate rows use snake_case fields: `metrics`, `quality_flags`,
 `valuation_flags`, `reject_reasons`, and `data_gaps`. Treat `quality_flags`
 and `valuation_flags` as positive computed hints only. In V1, allowed
 `valuation_flags` are `cheap_pe`, `cheap_profit`, `cheap_fcf`, and
-`reasonable_pb`; `expected_return` is a metric, not a flag. Always re-check any
+`reasonable_pb`; `expected_return` is a metric, not a flag.
+Use `market_cap_rank`, `market_cap_percentile`, and `analyzed` to
+explain why a stock was or was not financially analyzed. Always re-check any
 candidate with the single-stock workflow and primary sources.
 
 ## Primary Source Routing
@@ -133,7 +140,44 @@ business model itself is attractive.
 | Capital return | 15 | Are normalized ROIC/ROE high without relying on leverage, cyclicality, or one-offs? |
 | Balance sheet resilience | 10 | Can the company survive and keep investing in a bad year? |
 | Growth quality | 10 | Is growth compounding, or driven by subsidies, M&A, or cyclical recovery? |
-| Management and accounting | 15 | Are buybacks, dividends, M&A, incentives, related parties, and accounting transparent and rational? |
+| Management and accounting | 15 | Are management actions increasing per-share intrinsic value, and are the accounts reliable enough to trust that conclusion? |
+
+### Management And Accounting Score
+
+Do not score management from reputation or a single sentence. The question is:
+is this team raising per-share intrinsic value, or masking weak economics with
+growth, incentives, acquisitions, accounting choices, or buyback headlines?
+
+Use this 15-point breakdown:
+
+| Subcheck | Max Points | What to verify |
+|:---|---:|:---|
+| Shareholder alignment | 3 | Founder/management ownership, control structure, minority-shareholder treatment, and insider transactions. |
+| Capital allocation | 4 | Buybacks, dividends, M&A, reinvestment, and whether actions improve per-share value rather than only headline growth. |
+| Incentives and dilution | 3 | SBC/RSU/options, diluted share count, incentive metrics, and whether buybacks truly offset dilution. |
+| Accounting quality | 3 | Non-GAAP adjustments, unusual gains, revenue recognition, capitalization, impairment, receivables, inventory, and investment marks. |
+| Governance and related parties | 2 | VIE, dual-class shares, related-party transactions, audit opinion, CAM/KAM items, and segment disclosure quality. |
+
+Apply these caps unless stronger primary evidence removes the concern:
+
+- If management incentives are not checked from annual report, proxy, or
+  remuneration disclosure, management/accounting score cannot exceed 10/15.
+- If SBC, RSU, options, or convertible dilution is material but net dilution is
+  not quantified, score cannot exceed 11/15.
+- If buybacks are material, calculate net share-count change and compare the
+  buyback price with conservative/base fair value; expensive buybacks are not a
+  positive capital-allocation signal.
+- If profit is materially affected by investment gains, fair-value marks,
+  subsidies, capitalization, impairment reversals, or aggressive non-GAAP
+  adjustments, score cannot exceed 12/15 until normalized earnings are shown.
+- If related-party/VIE/control-shareholder risk is material and not clearly
+  harmless to minority shareholders, score cannot exceed 10/15.
+- Give 14-15/15 only when alignment, capital allocation, dilution, accounting,
+  and governance are all checked with primary evidence and no material issue is
+  merely marked "unverified".
+
+In the report, include a compact management/accounting breakdown table whenever
+this dimension affects the total score, the signal, or the confidence cap.
 
 For platform businesses, explicitly check both sides of the marketplace,
 take-rate durability, user acquisition cost, network effects, regulatory risk,

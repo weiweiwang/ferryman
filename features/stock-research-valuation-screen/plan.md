@@ -44,7 +44,7 @@ Architecture Check:
 - Boundary: `skills/stock-research` 内的 skill 脚本、测试和文档；不跨入 Ferryman backend runtime。
 - SSOT: `features/stock-research-valuation-screen/spec.md` 定义产品规则；脚本字段契约由 `screen_stock_candidates.py` 和 tests 固化；`SKILL.md` 定义 agent 使用边界。
 - Existing Mechanism: stdout-first JSON、optional `--json-out`、stable `{ok:false, phase, error}` failure payload、risk-free-rate multiple caps、skill validator；新增 optional `--xlsx-out` 仅作人工扫描视图。
-- Interface: 新增 CLI `screen_stock_candidates.py --markets SH SZ HK --max-count N --sort-by screen_score --json-out path --xlsx-out path`。
+- Interface: 新增 CLI `screen_stock_candidates.py --markets SH SZ HK --max-count N --sort-by screen_score --json-out path --xlsx-out path`；脚本内部固定按市值降序抓快照，`--max-count` 按每个市场限制原始快照池，并只对每个市场市值排名前 20% 的股票做财务补充和候选评分。
 - Docs: `SKILL.md` usage；必要时 `report-template.md` 增加候选来源字段。
 - Locality: 修改限定在 `skills/stock-research/**` 和本 feature docs。
 - Design Checks: 改动扩散控制在 skill；规则重复通过 spec 和 `SKILL.md` 分层；边界不清风险通过 R1/R2 明确候选不等于买入。
@@ -68,6 +68,7 @@ TDD Planning:
 | PB 只保留 `reasonable_pb` | PB 是账面资产辅助约束，不应被当作优秀公司低估的核心证据 | `cheap_pb` 或 `low_pb` 容易把低 PB 价值陷阱推高 |
 | 风险利率复用 `fetch_risk_free_rate.py` | 避免同币种 10Y 收益率规则重复 | screen 脚本内部独立实现利率抓取会制造两个口径 |
 | Excel 作为显式人工扫描视图 | 几千只股票用表格筛选更高效，但 JSON 仍是 agent 可审计源数据 | 默认写 reports 会制造隐式副作用；只输出 Excel 又不利于 agent 消费 |
+| 不暴露财报补充数量参数 | 分析范围应由“市值排名前 20%”这条业务规则决定，而不是让用户猜一个财报抓取数量 | 数量参数会把实现细节暴露给用户，且容易和候选质量混淆 |
 | live tests gated by env var | 本地和 CI 默认稳定，用户需要时可跑真实源验证 | 默认所有测试都访问外网会让 CI 和沙箱不稳定 |
 
 ## Affected Surface
@@ -129,7 +130,7 @@ TDD Planning:
 |---|---|---|
 | A1 候选不是投资建议 | Unit test inspect payload fields；文档 review | JSON 无 BUY / Safety Margin Confidence；`SKILL.md` 明确 candidate only |
 | A2 不依赖 Django/Celery/DB | import/source guard test | test 断言不 import `django`, `celery`, `mysql`, `radar.models` |
-| A3 候选字段完整 | mock fixtures | pass/reject/insufficient payload snapshots 或字段断言；断言新 payload 不出现 camelCase 字段 |
+| A3 候选字段完整 | mock fixtures | pass/reject/insufficient payload snapshots 或字段断言；断言新 payload 不出现 camelCase 字段；断言只分析市值排名前 20% |
 | A3 valuation flags 清晰可读 | mock fixtures | 只出现 `cheap_pe`、`cheap_profit`、`cheap_fcf`、`reasonable_pb`；不出现 `high_expected_return` 或 `cheap_pb` |
 | A4 HKD 官方利率 | mock `.xls` + gated live test | HKD `ok:true`, source HKMA Section 10, no proxy |
 | A5 可进入单票研究 | mapping test | candidate ticker 可传给 `fetch_stock_data.py --ticker` |
@@ -148,7 +149,7 @@ TDD Planning:
 
 - Offline tests: `pytest skills/stock-research/tests` passed with 36 passed, 4 skipped.
 - Live risk-free tests: `STOCK_RESEARCH_RUN_LIVE_TESTS=1 /Users/wangweiwei/miniconda3/bin/conda run -n ferryman python -m pytest skills/stock-research/tests/test_fetch_risk_free_rate.py` passed with 16 passed under elevated network access.
-- Live screener smoke: `conda run -n ferryman python skills/stock-research/scripts/screen_stock_candidates.py --markets HK --max-count 3 --enrich-limit 1 --timeout 30` returned `ok:true` with `00700.HK` as a candidate. `--markets SH SZ --max-count 3 --enrich-limit 1 --timeout 30` returned `ok:true` with A-share market snapshots parsed correctly and banks marked `INDUSTRY_REVIEW_REQUIRED`.
+- Live screener smoke: earlier `conda run -n ferryman python skills/stock-research/scripts/screen_stock_candidates.py --markets HK --max-count 3 --timeout 30` returned `ok:true` with `00700.HK` as a candidate. `--markets SH SZ --max-count 3 --timeout 30` returned `ok:true` with A-share market snapshots parsed correctly and banks marked `INDUSTRY_REVIEW_REQUIRED`.
 - Structure checks: `python3 skills/skill-creator/scripts/quick_validate.py skills/stock-research`, `python -m py_compile`, and `git diff --check -- skills/stock-research features/stock-research-valuation-screen` passed after fixes.
 
 ## Rollback / Recovery

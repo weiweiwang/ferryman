@@ -65,6 +65,7 @@ EASTMONEY_LIST_FIELDS = (
 )
 MIN_FINANCIAL_YEARS = 5
 DEFAULT_MIN_MARKET_CAP = 5_000_000_000
+ANALYSIS_MARKET_CAP_TOP_PERCENT = 20.0
 INDUSTRY_REVIEW_KEYWORDS = (
     "银行",
     "保险",
@@ -108,6 +109,9 @@ class MarketSnapshot:
     market_cap: float | None
     float_market_cap: float | None
     industry: str | None
+    market_cap_rank: int | None = None
+    market_cap_percentile: float | None = None
+    selected_for_financial_analysis: bool = False
     source: str = "eastmoney"
 
 
@@ -288,6 +292,7 @@ def fetch_market_snapshots(
 
     for market in markets:
         config = MARKET_CONFIGS[market]
+        market_snapshots: list[MarketSnapshot] = []
         for page_number in range(1, max_pages + 1):
             params = {
                 "pn": page_number,
@@ -335,14 +340,36 @@ def fetch_market_snapshots(
 
             for row in rows:
                 try:
-                    snapshots.append(parse_market_snapshot(row, market))
+                    market_snapshots.append(parse_market_snapshot(row, market))
                 except Exception as exc:
                     errors.append({"market": market, "phase": "market_snapshot_parse", "error": str(exc)})
             if len(rows) < page_size:
                 break
+        market_snapshots.sort(key=lambda item: item.market_cap or 0, reverse=True)
+        snapshots.extend(market_snapshots[:max_count])
 
-    snapshots.sort(key=lambda item: item.market_cap or 0, reverse=True)
-    return snapshots[:max_count], errors
+    return snapshots, errors
+
+
+def annotate_market_cap_universe(
+    snapshots: list[MarketSnapshot],
+    *,
+    top_percent: float = ANALYSIS_MARKET_CAP_TOP_PERCENT,
+) -> None:
+    by_market: dict[str, list[MarketSnapshot]] = {}
+    for snapshot in snapshots:
+        by_market.setdefault(snapshot.market, []).append(snapshot)
+
+    for market_snapshots in by_market.values():
+        ordered = sorted(market_snapshots, key=lambda item: item.market_cap or 0, reverse=True)
+        total = len(ordered)
+        if total == 0:
+            continue
+        analysis_cutoff = max(1, math.ceil(total * top_percent / 100))
+        for index, snapshot in enumerate(ordered, start=1):
+            snapshot.market_cap_rank = index
+            snapshot.market_cap_percentile = round(100 * index / total, 4)
+            snapshot.selected_for_financial_analysis = index <= analysis_cutoff
 
 
 def get_json(
@@ -838,6 +865,9 @@ def build_result_item(
         "financial_currency": fin_currency,
         "price": snapshot.price,
         "market_cap": snapshot.market_cap,
+        "market_cap_rank": snapshot.market_cap_rank,
+        "market_cap_percentile": snapshot.market_cap_percentile,
+        "analyzed": bool(financial_rows),
         "industry": snapshot.industry,
         "status": status,
         "quality_score": q_score,
@@ -871,7 +901,6 @@ def screen_stocks(
     *,
     markets: list[str],
     max_count: int,
-    enrich_limit: int,
     sort_by: str,
     min_market_cap: float,
     session: requests.sessions.Session | None = None,
@@ -888,20 +917,21 @@ def screen_stocks(
         session=client,
         timeout=timeout,
     )
+    annotate_market_cap_universe(snapshots)
     for market in unsupported:
         errors.append({"market": market, "phase": "market_snapshot", "error": "unsupported market"})
 
     rates: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
-    enriched = 0
+    financial_fetch_attempts = 0
     for snapshot in snapshots:
         initial_rejects = quick_reject_reasons(snapshot, min_market_cap)
-        should_enrich = not initial_rejects and enriched < enrich_limit
+        should_analyze = not initial_rejects and snapshot.selected_for_financial_analysis
         financial_rows: list[dict[str, Any]] = []
-        if should_enrich:
+        if should_analyze:
+            financial_fetch_attempts += 1
             try:
                 financial_rows = fetch_financial_rows(snapshot, session=client, timeout=timeout)
-                enriched += 1
             except Exception as exc:
                 results.append(
                     {
@@ -912,6 +942,9 @@ def screen_stocks(
                         "financial_currency": snapshot.currency,
                         "price": snapshot.price,
                         "market_cap": snapshot.market_cap,
+                        "market_cap_rank": snapshot.market_cap_rank,
+                        "market_cap_percentile": snapshot.market_cap_percentile,
+                        "analyzed": False,
                         "industry": snapshot.industry,
                         "status": "INSUFFICIENT_DATA",
                         "quality_score": 0,
@@ -936,6 +969,9 @@ def screen_stocks(
                     "financial_currency": snapshot.currency,
                     "price": snapshot.price,
                     "market_cap": snapshot.market_cap,
+                    "market_cap_rank": snapshot.market_cap_rank,
+                    "market_cap_percentile": snapshot.market_cap_percentile,
+                    "analyzed": False,
                     "industry": snapshot.industry,
                     "status": "INSUFFICIENT_DATA",
                     "quality_score": 0,
@@ -945,7 +981,7 @@ def screen_stocks(
                     "quality_flags": [],
                     "valuation_flags": [],
                     "reject_reasons": [],
-                    "data_gaps": ["not_enriched"],
+                    "data_gaps": ["outside_top_20_percent_by_market_cap"],
                     "source": snapshot.source,
                 }
             )
@@ -977,7 +1013,10 @@ def screen_stocks(
         "data_limits": {
             "secondary_source_only": True,
             "max_count": max_count,
-            "enrich_limit": enrich_limit,
+            "financial_analysis_market_cap_top_percent": ANALYSIS_MARKET_CAP_TOP_PERCENT,
+            "financial_analysis_selected_count": sum(1 for item in snapshots if item.selected_for_financial_analysis),
+            "analyzed_count": sum(1 for item in results if item.get("analyzed")),
+            "financial_fetch_attempts": financial_fetch_attempts,
             "min_market_cap": min_market_cap,
             "errors": errors,
         },
@@ -1022,6 +1061,9 @@ def write_xlsx(path: str, payload: dict[str, Any]) -> None:
         "status",
         "price",
         "market_cap",
+        "market_cap_rank",
+        "market_cap_percentile",
+        "analyzed",
         "industry",
         "quality_score",
         "valuation_score",
@@ -1055,8 +1097,7 @@ def write_xlsx(path: str, payload: dict[str, Any]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Screen stock candidates for quality value research.")
     parser.add_argument("--markets", nargs="+", default=["SH", "SZ", "HK"], help="Markets to screen. Default: SH SZ HK.")
-    parser.add_argument("--max-count", type=int, default=300, help="Maximum market snapshots to keep after sorting.")
-    parser.add_argument("--enrich-limit", type=int, default=100, help="Maximum non-rejected snapshots to enrich.")
+    parser.add_argument("--max-count", type=int, default=300, help="Maximum market snapshots to keep per market after sorting.")
     parser.add_argument("--sort-by", choices=["screen_score", "market_cap"], default="screen_score")
     parser.add_argument("--min-market-cap", type=float, default=DEFAULT_MIN_MARKET_CAP)
     parser.add_argument("--timeout", type=float, default=20)
@@ -1067,7 +1108,6 @@ def main(argv: list[str] | None = None) -> int:
     payload = screen_stocks(
         markets=args.markets,
         max_count=args.max_count,
-        enrich_limit=args.enrich_limit,
         sort_by=args.sort_by,
         min_market_cap=args.min_market_cap,
         timeout=args.timeout,

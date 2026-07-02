@@ -161,6 +161,7 @@ def test_screener_does_not_import_django_or_radar_runtime():
 
     for forbidden in ("django", "celery", "mysql", "radar.models", "insights."):
         assert forbidden not in source
+    assert "--" + "enrich-limit" not in source
 
 
 def test_market_snapshot_fetcher_falls_back_to_secondary_eastmoney_host():
@@ -205,6 +206,38 @@ def test_market_snapshot_fetcher_uses_curl_fallback_when_requests_hosts_fail(mon
     assert snapshots[0].ticker == "601398.SH"
 
 
+def test_market_snapshot_fetcher_keeps_max_count_per_market():
+    module = load_screen_module()
+
+    class MultiMarketSession:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, url, params, timeout):
+            fs = params["fs"]
+            if "m:1+" in fs:
+                rows = [
+                    {"f12": "600001", "f14": "SH One", "f20": 400},
+                    {"f12": "600002", "f14": "SH Two", "f20": 300},
+                ]
+            else:
+                rows = [
+                    {"f12": "000001", "f14": "SZ One", "f20": 200},
+                    {"f12": "000002", "f14": "SZ Two", "f20": 100},
+                ]
+            return FakeListResponse({"data": {"diff": rows}})
+
+    snapshots, errors = module.fetch_market_snapshots(
+        markets=["SH", "SZ"],
+        max_count=2,
+        sort_by="market_cap",
+        session=MultiMarketSession(),
+    )
+
+    assert errors == []
+    assert [snapshot.ticker for snapshot in snapshots] == ["600001.SH", "600002.SH", "000001.SZ", "000002.SZ"]
+
+
 def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail(monkeypatch):
     module = load_screen_module()
 
@@ -213,7 +246,6 @@ def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail(mon
     payload = module.screen_stocks(
         markets=["HK"],
         max_count=1,
-        enrich_limit=1,
         sort_by="market_cap",
         min_market_cap=100_000_000,
         session=AlwaysFailListSession(),
@@ -236,7 +268,7 @@ def test_cli_returns_nonzero_when_market_snapshot_fetch_fails(monkeypatch, capsy
         lambda **kwargs: ([], [{"market": "HK", "phase": "market_snapshot", "error": "empty reply"}]),
     )
 
-    exit_code = module.main(["--markets", "HK", "--max-count", "1", "--enrich-limit", "1"])
+    exit_code = module.main(["--markets", "HK", "--max-count", "1"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -415,6 +447,41 @@ def test_result_payload_uses_snake_case_without_legacy_camel_case():
     assert forbidden.isdisjoint(set(walk_keys(item)))
 
 
+def test_screen_stocks_analyzes_only_top_20_percent_by_market_cap(monkeypatch):
+    module = load_screen_module()
+    snapshots = [
+        sample_snapshot(module, ticker=f"00000{index}.SZ", code=f"00000{index}", market_cap=market_cap)
+        for index, market_cap in enumerate([500, 400, 300, 200, 100], start=1)
+    ]
+    fetched = []
+
+    monkeypatch.setattr(module, "fetch_market_snapshots", lambda **kwargs: (snapshots, []))
+
+    def fake_fetch_financial_rows(snapshot, **kwargs):
+        fetched.append(snapshot.ticker)
+        return sample_financial_rows()
+
+    monkeypatch.setattr(module, "fetch_financial_rows", fake_fetch_financial_rows)
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: risk_free_payload() | {"ok": True})
+
+    payload = module.screen_stocks(
+        markets=["SZ"],
+        max_count=5,
+        sort_by="market_cap",
+        min_market_cap=1,
+    )
+
+    assert fetched == ["000001.SZ"]
+    assert payload["data_limits"]["financial_analysis_market_cap_top_percent"] == 20.0
+    assert payload["data_limits"]["financial_analysis_selected_count"] == 1
+    assert payload["data_limits"]["analyzed_count"] == 1
+    assert payload["data_limits"]["financial_fetch_attempts"] == 1
+    assert payload["results"][0]["market_cap_rank"] == 1
+    assert payload["results"][0]["market_cap_percentile"] == 20.0
+    assert payload["results"][0]["analyzed"] is True
+    assert "outside_top_20_percent_by_market_cap" in payload["results"][1]["data_gaps"]
+
+
 def test_cli_writes_json_and_xlsx_outputs(monkeypatch, tmp_path, capsys):
     module = load_screen_module()
     snapshot = sample_snapshot(module)
@@ -432,8 +499,6 @@ def test_cli_writes_json_and_xlsx_outputs(monkeypatch, tmp_path, capsys):
             "SZ",
             "HK",
             "--max-count",
-            "1",
-            "--enrich-limit",
             "1",
             "--min-market-cap",
             "100000000",
