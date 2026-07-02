@@ -19,7 +19,7 @@ FORBIDDEN_SOURCE_PATTERNS = (
     re.compile(r"operations publishing zone", re.I),
     re.compile(r"^\s*#{2,6}\s+article strategy\s*$", re.I | re.M),
     re.compile(r"^\s*#{2,6}\s+title candidates\s*$", re.I | re.M),
-    re.compile(r"^\s*#{2,6}\s+fact check notes\s*$", re.I | re.M),
+    re.compile(r"^\s*#{2,6}\s+fact check notes(?:\s*/\s*source notes)?\s*$", re.I | re.M),
     re.compile(r"^\s*\*\*(?:date|publication / channel|brand name)\*\*\s*:", re.I | re.M),
 )
 MARKDOWN = MarkdownIt("commonmark", {"html": False})

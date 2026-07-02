@@ -41,6 +41,16 @@ OPERATIONS PUBLISHING ZONE START
         render_article_html.extract_article(
             """# Draft
 
+## Fact Check Notes / Source Notes
+
+- Primary source URLs
+"""
+        )
+
+    with pytest.raises(ValueError, match="only '# final title' and final body"):
+        render_article_html.extract_article(
+            """# Draft
+
 **Date**: 2026-05-31
 
 Body
