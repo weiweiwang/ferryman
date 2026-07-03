@@ -8,6 +8,7 @@ import io
 import json
 import re
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -482,17 +483,23 @@ def fetch_risk_free_rate(
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fetch a same-currency 10Y sovereign/risk-free yield.")
     parser.add_argument("--currency", required=True, help="Cash-flow currency, e.g. USD, CNY, HKD, JPY.")
     parser.add_argument("--timeout", type=float, default=20)
-    args = parser.parse_args()
+    parser.add_argument("--json-out", help="Optional path to write the JSON payload.")
+    args = parser.parse_args(argv)
 
     result = fetch_risk_free_rate(
         args.currency,
         timeout=args.timeout,
     )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    payload = json.dumps(result, ensure_ascii=False, indent=2)
+    if args.json_out:
+        output_path = Path(args.json_out).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(payload + "\n", encoding="utf-8")
+    print(payload)
     return 0 if result.get("ok") else 1
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +263,21 @@ def test_multiple_cap_formula():
     assert module.multiple_cap(4.38, 2.0) == 11.42
     assert module.multiple_cap(4.38, 1.5) == 15.22
     assert module.multiple_cap(1.0, 2.0) == 20.0
+
+
+def test_main_can_write_explicit_json_out(monkeypatch, tmp_path, capsys):
+    module = load_rate_module()
+    output_path = tmp_path / "rate.json"
+    payload = {"ok": True, "currency": "CNY", "ratePercent": 1.733}
+
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: payload)
+
+    exit_code = module.main(["--currency", "CNY", "--json-out", str(output_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out) == payload
+    assert json.loads(output_path.read_text(encoding="utf-8")) == payload
 
 
 def test_fetch_usd_rate_from_fred_live():

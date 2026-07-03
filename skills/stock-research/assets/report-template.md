@@ -1,6 +1,8 @@
 ---
 ticker: "[Ticker]"
-company: "[公司名]"
+company:
+  zh: "[中文公司名或 null]"
+  en: "[English company name or null]"
 exchange: "[交易所]"
 report_date: "[YYYY-MM-DD]"
 fetched_at: "[YYYY-MM-DD HH:MM UTC]"
@@ -16,13 +18,16 @@ fair_value:
   base: 0
   currency: "[报价币种]"
 tags:
-  - stock-research
+  market: []
+  sector: []
+  industry: []
+  theme: []
 ---
 
-# [公司中文名] 股票研究：[公司名]（[Ticker]）
+# [中文公司名] 投资质量评估（[Ticker]）
 
 **数据时间**：[YYYY-MM-DD HH:MM UTC]
-**候选来源**：[如来自 `screen_stock_candidates.py`，记录 ticker、status、screen_score、flags、data_gaps；否则 N/A]
+**候选来源**：[候选筛选快照或 N/A]
 **质量评分**：[x/100]
 **安全边际信心**：[xx%]
 **最终信号**：[STRONG_BUY|BUY|WATCHLIST|TACTICAL_BUY|WAIT|AVOID]
@@ -84,7 +89,7 @@ tags:
 
 | 来源 | 日期 | 使用证据 | 支持/反驳 |
 |:---|:---|:---|:---|
-| [公告/年报/transcript] | [日期] | [指标或说明] | [支持的场景或风险] |
+| [底层数据源或官方文件 URL，不写内部脚本名] | [日期] | [指标或说明] | [支持的场景或风险] |
 
 ## 必查证据清单
 

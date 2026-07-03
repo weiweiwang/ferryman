@@ -136,16 +136,14 @@ class FakeListResponse:
         return self.payload
 
 
-class FailThenSuccessListSession:
+class RecordingFailListSession:
     def __init__(self):
         self.headers = {}
         self.calls = []
 
     def get(self, url, params, timeout):
         self.calls.append((url, params, timeout))
-        if len(self.calls) == 1:
-            raise RuntimeError("primary host failed")
-        return FakeListResponse({"data": {"diff": [{"f12": "601398", "f14": "工商银行", "f20": 1000}]}})
+        raise RuntimeError("primary host failed")
 
 
 class AlwaysFailListSession:
@@ -159,14 +157,26 @@ class AlwaysFailListSession:
 def test_screener_does_not_import_django_or_radar_runtime():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 
-    for forbidden in ("django", "celery", "mysql", "radar.models", "insights."):
+    for forbidden in ("django", "celery", "mysql", "radar.models", "insights.", "subprocess"):
         assert forbidden not in source
     assert "--" + "enrich-limit" not in source
+    assert "curl_get_json" not in source
+    assert "EASTMONEY_LIST_URLS" not in source
 
 
-def test_market_snapshot_fetcher_falls_back_to_secondary_eastmoney_host():
+def test_market_snapshot_fetcher_uses_primary_eastmoney_host():
     module = load_screen_module()
-    session = FailThenSuccessListSession()
+
+    class PrimaryListSession:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+
+        def get(self, url, params, timeout):
+            self.calls.append((url, params, timeout))
+            return FakeListResponse({"data": {"diff": [{"f12": "601398", "f14": "工商银行", "f20": 1000}]}})
+
+    session = PrimaryListSession()
 
     snapshots, errors = module.fetch_market_snapshots(
         markets=["SH"],
@@ -176,8 +186,9 @@ def test_market_snapshot_fetcher_falls_back_to_secondary_eastmoney_host():
     )
 
     assert errors == []
-    assert len(session.calls) == 2
-    _, params, _ = session.calls[0]
+    assert len(session.calls) == 1
+    url, params, _ = session.calls[0]
+    assert url == module.EASTMONEY_LIST_URL
     assert params["ut"] == module.EASTMONEY_QUOTE_UT
     assert params["fltt"] == 1
     assert params["dect"] == 1
@@ -185,25 +196,22 @@ def test_market_snapshot_fetcher_falls_back_to_secondary_eastmoney_host():
     assert snapshots[0].ticker == "601398.SH"
 
 
-def test_market_snapshot_fetcher_uses_curl_fallback_when_requests_hosts_fail(monkeypatch):
+def test_market_snapshot_fetcher_does_not_try_alternate_path_when_primary_fails():
     module = load_screen_module()
-
-    class Completed:
-        returncode = 0
-        stderr = ""
-        stdout = json.dumps({"data": {"diff": [{"f12": "601398", "f14": "工商银行", "f20": 1000}]}})
-
-    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: Completed())
+    session = RecordingFailListSession()
 
     snapshots, errors = module.fetch_market_snapshots(
         markets=["SH"],
         max_count=1,
         sort_by="market_cap",
-        session=AlwaysFailListSession(),
+        session=session,
     )
 
-    assert errors == []
-    assert snapshots[0].ticker == "601398.SH"
+    assert snapshots == []
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == module.EASTMONEY_LIST_URL
+    assert errors[0]["phase"] == "market_snapshot"
+    assert "primary host failed" in errors[0]["error"]
 
 
 def test_market_snapshot_fetcher_keeps_max_count_per_market():
@@ -238,10 +246,102 @@ def test_market_snapshot_fetcher_keeps_max_count_per_market():
     assert [snapshot.ticker for snapshot in snapshots] == ["600001.SH", "600002.SH", "000001.SZ", "000002.SZ"]
 
 
-def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail(monkeypatch):
+def test_market_snapshot_fetcher_uses_listing_universe_when_max_count_is_zero(monkeypatch):
     module = load_screen_module()
 
-    monkeypatch.setattr(module, "curl_get_json", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("empty reply")))
+    full_universe = [
+        sample_snapshot(
+            module,
+            ticker="600001.SH",
+            code="600001",
+            market="SH",
+            market_cap=500,
+            source="eastmoney_xuangu",
+        ),
+        sample_snapshot(
+            module,
+            ticker="600002.SH",
+            code="600002",
+            market="SH",
+            market_cap=400,
+            source="eastmoney_xuangu",
+        ),
+    ]
+
+    def fake_a_share_selector(**kwargs):
+        assert kwargs["markets"] == ["SH"]
+        assert kwargs["min_market_cap"] == 300
+        return full_universe, []
+
+    monkeypatch.setattr(module, "fetch_a_share_selector_market_snapshots", fake_a_share_selector)
+    monkeypatch.setattr(
+        module,
+        "fetch_hk_tencent_market_snapshots",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("HK should not be fetched")),
+    )
+    snapshots, errors = module.fetch_market_snapshots(
+        markets=["SH"],
+        max_count=0,
+        sort_by="market_cap",
+        min_market_cap=300,
+    )
+
+    assert errors == []
+    assert [snapshot.ticker for snapshot in snapshots] == ["600001.SH", "600002.SH"]
+    assert [snapshot.source for snapshot in snapshots] == ["eastmoney_xuangu", "eastmoney_xuangu"]
+
+
+def test_parse_a_share_selector_snapshot_maps_stock_selector_fields():
+    module = load_screen_module()
+
+    snapshot = module.parse_a_share_selector_snapshot(
+        {
+            "SECUCODE": "601398.SH",
+            "SECURITY_CODE": "601398",
+            "SECURITY_NAME_ABBR": "工商银行",
+            "NEW_PRICE": 7.05,
+            "PE9": 6.76635091,
+            "PBNEWMRQ": 0.63728979,
+            "TOTAL_MARKET_CAP": 2_512_664_112_477,
+            "INDUSTRY": "银行",
+        }
+    )
+
+    assert snapshot is not None
+    assert snapshot.ticker == "601398.SH"
+    assert snapshot.source == "eastmoney_xuangu"
+    assert snapshot.price == 7.05
+    assert snapshot.pe == 6.76635091
+    assert snapshot.pb == 0.63728979
+    assert snapshot.market_cap == 2_512_664_112_477
+    assert snapshot.industry == "银行"
+
+
+def test_parse_tencent_hk_quote_maps_price_valuation_and_market_cap():
+    module = load_screen_module()
+    text = (
+        'v_hk00700="100~腾讯控股~00700~430.200~429.800~442.600~40905100.0~0~0~430.200~0~0~0~0~0~0~0~0~0~'
+        '430.200~0~0~0~0~0~0~0~0~0~40905100.0~2026/07/02 16:08:25~0.400~0.09~447.000~429.400~'
+        '430.200~40905100.0~17910774601.960~0~15.71~~0~0~4.09~39114.7943~39114.7943~TENCENT~1.24~'
+        '677.700~411.000~1.18~44.47~0~0~0~0~0~14.69~3.10~0.45~100~-27.54~0.33~GP~20.59~'
+        '11.53~-3.84~-10.67~-10.13~9092234841.00~9092234841.00~14.86~5.315~437.862~-35.91~HKD~1~50";'
+    )
+
+    records = module.parse_tencent_quote_records(text)
+    snapshot = module.parse_tencent_hk_snapshot(records["hk00700"])
+
+    assert snapshot is not None
+    assert snapshot.ticker == "00700.HK"
+    assert snapshot.source == "tencent_quote"
+    assert snapshot.currency == "HKD"
+    assert snapshot.price == 430.2
+    assert snapshot.pe == 15.71
+    assert snapshot.pb == 3.1
+    assert snapshot.market_cap == 3_911_479_430_000.0
+
+
+def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail():
+    module = load_screen_module()
 
     payload = module.screen_stocks(
         markets=["HK"],
@@ -253,10 +353,32 @@ def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail(mon
 
     assert payload["ok"] is False
     assert payload["phase"] == "market_snapshot"
-    assert payload["error"] == "No market snapshots fetched from Eastmoney for requested markets."
+    assert payload["error"] == "No market snapshots fetched; see data_limits.errors."
     assert payload["summary"]["total"] == 0
     assert payload["results"] == []
     assert payload["data_limits"]["errors"][0]["market"] == "HK"
+
+
+def test_screen_stocks_returns_failure_when_ulist_universe_returns_no_rows(monkeypatch):
+    module = load_screen_module()
+
+    monkeypatch.setattr(
+        module,
+        "fetch_market_snapshots",
+        lambda **kwargs: ([], [{"market": "ALL", "phase": "market_snapshot_ulist", "error": "empty reply"}]),
+    )
+
+    payload = module.screen_stocks(
+        markets=["SH", "SZ", "HK"],
+        max_count=0,
+        sort_by="market_cap",
+        min_market_cap=100_000_000,
+    )
+
+    assert payload["ok"] is False
+    assert payload["phase"] == "market_snapshot"
+    assert payload["error"] == "No market snapshots fetched; see data_limits.errors."
+    assert payload["results"] == []
 
 
 def test_cli_returns_nonzero_when_market_snapshot_fetch_fails(monkeypatch, capsys):
@@ -447,7 +569,7 @@ def test_result_payload_uses_snake_case_without_legacy_camel_case():
     assert forbidden.isdisjoint(set(walk_keys(item)))
 
 
-def test_screen_stocks_analyzes_only_top_20_percent_by_market_cap(monkeypatch):
+def test_screen_stocks_analyzes_all_market_cap_floor_rows(monkeypatch):
     module = load_screen_module()
     snapshots = [
         sample_snapshot(module, ticker=f"00000{index}.SZ", code=f"00000{index}", market_cap=market_cap)
@@ -471,15 +593,42 @@ def test_screen_stocks_analyzes_only_top_20_percent_by_market_cap(monkeypatch):
         min_market_cap=1,
     )
 
-    assert fetched == ["000001.SZ"]
-    assert payload["data_limits"]["financial_analysis_market_cap_top_percent"] == 20.0
-    assert payload["data_limits"]["financial_analysis_selected_count"] == 1
-    assert payload["data_limits"]["analyzed_count"] == 1
-    assert payload["data_limits"]["financial_fetch_attempts"] == 1
+    assert fetched == ["000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ", "000005.SZ"]
+    assert payload["data_limits"]["financial_analysis_scope"] == "all_rows_at_or_above_market_cap_floor"
+    assert payload["data_limits"]["financial_analysis_selected_count"] == 5
+    assert payload["data_limits"]["analyzed_count"] == 5
+    assert payload["data_limits"]["financial_fetch_attempts"] == 5
     assert payload["results"][0]["market_cap_rank"] == 1
     assert payload["results"][0]["market_cap_percentile"] == 20.0
     assert payload["results"][0]["analyzed"] is True
-    assert "outside_top_20_percent_by_market_cap" in payload["results"][1]["data_gaps"]
+    assert all("outside_top_20_percent_by_market_cap" not in item["data_gaps"] for item in payload["results"])
+
+
+def test_screen_stocks_passes_request_delay_to_financial_fetch(monkeypatch):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    delays = []
+
+    monkeypatch.setattr(module, "fetch_market_snapshots", lambda **kwargs: ([snapshot], []))
+
+    def fake_fetch_financial_rows(snapshot, **kwargs):
+        delays.append(kwargs["request_delay"])
+        return sample_financial_rows()
+
+    monkeypatch.setattr(module, "fetch_financial_rows", fake_fetch_financial_rows)
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: risk_free_payload() | {"ok": True})
+
+    payload = module.screen_stocks(
+        markets=["SZ"],
+        max_count=1,
+        sort_by="market_cap",
+        min_market_cap=1,
+        request_delay=0.25,
+    )
+
+    assert payload["ok"] is True
+    assert delays == [0.25]
+    assert payload["data_limits"]["request_delay_seconds"] == 0.25
 
 
 def test_cli_writes_json_and_xlsx_outputs(monkeypatch, tmp_path, capsys):
@@ -515,4 +664,238 @@ def test_cli_writes_json_and_xlsx_outputs(monkeypatch, tmp_path, capsys):
     payload = json.loads(json_out.read_text(encoding="utf-8"))
     assert payload["results"][0]["ticker"] == "000001.SZ"
     workbook = load_workbook(xlsx_out)
+    assert "All" in workbook.sheetnames
     assert workbook["Candidate"].max_row == 2
+    assert "avg_fcf_5y" in [cell.value for cell in workbook["Candidate"][1]]
+
+
+def test_cli_checkpoint_run_writes_jsonl_and_default_xlsx(monkeypatch, tmp_path, capsys):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+
+    monkeypatch.setattr(module, "fetch_market_snapshots", lambda **kwargs: ([snapshot], []))
+    monkeypatch.setattr(module, "fetch_financial_rows", lambda *args, **kwargs: sample_financial_rows())
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: risk_free_payload() | {"ok": True})
+
+    run_dir = tmp_path / "reports" / "stock-screen" / "2026-07-02"
+    exit_code = module.main(
+        [
+            "--markets",
+            "SZ",
+            "--max-count",
+            "1",
+            "--run-date",
+            "2026-07-02",
+            "--run-dir",
+            str(run_dir),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out)["data_limits"]["run_dir"] == str(run_dir)
+    assert (run_dir / "universe.json").exists()
+    assert (run_dir / "enrich.jsonl").exists()
+    assert not (run_dir / "progress.json").exists()
+    assert (run_dir / "stock-screen-2026-07-02.xlsx").exists()
+    rows = [json.loads(line) for line in (run_dir / "enrich.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["ticker"] == "000001.SZ"
+    assert rows[0]["enrich_status"] == "ok"
+
+
+def test_cli_logs_progress_to_stderr_without_polluting_stdout(monkeypatch, capsys):
+    module = load_screen_module()
+    snapshots = [
+        sample_snapshot(module, ticker="000001.SZ", code="000001", name="One", market_cap=300),
+        sample_snapshot(module, ticker="000002.SZ", code="000002", name="Two", market_cap=200),
+        sample_snapshot(module, ticker="000003.SZ", code="000003", name="Three", market_cap=100),
+    ]
+
+    monkeypatch.setattr(module, "fetch_market_snapshots", lambda **kwargs: (snapshots, []))
+
+    def fake_fetch_financial_rows(snapshot, **kwargs):
+        if snapshot.ticker == "000002.SZ":
+            raise RuntimeError("timeout")
+        return sample_financial_rows()
+
+    monkeypatch.setattr(module, "fetch_financial_rows", fake_fetch_financial_rows)
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: risk_free_payload() | {"ok": True})
+
+    exit_code = module.main(
+        [
+            "--markets",
+            "SZ",
+            "--max-count",
+            "3",
+            "--min-market-cap",
+            "1",
+            "--progress-interval",
+            "2",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["data_limits"]["progress_interval"] == 2
+    assert payload["summary"]["total"] == 3
+    assert "[stock-screen] universe live total=3 markets=SZ" in captured.err
+    assert "enrich 1/3" not in captured.err
+    assert "enrich 2/3 ok=1 failed=1" in captured.err
+    assert "event=failed" in captured.err
+    assert "enrich 3/3 ok=2 failed=1" in captured.err
+    assert "[stock-screen] complete total=3 ok=2 failed=1" in captured.err
+
+
+def test_fresh_run_dir_resets_old_checkpoint(monkeypatch, tmp_path):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    run_dir = tmp_path / "reports" / "stock-screen" / "2026-07-02"
+    run_dir.mkdir(parents=True)
+    (run_dir / "universe.json").write_text('{"snapshots":[{"ticker":"OLD"}]}\n', encoding="utf-8")
+    (run_dir / "enrich.jsonl").write_text('{"ticker":"OLD","enrich_status":"ok","result":{}}\n', encoding="utf-8")
+    (run_dir / "progress.json").write_text('{"completed":1}\n', encoding="utf-8")
+
+    monkeypatch.setattr(module, "fetch_market_snapshots", lambda **kwargs: ([snapshot], []))
+    monkeypatch.setattr(module, "fetch_financial_rows", lambda *args, **kwargs: sample_financial_rows())
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: risk_free_payload() | {"ok": True})
+
+    payload = module.screen_stocks(
+        markets=["SZ"],
+        max_count=1,
+        sort_by="market_cap",
+        min_market_cap=1,
+        run_date="2026-07-02",
+        run_dir=run_dir,
+        resume=False,
+    )
+
+    assert payload["ok"] is True
+    universe = json.loads((run_dir / "universe.json").read_text(encoding="utf-8"))
+    assert universe["snapshots"][0]["ticker"] == "000001.SZ"
+    rows = [json.loads(line) for line in (run_dir / "enrich.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["ticker"] for row in rows] == ["000001.SZ"]
+    assert not (run_dir / "progress.json").exists()
+
+
+def test_resume_uses_universe_checkpoint_skips_ok_and_retries_failed(monkeypatch, tmp_path):
+    module = load_screen_module()
+    first = sample_snapshot(module, ticker="000001.SZ", code="000001", name="First")
+    second = sample_snapshot(module, ticker="000002.SZ", code="000002", name="Second")
+    module.annotate_market_cap_universe([first, second])
+    run_dir = tmp_path / "reports" / "stock-screen" / "2026-07-02"
+    module.write_universe(
+        run_dir,
+        run_date="2026-07-02",
+        markets=["SZ"],
+        snapshots=[first, second],
+        errors=[],
+        min_market_cap=1,
+    )
+    first_result = module.build_result_item(
+        first,
+        financial_rows=sample_financial_rows(),
+        risk_free=risk_free_payload(),
+        min_market_cap=1,
+    )
+    module.checkpoint_result(
+        run_dir,
+        run_date="2026-07-02",
+        snapshot=first,
+        enrich_status="ok",
+        result=first_result,
+        attempt=1,
+    )
+    failed_result = module.financial_fetch_failed_item(second, min_market_cap=1, error="timeout")
+    module.checkpoint_result(
+        run_dir,
+        run_date="2026-07-02",
+        snapshot=second,
+        enrich_status="failed",
+        result=failed_result,
+        attempt=1,
+        error="timeout",
+    )
+    fetched = []
+
+    def fail_if_market_snapshots_are_fetched(**kwargs):
+        raise AssertionError("resume should load universe.json instead of fetching snapshots")
+
+    def fake_fetch_financial_rows(snapshot, **kwargs):
+        fetched.append(snapshot.ticker)
+        return sample_financial_rows()
+
+    monkeypatch.setattr(module, "fetch_market_snapshots", fail_if_market_snapshots_are_fetched)
+    monkeypatch.setattr(module, "fetch_financial_rows", fake_fetch_financial_rows)
+    monkeypatch.setattr(module, "fetch_risk_free_rate", lambda *args, **kwargs: risk_free_payload() | {"ok": True})
+
+    payload = module.screen_stocks(
+        markets=["SZ"],
+        max_count=0,
+        sort_by="market_cap",
+        min_market_cap=1,
+        run_date="2026-07-02",
+        run_dir=run_dir,
+        resume=True,
+    )
+
+    assert payload["ok"] is True
+    assert fetched == ["000002.SZ"]
+    assert {item["ticker"] for item in payload["results"]} == {"000001.SZ", "000002.SZ"}
+    latest_rows = module.latest_checkpoint_rows(run_dir)
+    assert latest_rows["000001.SZ"]["enrich_status"] == "ok"
+    assert latest_rows["000002.SZ"]["enrich_status"] == "ok"
+    assert latest_rows["000002.SZ"]["attempt"] == 2
+    assert not (run_dir / "progress.json").exists()
+
+
+def test_resume_rejects_cross_day_checkpoint(tmp_path):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    run_dir = tmp_path / "reports" / "stock-screen" / "2026-07-02"
+    module.write_universe(
+        run_dir,
+        run_date="2026-07-02",
+        markets=["SZ"],
+        snapshots=[snapshot],
+        errors=[],
+        min_market_cap=1,
+    )
+
+    payload = module.screen_stocks(
+        markets=["SZ"],
+        max_count=0,
+        sort_by="market_cap",
+        min_market_cap=1,
+        run_date="2026-07-03",
+        run_dir=run_dir,
+        resume=True,
+    )
+
+    assert payload["ok"] is False
+    assert payload["phase"] == "resume_checkpoint"
+    assert "Cannot resume run_date 2026-07-03" in payload["error"]
+    assert payload["results"] == []
+
+
+def test_financial_cache_reuses_rows_without_refetch(monkeypatch, tmp_path):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    cache_dir = tmp_path / "reports" / "stock-screen" / "cache" / "financials"
+    module.write_financial_rows_cache(cache_dir, snapshot, sample_financial_rows())
+
+    def fail_fetch(*args, **kwargs):
+        raise AssertionError("cached financial rows should avoid live fetch")
+
+    monkeypatch.setattr(module, "fetch_financial_rows", fail_fetch)
+
+    rows, from_cache = module.fetch_financial_rows_cached(
+        snapshot,
+        cache_dir=cache_dir,
+        session=module.configure_session(module.requests.Session()),
+        request_delay=0,
+        timeout=1,
+    )
+
+    assert from_cache is True
+    assert rows == sample_financial_rows()

@@ -4,13 +4,9 @@ description: >
   Use this for concise research on excellent companies that appear temporarily
   mispriced, with a strict 2x conservative fair-value and 90% margin-of-safety
   confidence gate.
-version: 0.3.0
-author: Ferryman
-created: 2026-04-12
-updated: 2026-07-02
 ---
 
-# Stock Research
+# Investment Quality Review
 
 You are a quality-focused value analyst. Find excellent businesses temporarily
 mispriced by the market; do not repackage low-quality cheap stocks.
@@ -22,7 +18,8 @@ mispriced by the market; do not repackage low-quality cheap stocks.
 - For market-wide candidate generation, use `scripts/screen_stock_candidates.py`;
   treat it as a secondary-data screen only, not an investment signal.
 - Use `scripts/fetch_risk_free_rate.py --currency <financialCurrency-or-currency>`
-  for the same-currency 10Y sovereign yield used in valuation.
+  for the same-currency 10Y sovereign yield used in valuation; add
+  `--json-out <path>` when the result should be persisted.
 - If imports fail, install the lightweight runtime dependencies from
   `requirements.txt` in the Python environment used to run the scripts.
 - High signals require all five gates: excellent business, credible temporary
@@ -37,10 +34,22 @@ mispriced by the market; do not repackage low-quality cheap stocks.
   Keep it as a compact index, not a duplicate report: identity, conclusion,
   current price, key fair values, score, and tags only. Use snake_case keys;
   percentages are 0-100 numbers without `%`.
+  Use `company.zh` and `company.en` for company names. Leave an unavailable
+  language as `null`; do not machine-translate official company names just to
+  fill the field.
   `fetched_at` is the data fetch timestamp. `confidence_pct` means safety-margin
   confidence. `fair_value` defaults to per-share fair value in the stated
   currency; use `fair_value_market_cap` only when indexing market-cap fair
   value separately.
+  Use structured `tags.market`, `tags.sector`, `tags.industry`, and
+  `tags.theme` only from `references/taxonomy.md`; leave uncertain categories
+  empty and do not invent tags.
+- Match the report title to the report language and site positioning: Chinese
+  reports use `# <company.zh> 投资质量评估（<ticker>）`; English reports use
+  `# <company.en> Investment Quality Review (<ticker>)`. Do not use generic
+  `股票研究` / `Stock Research` in report titles unless the user explicitly asks
+  for that wording, and do not put both Chinese and English company names in the
+  title unless the user explicitly asks for a bilingual title.
 
 ## Workflow
 
@@ -87,28 +96,26 @@ research pool. It may output `CANDIDATE`, `REJECTED`, `INSUFFICIENT_DATA`, or
 `INDUSTRY_REVIEW_REQUIRED`; it must not create `BUY`, `STRONG_BUY`, or
 `Safety Margin Confidence`.
 
-The screener fetches market snapshots from Eastmoney in descending market-cap
-order and analyzes only the top 20% by market-cap rank for each requested
-market. `--max-count` limits the raw snapshot pool per market; it is not an
-analysis-count knob. Do not pass or invent a separate enrichment limit.
-
-Use stdout as the primary summary. Persist only when explicitly needed with
-`--json-out <path>` and/or `--xlsx-out <path>`. JSON is the machine-readable
-source; Excel is only an analyst scanning view.
-
-Candidate rows use snake_case fields: `metrics`, `quality_flags`,
-`valuation_flags`, `reject_reasons`, and `data_gaps`. Treat `quality_flags`
-and `valuation_flags` as positive computed hints only. In V1, allowed
-`valuation_flags` are `cheap_pe`, `cheap_profit`, `cheap_fcf`, and
-`reasonable_pb`; `expected_return` is a metric, not a flag.
-Use `market_cap_rank`, `market_cap_percentile`, and `analyzed` to
-explain why a stock was or was not financially analyzed. Always re-check any
+Use stdout for quick screens. Persist with `--json-out` or `--xlsx-out` only
+when useful. For full-universe or resumable screens, read
+`references/screener.md` before running the script. Always re-check any
 candidate with the single-stock workflow and primary sources.
+
+## Publishing Taxonomy
+
+Before setting frontmatter tags, read `references/taxonomy.md`. Tags are for
+site filtering, so use only the controlled vocabulary, keep the four tag arrays
+present, and preserve prior company tags unless the business mix changed.
 
 ## Primary Source Routing
 
 Use browser/search only against official disclosure venues before relying on
 company IR. Record the source, date, URL, and supported assumption in the report.
+Do not cite internal script names as user-facing sources. If data was fetched by
+a script, cite the underlying provider or venue instead, such as Yahoo Finance
+via yfinance for market data, FRED/Federal Reserve for USD 10Y yields,
+ChinaBond for CNY 10Y yields, HKMA for HKD government-bond benchmarks, or the
+relevant exchange/filing venue for primary disclosures.
 
 | Market | Primary source priority |
 |:---|:---|
@@ -125,12 +132,9 @@ primary evidence, mark it unverified and cap confidence.
 
 ## Business Quality Scorecard
 
-Score the business before valuation. The weights intentionally emphasize moat
-and repeatable cash flow because they drive long-term compounding; capital
-return and management/accounting are the next most important checks.
-Understandability is only a hygiene check; a business is not excellent merely
-because it is easy to understand. The first dimension must judge whether the
-business model itself is attractive.
+Score the business before valuation. Emphasize moat, repeatable cash flow,
+capital return, and management/accounting. Treat understandability as hygiene:
+an easy business is not excellent unless the model itself is attractive.
 
 | Dimension | Max Points | Question |
 |:---|---:|:---|
@@ -144,9 +148,9 @@ business model itself is attractive.
 
 ### Management And Accounting Score
 
-Do not score management from reputation or a single sentence. The question is:
-is this team raising per-share intrinsic value, or masking weak economics with
-growth, incentives, acquisitions, accounting choices, or buyback headlines?
+Do not score management from reputation. Judge whether actions raise per-share
+intrinsic value or mask weak economics with growth, incentives, acquisitions,
+accounting choices, or buyback headlines.
 
 Use this 15-point breakdown:
 
@@ -217,10 +221,6 @@ and whether working-capital timing inflates operating cash flow.
   | Borrowings, notes, leases, preferred claims | -100% | Rarely above -100%; disclose if market value is clearly lower | Deduct more for refinancing stress, guarantees, or off-balance-sheet claims |
   | Minority interest, deferred tax, options/RSUs, contingent liabilities | Materiality-based deduction | Immaterial and disclosed as such | Material claim on consolidated assets or future per-share value |
 
-  The principle comes from conservative asset-value analysis and margin of
-  safety: uncertain assets deserve haircuts; senior claims are deducted before
-  common-share value. Do not attribute the default percentages to a specific
-  textbook rule.
 - **Fair-value output**: For quoted equities, calculate and disclose:
   current market cap, estimated share count, valuation currency, quote currency,
   FX rate if used, fair-value market cap, fair-value per-share price, and
@@ -264,6 +264,10 @@ and whether working-capital timing inflates operating cash flow.
 ## Guardrails
 
 - Keep the report compact and evidence-backed.
+- Before finalizing any user-facing report, run a publication cleanup scan on
+  the saved Markdown file: `rg -n "stock-research|Stock Research|股票研究|数据脚本|fetch_.*\\.py|screen_.*\\.py" <report.md>`.
+  If it matches, replace internal names with reader-facing language and cite
+  underlying data providers or official venues.
 - Technical analysis can set buy zone, trigger, and stop-loss, but cannot
   upgrade the fundamental signal.
 - Do not recommend position size without portfolio context, time horizon,
