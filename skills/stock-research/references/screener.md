@@ -16,6 +16,9 @@ Use this only for broad market screens, not for single-stock research.
   A-shares; HKEX listings plus Tencent batch quotes for Hong Kong.
 - Do not add alternate providers, alternate hosts, or shell-command fetch paths
   without explicit user review.
+- Do not silently fall back to generic statement schemas or proxy data. If a
+  provider field needed to choose the correct schema is unavailable, return a
+  failed enrich row so the analyst can review it.
 - `--max-count` limits the raw snapshot pool. Do not invent a separate
   enrichment limit.
 - Persist ad hoc outputs only when useful with `--json-out` and/or `--xlsx-out`.

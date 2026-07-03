@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 
@@ -155,7 +156,17 @@ class AlwaysFailListSession:
 
 
 def test_screener_does_not_import_django_or_radar_runtime():
-    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    script_dir = SCRIPT_PATH.parent
+    source = "\n".join(
+        (script_dir / filename).read_text(encoding="utf-8")
+        for filename in (
+            "screen_stock_candidates.py",
+            "screen_stock_common.py",
+            "screen_stock_metrics.py",
+            "screen_stock_parsers.py",
+            "screen_stock_providers.py",
+        )
+    )
 
     for forbidden in ("django", "celery", "mysql", "radar.models", "insights.", "subprocess"):
         assert forbidden not in source
@@ -273,9 +284,9 @@ def test_market_snapshot_fetcher_uses_listing_universe_when_max_count_is_zero(mo
         assert kwargs["min_market_cap"] == 300
         return full_universe, []
 
-    monkeypatch.setattr(module, "fetch_a_share_selector_market_snapshots", fake_a_share_selector)
+    monkeypatch.setattr(module.screen_stock_providers, "fetch_a_share_selector_market_snapshots", fake_a_share_selector)
     monkeypatch.setattr(
-        module,
+        module.screen_stock_providers,
         "fetch_hk_tencent_market_snapshots",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("HK should not be fetched")),
     )
@@ -497,6 +508,39 @@ def test_build_result_item_marks_quality_value_candidate_with_readable_flags():
     assert "cheap_pb" not in item["valuation_flags"]
     assert item["metrics"]["pe"] == 10.0
     assert item["metrics"]["expected_return"] is not None
+
+
+def test_a_share_financial_rows_do_not_fallback_when_company_type_is_unknown(monkeypatch):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module, market="SH", ticker="600001.SH", code="600001")
+
+    monkeypatch.setattr(module.screen_stock_providers, "fetch_a_company_type", lambda *args, **kwargs: "9")
+
+    with pytest.raises(RuntimeError, match="Unsupported A-share company type"):
+        module.fetch_a_financial_rows(
+            snapshot,
+            session=module.configure_session(module.requests.Session()),
+            timeout=1,
+            request_delay=0,
+        )
+
+
+def test_a_share_financial_rows_propagate_company_type_errors(monkeypatch):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module, market="SH", ticker="600001.SH", code="600001")
+
+    def fail_company_type(*args, **kwargs):
+        raise RuntimeError("company type unavailable")
+
+    monkeypatch.setattr(module.screen_stock_providers, "fetch_a_company_type", fail_company_type)
+
+    with pytest.raises(RuntimeError, match="company type unavailable"):
+        module.fetch_a_financial_rows(
+            snapshot,
+            session=module.configure_session(module.requests.Session()),
+            timeout=1,
+            request_delay=0,
+        )
 
 
 def test_build_result_item_uses_reject_reasons_for_obvious_rejects():
