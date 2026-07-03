@@ -428,7 +428,13 @@ def fetch_risk_free_rate(
         try:
             return fetch_usd_rate(session=session, timeout=timeout, now=now)
         except RiskFreeRateError as exc:
-            return failure_payload(currency="USD", error=str(exc), now=now)
+            return failure_payload(
+                currency="USD",
+                error=str(exc),
+                source=SOVEREIGN_SOURCES["USD"]["name"],
+                source_url=SOVEREIGN_SOURCES["USD"]["url"],
+                now=now,
+            )
 
     if normalized_currency == "CNY":
         try:

@@ -238,6 +238,20 @@ def test_cny_failure_is_stable_when_chinabond_html_has_no_10y_row():
     assert result["sourceUrl"] == module.CHINABOND_YIELD_MAIN_URL
 
 
+def test_usd_failure_includes_fred_source_metadata():
+    module = load_rate_module()
+    session = FakeSession(FakeResponse("observation_date,DGS10\n2026-01-01,.\n"))
+
+    result = module.fetch_risk_free_rate("USD", session=session)
+
+    assert result["ok"] is False
+    assert result["phase"] == "risk_free_rate"
+    assert result["currency"] == "USD"
+    assert "no usable 10Y yield observations" in result["error"]
+    assert result["source"] == module.SOVEREIGN_SOURCES["USD"]["name"]
+    assert result["sourceUrl"] == module.FRED_DGS10_PAGE_URL
+
+
 def test_hkd_failure_is_stable_when_hkma_xls_cannot_be_parsed(monkeypatch):
     module = load_rate_module()
     session = FakeSession(FakeResponse("", content=b"not-a-workbook"))

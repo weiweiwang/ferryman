@@ -34,16 +34,16 @@ def compute_metrics(
     risk_free: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], list[str]]:
     data_gaps: list[str] = []
-    rows = financial_rows[:MIN_FINANCIAL_YEARS]
-    complete_rows = complete_financial_rows(rows)
+    rows = financial_rows
+    complete_rows = complete_financial_rows(rows)[:MIN_FINANCIAL_YEARS]
     if len(complete_rows) < MIN_FINANCIAL_YEARS:
         data_gaps.append("missing_5y_financial_rows")
 
     net_profits = [to_float(row.get("net_profit")) for row in complete_rows]
     operating_cash_flows = [to_float(row.get("operating_cash_flow")) for row in complete_rows]
     free_cash_flows = [to_float(row.get("free_cash_flow")) for row in complete_rows]
-    roe_values = [to_float(row.get("roe")) for row in rows]
-    roic_values = [to_float(row.get("roic")) for row in rows]
+    roe_values = [to_float(row.get("roe")) for row in complete_rows]
+    roic_values = [to_float(row.get("roic")) for row in complete_rows]
     latest = rows[0] if rows else {}
 
     avg_net_profit = mean(net_profits)

@@ -643,6 +643,30 @@ def test_build_result_item_uses_data_gaps_for_missing_financial_history():
     assert item["reject_reasons"] == []
 
 
+def test_build_result_item_uses_recent_five_complete_years_when_latest_year_is_incomplete():
+    module = load_screen_module()
+    rows = sample_financial_rows()
+    incomplete_latest = rows[0] | {"free_cash_flow": None}
+    older_complete = rows[-1] | {
+        "year": "2020",
+        "net_profit": 83_000_000.0,
+        "operating_cash_flow": 96_000_000.0,
+        "free_cash_flow": 77_000_000.0,
+    }
+
+    item = module.build_result_item(
+        sample_snapshot(module),
+        financial_rows=[incomplete_latest, *rows[1:], older_complete],
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert item["status"] == "CANDIDATE"
+    assert item["metrics"]["complete_financial_years"] == 5
+    assert item["metrics"]["avg_fcf_5y"] == 75_000_000.0
+    assert "missing_5y_financial_rows" not in item["data_gaps"]
+
+
 def test_industry_review_required_takes_precedence_over_generic_financial_rules():
     module = load_screen_module()
     weak_bank_rows = [row | {"free_cash_flow": -1.0} for row in sample_financial_rows()]
