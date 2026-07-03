@@ -27,15 +27,22 @@ Use this only for broad market screens, not for single-stock research.
 - Runtime progress is logged to stderr every `--progress-interval` rows; stdout
   remains the final JSON summary.
 - Cross-day runs need a new date directory because prices, market cap, PE/PB,
-  and valuation judgment are date-sensitive. Reuse financial-row cache only for
+  and derived metrics are date-sensitive. Reuse financial-row cache only for
   report-period financial rows.
 
 ## Candidate Fields
 
-Candidate rows use `metrics`, `quality_flags`, `valuation_flags`,
-`reject_reasons`, and `data_gaps`. Treat flags as computed hints only. Current
-`valuation_flags`: `cheap_pe`, `cheap_profit`, `cheap_fcf`, and
-`reasonable_pb`. `expected_return` is a metric, not a flag.
+Candidate rows use `metrics`, `reject_reasons`, and `data_gaps`. The screener
+does not emit quality or valuation tags, scores, buy signals, or safety-margin
+confidence. `expected_return`, PE/PB, profit multiple, FCF multiple, and
+same-currency risk-free multiple cap stay inside `metrics` only.
+
+`CANDIDATE` means enough data and no hard disqualifier. Use `REJECTED` only for
+invalid price, missing or below-floor market cap, A-share ST/*ST status,
+non-positive 5-year average profit, non-positive 5-year average FCF, 5-year
+average OCF/profit below 0.5, or goodwill/equity above 0.5. Do not reject only
+because valuation metrics, FCF/profit, or negative FCF year count are
+unattractive.
 
 Use `market_cap_rank`, `market_cap_percentile`, and `analyzed` to explain why a
 stock was or was not financially analyzed.

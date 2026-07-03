@@ -96,6 +96,19 @@ research pool. It may output `CANDIDATE`, `REJECTED`, `INSUFFICIENT_DATA`, or
 `INDUSTRY_REVIEW_REQUIRED`; it must not create `BUY`, `STRONG_BUY`, or
 `Safety Margin Confidence`.
 
+The screener is a broad quality-pool filter, not a valuation engine. It should
+avoid missing potentially good companies. `CANDIDATE` means the row has enough
+data and no hard financial disqualifier; it does not mean the stock is cheap or
+buyable. Keep valuation ratios and `expected_return` only as `metrics` for
+later single-stock research.
+
+Use `REJECTED` only for hard disqualifiers: invalid price, missing or below-floor
+market cap, A-share ST/*ST status, non-positive 5-year average profit,
+non-positive 5-year average FCF, 5-year average OCF/profit below 0.5, or
+goodwill/equity above 0.5. Do not reject only because PE/PB, profit multiple,
+FCF multiple, FCF/profit, negative FCF year count, risk-free-rate multiple, or
+`expected_return` is unattractive.
+
 Use stdout for quick screens. Persist with `--json-out` or `--xlsx-out` only
 when useful. For full-universe or resumable screens, read
 `references/screener.md` before running the script. Always re-check any

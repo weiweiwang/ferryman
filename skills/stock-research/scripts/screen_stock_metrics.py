@@ -108,8 +108,6 @@ def quick_reject_reasons(snapshot: MarketSnapshot, min_market_cap: float) -> lis
         reasons.append("st_or_special_treatment")
     if snapshot.market_cap is None or snapshot.market_cap < min_market_cap:
         reasons.append("below_market_cap_floor")
-    if snapshot.pe is None or snapshot.pe <= 0:
-        reasons.append("non_positive_pe")
     return reasons
 
 
@@ -124,98 +122,37 @@ def financial_fetch_blockers(snapshot: MarketSnapshot, min_market_cap: float) ->
     return reasons
 
 
-def quality_flags(metrics: dict[str, Any], negative_fcf_years: int) -> list[str]:
-    flags: list[str] = []
-    if (metrics.get("roe_mean") or 0) >= 12 and (metrics.get("roe_stability") or 0) >= 2:
-        flags.append("stable_roe")
-    if (metrics.get("roic_mean") or 0) >= 10:
-        flags.append("high_roic")
-    if (metrics.get("ocf_to_profit") or 0) >= 0.9 and (metrics.get("fcf_to_profit") or 0) >= 0.7:
-        flags.append("strong_cash_conversion")
-    if (metrics.get("avg_fcf_5y") or 0) > 0 and negative_fcf_years <= 1:
-        flags.append("positive_fcf_5y")
-    if metrics.get("debt_to_assets") is not None and metrics["debt_to_assets"] <= 0.5:
-        flags.append("low_debt")
-    if metrics.get("goodwill_to_equity") is not None and metrics["goodwill_to_equity"] <= 0.2:
-        flags.append("low_goodwill")
-    return flags
-
-
-def valuation_flags(metrics: dict[str, Any]) -> list[str]:
-    flags: list[str] = []
-    cap = metrics.get("risk_free_multiple_cap")
-    if cap is not None:
-        if metrics.get("pe") is not None and 0 < metrics["pe"] <= cap:
-            flags.append("cheap_pe")
-        if metrics.get("market_cap_to_avg_profit") is not None and metrics["market_cap_to_avg_profit"] <= cap:
-            flags.append("cheap_profit")
-        if metrics.get("market_cap_to_avg_fcf") is not None and metrics["market_cap_to_avg_fcf"] <= cap:
-            flags.append("cheap_fcf")
-    if metrics.get("pb") is not None and 0 < metrics["pb"] <= 3:
-        flags.append("reasonable_pb")
-    return flags
-
-
-def score_flags(flags: list[str], weights: dict[str, int]) -> int:
-    return min(100, sum(weights.get(flag, 0) for flag in flags))
-
-
 def classify_candidate(
     snapshot: MarketSnapshot,
     metrics: dict[str, Any],
     data_gaps: list[str],
     initial_reject_reasons: list[str],
-) -> tuple[str, list[str], list[str], list[str], int, int, int]:
+) -> tuple[str, list[str]]:
     reject_reasons = list(initial_reject_reasons)
     if reject_reasons:
-        return "REJECTED", [], [], sorted(set(reject_reasons)), 0, 0, 0
+        return "REJECTED", sorted(set(reject_reasons))
 
     if is_industry_review_required(snapshot.industry):
         data_gaps.append("industry_review_required")
-        return "INDUSTRY_REVIEW_REQUIRED", [], [], [], 0, 0, 0
+        return "INDUSTRY_REVIEW_REQUIRED", []
+
+    complete_years = metrics.get("complete_financial_years") or 0
+    if complete_years < MIN_FINANCIAL_YEARS:
+        return "INSUFFICIENT_DATA", []
 
     if metrics.get("avg_net_profit_5y") is not None and metrics["avg_net_profit_5y"] <= 0:
         reject_reasons.append("non_positive_profit")
     if metrics.get("avg_fcf_5y") is not None and metrics["avg_fcf_5y"] <= 0:
         reject_reasons.append("non_positive_fcf")
-    if metrics.get("ocf_to_profit") is not None and metrics["ocf_to_profit"] < 0.6:
+    if metrics.get("ocf_to_profit") is not None and metrics["ocf_to_profit"] < 0.5:
         reject_reasons.append("weak_ocf_conversion")
-    if metrics.get("fcf_to_profit") is not None and metrics["fcf_to_profit"] < 0.4:
-        reject_reasons.append("weak_fcf_conversion")
-    if metrics.get("debt_to_assets") is not None and metrics["debt_to_assets"] > 0.7:
-        reject_reasons.append("high_debt")
     if metrics.get("goodwill_to_equity") is not None and metrics["goodwill_to_equity"] > 0.5:
         reject_reasons.append("high_goodwill")
 
     if reject_reasons:
-        return "REJECTED", [], [], sorted(set(reject_reasons)), 0, 0, 0
+        return "REJECTED", sorted(set(reject_reasons))
 
-    complete_years = metrics.get("complete_financial_years") or 0
-    if complete_years < MIN_FINANCIAL_YEARS:
-        return "INSUFFICIENT_DATA", [], [], [], 0, 0, 0
-
-    negative_fcf_years = metrics.get("negative_fcf_years") or 0
-    q_flags = quality_flags(metrics, negative_fcf_years)
-    v_flags = valuation_flags(metrics)
-    q_score = score_flags(
-        q_flags,
-        {
-            "stable_roe": 25,
-            "high_roic": 15,
-            "strong_cash_conversion": 25,
-            "positive_fcf_5y": 15,
-            "low_debt": 10,
-            "low_goodwill": 10,
-        },
-    )
-    v_score = score_flags(
-        v_flags,
-        {"cheap_pe": 25, "cheap_profit": 30, "cheap_fcf": 35, "reasonable_pb": 10},
-    )
-    screen_score = round(q_score * 0.6 + v_score * 0.4)
-    if len(q_flags) >= 3 and len(set(v_flags) & {"cheap_pe", "cheap_profit", "cheap_fcf"}) >= 1:
-        return "CANDIDATE", q_flags, v_flags, [], q_score, v_score, screen_score
-    return "REJECTED", q_flags, v_flags, ["not_enough_quality_or_valuation_signals"], q_score, v_score, screen_score
+    return "CANDIDATE", []
 
 
 def build_result_item(
@@ -232,7 +169,7 @@ def build_result_item(
         metrics["market_cap_to_avg_profit"] = None
         metrics["market_cap_to_avg_fcf"] = None
         data_gaps.append("fx_conversion_required")
-    status, q_flags, v_flags, final_reject_reasons, q_score, v_score, screen_score = classify_candidate(
+    status, final_reject_reasons = classify_candidate(
         snapshot,
         metrics,
         data_gaps,
@@ -252,22 +189,62 @@ def build_result_item(
         "analyzed": bool(financial_rows),
         "industry": snapshot.industry,
         "status": status,
-        "quality_score": q_score,
-        "valuation_score": v_score,
-        "screen_score": screen_score,
         "metrics": metrics,
-        "quality_flags": q_flags,
-        "valuation_flags": v_flags,
         "reject_reasons": final_reject_reasons,
         "data_gaps": sorted(set(data_gaps)),
         "source": snapshot.source,
     }
 
 
+def refresh_result_item_contract(item: dict[str, Any], *, min_market_cap: float) -> dict[str, Any]:
+    """Reclassify checkpointed rows with the current screener contract."""
+    metrics = dict(item.get("metrics") or {})
+    market_cap_rank = to_float(item.get("market_cap_rank"))
+    snapshot = MarketSnapshot(
+        ticker=str(item.get("ticker") or ""),
+        code=str(item.get("ticker") or "").split(".")[0],
+        name=str(item.get("name") or ""),
+        market=str(item.get("market") or ""),
+        currency=str(item.get("currency") or ""),
+        price=to_float(item.get("price")),
+        pe=to_float(metrics.get("pe")),
+        pb=to_float(metrics.get("pb")),
+        market_cap=to_float(item.get("market_cap")),
+        float_market_cap=None,
+        industry=item.get("industry"),
+        market_cap_rank=int(market_cap_rank) if market_cap_rank is not None else None,
+        market_cap_percentile=to_float(item.get("market_cap_percentile")),
+        source=str(item.get("source") or "eastmoney"),
+    )
+    data_gaps = list(item.get("data_gaps") or [])
+    reject_reasons = quick_reject_reasons(snapshot, min_market_cap)
+    status, final_reject_reasons = classify_candidate(snapshot, metrics, data_gaps, reject_reasons)
+    removed_fields = {
+        "quality_score",
+        "valuation_score",
+        "screen_score",
+        "quality_flags",
+        "valuation_flags",
+    }
+    refreshed = {key: value for key, value in item.items() if key not in removed_fields}
+    refreshed["status"] = status
+    refreshed["metrics"] = metrics
+    refreshed["reject_reasons"] = final_reject_reasons
+    refreshed["data_gaps"] = sorted(set(data_gaps))
+    return refreshed
+
+
 def sort_results(results: list[dict[str, Any]], sort_by: str) -> list[dict[str, Any]]:
-    if sort_by == "market_cap":
-        return sorted(results, key=lambda item: item.get("market_cap") or 0, reverse=True)
-    return sorted(results, key=lambda item: item.get("screen_score") or 0, reverse=True)
+    if sort_by == "expected_return":
+        return sorted(
+            results,
+            key=lambda item: (
+                (item.get("metrics") or {}).get("expected_return") is not None,
+                (item.get("metrics") or {}).get("expected_return") or 0,
+            ),
+            reverse=True,
+        )
+    return sorted(results, key=lambda item: item.get("market_cap") or 0, reverse=True)
 
 
 def failed_market_snapshots(markets: list[str], errors: list[dict[str, Any]]) -> set[str]:
@@ -298,12 +275,7 @@ def financial_fetch_failed_item(
         "analyzed": False,
         "industry": snapshot.industry,
         "status": "INSUFFICIENT_DATA",
-        "quality_score": 0,
-        "valuation_score": 0,
-        "screen_score": 0,
         "metrics": {"pe": snapshot.pe, "pb": snapshot.pb, "complete_financial_years": 0},
-        "quality_flags": [],
-        "valuation_flags": [],
         "reject_reasons": quick_reject_reasons(snapshot, min_market_cap),
         "data_gaps": ["financial_fetch_failed"],
         "error_phase": "financial_rows",

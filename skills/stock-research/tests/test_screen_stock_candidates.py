@@ -491,7 +491,7 @@ def test_parses_eastmoney_hk_currency_and_chinese_amount_units():
     assert module.to_float("39.13%") == 39.13
 
 
-def test_build_result_item_marks_quality_value_candidate_with_readable_flags():
+def test_build_result_item_marks_candidate_without_quality_or_valuation_flags():
     module = load_screen_module()
 
     item = module.build_result_item(
@@ -502,12 +502,80 @@ def test_build_result_item_marks_quality_value_candidate_with_readable_flags():
     )
 
     assert item["status"] == "CANDIDATE"
-    assert set(item["quality_flags"]) >= {"stable_roe", "high_roic", "strong_cash_conversion", "positive_fcf_5y"}
-    assert set(item["valuation_flags"]) >= {"cheap_pe", "cheap_profit", "cheap_fcf", "reasonable_pb"}
-    assert "high_expected_return" not in item["valuation_flags"]
-    assert "cheap_pb" not in item["valuation_flags"]
+    assert "quality_flags" not in item
+    assert "valuation_flags" not in item
+    assert "quality_score" not in item
+    assert "valuation_score" not in item
+    assert "screen_score" not in item
     assert item["metrics"]["pe"] == 10.0
     assert item["metrics"]["expected_return"] is not None
+
+
+def test_build_result_item_does_not_reject_non_positive_pe_by_itself():
+    module = load_screen_module()
+
+    item = module.build_result_item(
+        sample_snapshot(module, pe=-3.0),
+        financial_rows=sample_financial_rows(),
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert item["status"] == "CANDIDATE"
+    assert item["reject_reasons"] == []
+    assert item["metrics"]["pe"] == -3.0
+    assert item["metrics"]["expected_return"] is None
+
+
+def test_build_result_item_keeps_high_debt_as_metric_not_reject_reason():
+    module = load_screen_module()
+    rows = [row | {"total_assets": 500_000_000.0, "total_liabilities": 450_000_000.0} for row in sample_financial_rows()]
+
+    item = module.build_result_item(
+        sample_snapshot(module),
+        financial_rows=rows,
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert item["status"] == "CANDIDATE"
+    assert item["metrics"]["debt_to_assets"] == 0.9
+    assert "high_debt" not in item["reject_reasons"]
+
+
+def test_build_result_item_keeps_three_negative_fcf_years_as_metric_not_reject_reason():
+    module = load_screen_module()
+    rows = sample_financial_rows()
+    rows[0] = rows[0] | {"free_cash_flow": -1.0}
+    rows[1] = rows[1] | {"free_cash_flow": -1.0}
+    rows[2] = rows[2] | {"free_cash_flow": -1.0}
+
+    item = module.build_result_item(
+        sample_snapshot(module),
+        financial_rows=rows,
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert item["status"] == "CANDIDATE"
+    assert item["metrics"]["negative_fcf_years"] == 3
+    assert "too_many_negative_fcf_years" not in item["reject_reasons"]
+
+
+def test_build_result_item_keeps_low_fcf_to_profit_as_metric_not_reject_reason():
+    module = load_screen_module()
+    rows = [row | {"free_cash_flow": 10_000_000.0} for row in sample_financial_rows()]
+
+    item = module.build_result_item(
+        sample_snapshot(module),
+        financial_rows=rows,
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert item["status"] == "CANDIDATE"
+    assert item["metrics"]["fcf_to_profit"] < 0.25
+    assert "weak_fcf_conversion" not in item["reject_reasons"]
 
 
 def test_a_share_financial_rows_do_not_fallback_when_company_type_is_unknown(monkeypatch):
@@ -554,9 +622,10 @@ def test_build_result_item_uses_reject_reasons_for_obvious_rejects():
     )
 
     assert item["status"] == "REJECTED"
-    assert set(item["reject_reasons"]) >= {"no_valid_price", "st_or_special_treatment", "non_positive_pe"}
-    assert item["quality_flags"] == []
-    assert item["valuation_flags"] == []
+    assert set(item["reject_reasons"]) >= {"no_valid_price", "st_or_special_treatment"}
+    assert "non_positive_pe" not in item["reject_reasons"]
+    assert "quality_flags" not in item
+    assert "valuation_flags" not in item
 
 
 def test_build_result_item_uses_data_gaps_for_missing_financial_history():
@@ -609,6 +678,11 @@ def test_result_payload_uses_snake_case_without_legacy_camel_case():
         "valuationFlags",
         "rejectReasons",
         "nextResearchChecks",
+        "quality_flags",
+        "valuation_flags",
+        "quality_score",
+        "valuation_score",
+        "screen_score",
     }
     assert forbidden.isdisjoint(set(walk_keys(item)))
 
@@ -710,7 +784,11 @@ def test_cli_writes_json_and_xlsx_outputs(monkeypatch, tmp_path, capsys):
     workbook = load_workbook(xlsx_out)
     assert "All" in workbook.sheetnames
     assert workbook["Candidate"].max_row == 2
-    assert "avg_fcf_5y" in [cell.value for cell in workbook["Candidate"][1]]
+    headers = [cell.value for cell in workbook["Candidate"][1]]
+    assert "avg_fcf_5y" in headers
+    assert "quality_flags" not in headers
+    assert "valuation_flags" not in headers
+    assert "screen_score" not in headers
 
 
 def test_cli_checkpoint_run_writes_jsonl_and_default_xlsx(monkeypatch, tmp_path, capsys):
@@ -842,6 +920,13 @@ def test_resume_uses_universe_checkpoint_skips_ok_and_retries_failed(monkeypatch
         risk_free=risk_free_payload(),
         min_market_cap=1,
     )
+    first_result["status"] = "REJECTED"
+    first_result["quality_score"] = 70
+    first_result["valuation_score"] = 0
+    first_result["screen_score"] = 42
+    first_result["quality_flags"] = ["stable_roe"]
+    first_result["valuation_flags"] = []
+    first_result["reject_reasons"] = ["not_enough_quality_or_valuation_signals"]
     module.checkpoint_result(
         run_dir,
         run_date="2026-07-02",
@@ -886,6 +971,12 @@ def test_resume_uses_universe_checkpoint_skips_ok_and_retries_failed(monkeypatch
     assert payload["ok"] is True
     assert fetched == ["000002.SZ"]
     assert {item["ticker"] for item in payload["results"]} == {"000001.SZ", "000002.SZ"}
+    refreshed_first = next(item for item in payload["results"] if item["ticker"] == "000001.SZ")
+    assert refreshed_first["status"] == "CANDIDATE"
+    assert refreshed_first["reject_reasons"] == []
+    assert "quality_flags" not in refreshed_first
+    assert "valuation_flags" not in refreshed_first
+    assert "screen_score" not in refreshed_first
     latest_rows = module.latest_checkpoint_rows(run_dir)
     assert latest_rows["000001.SZ"]["enrich_status"] == "ok"
     assert latest_rows["000002.SZ"]["enrich_status"] == "ok"

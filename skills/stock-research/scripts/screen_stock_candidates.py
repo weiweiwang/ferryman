@@ -74,11 +74,9 @@ from screen_stock_metrics import (  # noqa: E402
     financial_currency,
     financial_fetch_blockers,
     financial_fetch_failed_item,
-    quality_flags,
     quick_reject_reasons,
-    score_flags,
+    refresh_result_item_contract,
     sort_results,
-    valuation_flags,
 )
 from screen_stock_parsers import (  # noqa: E402
     market_from_secucode,
@@ -353,7 +351,7 @@ def screen_stocks(
         for ticker, row in checkpoint_rows.items():
             result = row.get("result")
             if isinstance(result, dict):
-                results_by_ticker[ticker] = result
+                results_by_ticker[ticker] = refresh_result_item_contract(result, min_market_cap=min_market_cap)
     financial_fetch_attempts = 0
     for processed_count, snapshot in enumerate(snapshots, start=1):
         previous_row = checkpoint_rows.get(snapshot.ticker)
@@ -546,11 +544,6 @@ def write_xlsx(path: str, payload: dict[str, Any]) -> None:
         "market_cap_percentile",
         "analyzed",
         "industry",
-        "quality_score",
-        "valuation_score",
-        "screen_score",
-        "quality_flags",
-        "valuation_flags",
         "reject_reasons",
         "data_gaps",
         "error_phase",
@@ -629,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
         default=300,
         help="Maximum market snapshots to keep per market after sorting. Use 0 to page until --min-market-cap is crossed.",
     )
-    parser.add_argument("--sort-by", choices=["screen_score", "market_cap"], default="screen_score")
+    parser.add_argument("--sort-by", choices=["market_cap", "expected_return"], default="market_cap")
     parser.add_argument("--min-market-cap", type=float, default=DEFAULT_MIN_MARKET_CAP)
     parser.add_argument("--request-delay", type=float, default=DEFAULT_REQUEST_DELAY_SECONDS)
     parser.add_argument(
