@@ -2,43 +2,68 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from io import BytesIO
 from typing import Any
 
 import requests
 
 from screen_stock_common import (
-    A_SHARE_SELECTOR_FIELDS,
-    DEFAULT_HEADERS,
     DEFAULT_PAGE_SIZE,
     EASTMONEY_LIST_FIELDS,
     EASTMONEY_QUOTE_UT,
     EASTMONEY_WBP2U,
     MARKET_CONFIGS,
+    MARKET_SNAPSHOT_ENDPOINT,
     MIN_FINANCIAL_YEARS,
     SORT_FIELDS,
-    ListingEntry,
+    US_MARKET_CODE_BY_SUFFIX,
     MarketSnapshot,
     configure_session,
     normalize_currency,
     parse_json_or_jsonp,
     sleep_if_needed,
     to_float,
+    us_ticker_for_eastmoney_market,
 )
 from screen_stock_parsers import (
-    parse_a_share_selector_snapshot,
     parse_market_snapshot,
-    parse_tencent_hk_snapshot,
-    parse_tencent_quote_records,
 )
 
 
-EASTMONEY_LIST_URL = "https://push2.eastmoney.com/api/qt/clist/get"
+# Market snapshot fetching must stay single-source: Eastmoney webguest clist for
+# SH/SZ/HK/US. Financial statement endpoints below may differ by market, but
+# the screening universe must not mix HKEX, Tencent, xuangu, or alternate hosts.
+EASTMONEY_WEBGUEST_LIST_URL = MARKET_SNAPSHOT_ENDPOINT
 EASTMONEY_DATA_URL = "https://datacenter.eastmoney.com/securities/api/data/get"
+EASTMONEY_DATA_V1_URL = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
 EASTMONEY_HK_DATA_URL = "https://emh5.eastmoney.com/api/GangGu/CaiWu"
-EASTMONEY_XUANGU_LIST_URL = "https://data.eastmoney.com/dataapi/xuangu/list"
-TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
-HKEX_SECURITIES_LIST_URL = "https://www.hkex.com.hk/eng/services/trading/securities/securitieslists/ListOfSecurities.xlsx"
+
+US_INCOME_ITEM_CODES = {
+    "revenue": "004001999",
+    "net_profit": ("004015999", "004013999", "004013003"),
+}
+US_CASHFLOW_ITEM_CODES = {
+    "operating_cash_flow": "003999",
+    "capex": "005002",
+}
+US_BALANCE_ITEM_CODES = {
+    "cash_and_equivalents": "004001001",
+    "current_financial_assets": "004001016",
+    "noncurrent_financial_assets": "004003015",
+    "total_assets": "004005999",
+    "short_debt": "004007007",
+    "long_debt": "004009005",
+    "total_liabilities": "004011999",
+    "equity": "004017999",
+}
+
+
+def sum_present_values(*values: Any) -> float | None:
+    present = [to_float(value) for value in values if to_float(value) is not None]
+    return sum(present) if present else None
+
+
+def sum_present_fields(row: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    return sum_present_values(*(row.get(key) for key in keys))
 
 
 def get_with_retry(
@@ -67,200 +92,6 @@ def get_with_retry(
     raise last_error
 
 
-def fetch_hkex_listings(
-    session: requests.sessions.Session,
-    *,
-    timeout: float,
-    request_delay: float,
-) -> list[ListingEntry]:
-    from openpyxl import load_workbook
-
-    response = get_with_retry(
-        session,
-        HKEX_SECURITIES_LIST_URL,
-        headers=DEFAULT_HEADERS,
-        timeout=max(timeout, 60),
-        request_delay=request_delay,
-    )
-    workbook = load_workbook(BytesIO(response.content), read_only=True, data_only=True)
-    sheet = workbook.active
-    sheet.reset_dimensions()
-    rows = sheet.iter_rows(values_only=True)
-    for _ in range(2):
-        next(rows)
-    headers = [str(value or "").strip() for value in next(rows)]
-    index = {header: pos for pos, header in enumerate(headers)}
-    listings: list[ListingEntry] = []
-    for row in rows:
-        code = str(row[index["Stock Code"]] or "").strip()
-        category = str(row[index["Category"]] or "").strip()
-        sub_category = str(row[index["Sub-Category"]] or "").strip()
-        if not code or category != "Equity" or "Equity Securities" not in sub_category:
-            continue
-        code = code.zfill(5)
-        listings.append(
-            ListingEntry(
-                code=code,
-                secid=f"116.{code}",
-                market="HK",
-                official_name=row[index["Name of Securities"]],
-                board=sub_category,
-                trading_currency=row[index["Trading Currency"]],
-                listing_source="HKEX",
-            )
-        )
-    return listings
-
-
-def chunked(items: list[ListingEntry], size: int) -> list[list[ListingEntry]]:
-    return [items[index : index + size] for index in range(0, len(items), size)]
-
-
-def fetch_a_share_selector_market_snapshots(
-    *,
-    markets: list[str],
-    min_market_cap: float,
-    session: requests.sessions.Session,
-    timeout: float,
-    request_delay: float,
-) -> tuple[list[MarketSnapshot], list[dict[str, Any]]]:
-    requested = {market for market in markets if market in {"SH", "SZ"}}
-    if not requested:
-        return [], []
-
-    snapshots: list[MarketSnapshot] = []
-    errors: list[dict[str, Any]] = []
-    page_number = 1
-    page_size = DEFAULT_PAGE_SIZE
-    while True:
-        params = {
-            "type": "RPTA_PCNEW_STOCKSELECT",
-            "sty": A_SHARE_SELECTOR_FIELDS,
-            "filter": f"(TOTAL_MARKET_CAP>={int(min_market_cap)})",
-            "source": "SELECT_SECURITIES",
-            "client": "WEB",
-            "hyversion": "new",
-            "st": "TOTAL_MARKET_CAP",
-            "sr": -1,
-            "p": page_number,
-            "ps": page_size,
-        }
-        try:
-            payload = get_json(session, EASTMONEY_XUANGU_LIST_URL, params=params, request_delay=request_delay, timeout=timeout)
-        except Exception as exc:
-            errors.append({"market": ",".join(sorted(requested)), "phase": "market_snapshot_xuangu", "error": str(exc)})
-            break
-
-        result = payload.get("result") or {}
-        rows = result.get("data") or []
-        for row in rows:
-            try:
-                snapshot = parse_a_share_selector_snapshot(row)
-            except Exception as exc:
-                errors.append({"market": "A", "phase": "market_snapshot_xuangu_parse", "error": str(exc)})
-                continue
-            if snapshot is None or snapshot.market not in requested:
-                continue
-            if snapshot.market_cap is None or snapshot.market_cap < min_market_cap:
-                continue
-            snapshots.append(snapshot)
-
-        if not rows or result.get("nextpage") is False:
-            break
-        count = to_float(result.get("count"))
-        if count is not None and page_number >= math.ceil(count / page_size):
-            break
-        page_number += 1
-
-    snapshots.sort(key=lambda item: item.market_cap or 0, reverse=True)
-    return snapshots, errors
-
-
-def fetch_hk_tencent_market_snapshots(
-    listings: list[ListingEntry],
-    *,
-    min_market_cap: float,
-    session: requests.sessions.Session,
-    timeout: float,
-    request_delay: float,
-) -> tuple[list[MarketSnapshot], list[dict[str, Any]]]:
-    listings_by_symbol = {f"hk{listing.code.lower()}": listing for listing in listings if listing.market == "HK"}
-    snapshots: list[MarketSnapshot] = []
-    errors: list[dict[str, Any]] = []
-    symbols = list(listings_by_symbol)
-    headers = {**DEFAULT_HEADERS, "Referer": "https://gu.qq.com/", "Accept": "*/*"}
-
-    for index in range(0, len(symbols), DEFAULT_PAGE_SIZE):
-        batch = symbols[index : index + DEFAULT_PAGE_SIZE]
-        if not batch:
-            continue
-        try:
-            response = session.get(f"{TENCENT_QUOTE_URL}{','.join(batch)}", headers=headers, timeout=timeout)
-            response.raise_for_status()
-            records = parse_tencent_quote_records(response.text)
-        except Exception as exc:
-            errors.append({"market": "HK", "phase": "market_snapshot_tencent_quote", "error": str(exc)})
-            sleep_if_needed(request_delay)
-            continue
-
-        for symbol, fields in records.items():
-            try:
-                snapshot = parse_tencent_hk_snapshot(fields, listings_by_symbol.get(symbol))
-            except Exception as exc:
-                errors.append({"market": "HK", "phase": "market_snapshot_tencent_parse", "error": str(exc)})
-                continue
-            if snapshot is None:
-                continue
-            if snapshot.market_cap is None or snapshot.market_cap < min_market_cap:
-                continue
-            snapshots.append(snapshot)
-        sleep_if_needed(request_delay)
-
-    snapshots.sort(key=lambda item: item.market_cap or 0, reverse=True)
-    return snapshots, errors
-
-
-def fetch_listing_universe_market_snapshots(
-    *,
-    markets: list[str],
-    min_market_cap: float,
-    session: requests.sessions.Session,
-    timeout: float,
-    request_delay: float,
-) -> tuple[list[MarketSnapshot], list[dict[str, Any]]]:
-    snapshots: list[MarketSnapshot] = []
-    errors: list[dict[str, Any]] = []
-    a_markets = [market for market in markets if market in {"SH", "SZ"}]
-    if a_markets:
-        a_snapshots, a_errors = fetch_a_share_selector_market_snapshots(
-            markets=a_markets,
-            min_market_cap=min_market_cap,
-            session=session,
-            timeout=timeout,
-            request_delay=request_delay,
-        )
-        snapshots.extend(a_snapshots)
-        errors.extend(a_errors)
-
-    if "HK" in markets:
-        try:
-            hk_listings = fetch_hkex_listings(session, timeout=timeout, request_delay=request_delay)
-            hk_snapshots, hk_errors = fetch_hk_tencent_market_snapshots(
-                hk_listings,
-                min_market_cap=min_market_cap,
-                session=session,
-                timeout=timeout,
-                request_delay=request_delay,
-            )
-            snapshots.extend(hk_snapshots)
-            errors.extend(hk_errors)
-        except Exception as exc:
-            errors.append({"market": "HK", "phase": "listing_universe", "error": str(exc)})
-
-    snapshots.sort(key=lambda item: item.market_cap or 0, reverse=True)
-    return snapshots, errors
-
-
 def limit_snapshots_per_market(
     snapshots: list[MarketSnapshot],
     *,
@@ -276,7 +107,12 @@ def limit_snapshots_per_market(
     return limited
 
 
-def fetch_market_snapshots(
+def eastmoney_list_url_for_market(market: str) -> str:
+    # Keep one endpoint for every supported market; tests enforce this boundary.
+    return EASTMONEY_WEBGUEST_LIST_URL
+
+
+def fetch_eastmoney_list_market_snapshots(
     *,
     markets: list[str],
     max_count: int,
@@ -287,16 +123,6 @@ def fetch_market_snapshots(
     timeout: float = 20,
 ) -> tuple[list[MarketSnapshot], list[dict[str, Any]]]:
     client = configure_session(session or requests.Session())
-    if min_market_cap is not None and sort_by == "market_cap":
-        snapshots, errors = fetch_listing_universe_market_snapshots(
-            markets=markets,
-            min_market_cap=min_market_cap,
-            session=client,
-            timeout=timeout,
-            request_delay=request_delay,
-        )
-        return limit_snapshots_per_market(snapshots, markets=markets, max_count=max_count), errors
-
     snapshots: list[MarketSnapshot] = []
     errors: list[dict[str, Any]] = []
     page_size = DEFAULT_PAGE_SIZE if max_count <= 0 else min(max_count, DEFAULT_PAGE_SIZE)
@@ -307,6 +133,7 @@ def fetch_market_snapshots(
         market_snapshots: list[MarketSnapshot] = []
         page_number = 1
         while max_pages is None or page_number <= max_pages:
+            list_url = eastmoney_list_url_for_market(market)
             params = {
                 "pn": page_number,
                 "pz": page_size,
@@ -322,13 +149,15 @@ def fetch_market_snapshots(
                 "wbp2u": EASTMONEY_WBP2U,
                 "_": int(datetime.now(timezone.utc).timestamp() * 1000),
             }
+            params["timil"] = 1
+            params["cb"] = "jQuery1124"
             try:
-                response = client.get(EASTMONEY_LIST_URL, params=params, timeout=timeout)
+                response = client.get(list_url, params=params, timeout=timeout)
                 response.raise_for_status()
                 payload = parse_json_or_jsonp(response.text)
                 rows = ((payload.get("data") or {}).get("diff") or [])
             except Exception as exc:
-                errors.append({"market": market, "phase": "market_snapshot", "error": f"{EASTMONEY_LIST_URL}: {exc}"})
+                errors.append({"market": market, "phase": "market_snapshot", "error": f"{list_url}: {exc}"})
                 break
 
             reached_market_cap_floor = False
@@ -359,6 +188,28 @@ def fetch_market_snapshots(
         snapshots.extend(market_snapshots if max_count <= 0 else market_snapshots[:max_count])
 
     return snapshots, errors
+
+
+def fetch_market_snapshots(
+    *,
+    markets: list[str],
+    max_count: int,
+    sort_by: str,
+    min_market_cap: float | None = None,
+    request_delay: float = 0.0,
+    session: requests.sessions.Session | None = None,
+    timeout: float = 20,
+) -> tuple[list[MarketSnapshot], list[dict[str, Any]]]:
+    client = configure_session(session or requests.Session())
+    return fetch_eastmoney_list_market_snapshots(
+        markets=markets,
+        max_count=max_count,
+        sort_by=sort_by,
+        min_market_cap=min_market_cap,
+        request_delay=request_delay,
+        session=client,
+        timeout=timeout,
+    )
 
 
 def annotate_market_cap_universe(snapshots: list[MarketSnapshot]) -> None:
@@ -486,6 +337,7 @@ def fetch_a_financial_rows(
         by_year.setdefault(year, {"year": year, "currency": "CNY"})
         by_year[year].update(
             {
+                "revenue": to_float(row.get("TOTALOPERATEREVE") or row.get("OPERATEINCOME") or row.get("OPERATE_INCOME")),
                 "net_profit": to_float(row.get("PARENTNETPROFIT")),
                 "roe": to_float(row.get("ROEJQ")),
                 "roic": to_float(row.get("ROIC")),
@@ -515,6 +367,25 @@ def fetch_a_financial_rows(
             continue
         total_assets = to_float(row.get("TOTAL_ASSETS"))
         total_liabilities = to_float(row.get("TOTAL_LIABILITIES"))
+        short_debt = sum_present_fields(
+            row,
+            (
+                "SHORT_LOAN",
+                "SHORT_BOND_PAYABLE",
+                "SHORT_FIN_PAYABLE",
+                "NONCURRENT_LIAB_1YEAR",
+            ),
+        )
+        long_debt = sum_present_fields(
+            row,
+            (
+                "LONG_LOAN",
+                "BOND_PAYABLE",
+                "LEASE_LIAB",
+                "LONG_PAYABLE",
+            ),
+        )
+        total_debt = sum_present_values(short_debt, long_debt)
         goodwill = to_float(row.get("GOODWILL")) or 0.0
         equity = total_assets - total_liabilities if total_assets is not None and total_liabilities is not None else None
         by_year.setdefault(year, {"year": year, "currency": "CNY"})
@@ -522,6 +393,29 @@ def fetch_a_financial_rows(
             {
                 "total_assets": total_assets,
                 "total_liabilities": total_liabilities,
+                "cash_and_equivalents": to_float(row.get("MONETARYFUNDS")),
+                "current_financial_assets": sum_present_fields(
+                    row,
+                    (
+                        "TRADE_FINASSET",
+                        "FVTPL_FINASSET",
+                        "DERIVE_FINASSET",
+                        "OTHER_CURRENT_ASSET",
+                    ),
+                ),
+                "noncurrent_financial_assets": sum_present_fields(
+                    row,
+                    (
+                        "FVTOCI_FINASSET",
+                        "FVTOCI_NCFINASSET",
+                        "OTHER_EQUITY_INVEST",
+                        "OTHER_NONCURRENT_FINASSET",
+                        "OTHER_CREDITOR_INVEST",
+                    ),
+                ),
+                "short_debt": short_debt,
+                "long_debt": long_debt,
+                "total_debt": total_debt,
                 "goodwill": goodwill,
                 "equity": equity,
             }
@@ -601,6 +495,7 @@ def fetch_hk_financial_rows(
         by_year.setdefault(year, {"year": year, "currency": currency})
         by_year[year].update(
             {
+                "revenue": to_float(row.get("Revenue")),
                 "net_profit": to_float(row.get("Parentnetprofit")),
                 "roe": roe * 100 if roe is not None and abs(roe) < 1 else roe,
                 "roic": roic * 100 if roic is not None and abs(roic) < 1 else roic,
@@ -630,6 +525,24 @@ def fetch_hk_financial_rows(
             continue
         total_assets = to_float(row.get("BS004009999"))
         total_liabilities = to_float(row.get("BS004025999"))
+        short_debt = sum_present_fields(
+            row,
+            (
+                "BS004011006",  # current lease liabilities
+                "BS004011010",  # current borrowings
+                "BS004011023",  # other current financial liabilities
+            ),
+        )
+        long_debt = sum_present_fields(
+            row,
+            (
+                "BS004020001",  # non-current borrowings
+                "BS004020005",  # non-current lease liabilities
+                "BS004020018",  # non-current notes payable
+                "BS004020019",  # other non-current financial liabilities
+            ),
+        )
+        total_debt = sum_present_values(short_debt, long_debt)
         goodwill = to_float(row.get("BS004001005")) or 0.0
         equity = total_assets - total_liabilities if total_assets is not None and total_liabilities is not None else None
         by_year.setdefault(year, {"year": year, "currency": normalize_currency(row.get("CURRENCY"), snapshot.currency)})
@@ -637,10 +550,321 @@ def fetch_hk_financial_rows(
             {
                 "total_assets": total_assets,
                 "total_liabilities": total_liabilities,
+                "cash_and_equivalents": sum_present_fields(
+                    row,
+                    (
+                        "BS004002009",  # restricted cash
+                        "BS004002010",  # cash and cash equivalents
+                    ),
+                ),
+                "current_financial_assets": sum_present_fields(
+                    row,
+                    (
+                        "BS004002011",  # current term deposits
+                        "BS004002013",  # current FV financial assets
+                        "BS004002022",  # other current financial assets
+                    ),
+                ),
+                "noncurrent_financial_assets": sum_present_fields(
+                    row,
+                    (
+                        "BS004001022",  # non-current FV financial assets
+                        "BS004001030",  # non-current term deposits
+                        "BS004001031",  # other non-current financial assets
+                    ),
+                ),
+                "short_debt": short_debt,
+                "long_debt": long_debt,
+                "total_debt": total_debt,
                 "goodwill": goodwill,
                 "equity": equity,
             }
         )
+    return [by_year[year] for year in sorted(by_year.keys(), reverse=True)]
+
+
+def percent_or_none(value: Any) -> float | None:
+    result = to_float(value)
+    if result is not None and abs(result) < 1:
+        return result * 100
+    return result
+
+
+def us_secucode_candidates(snapshot: MarketSnapshot) -> list[str]:
+    for value in (snapshot.ticker, snapshot.code):
+        candidate = str(value or "").strip().upper()
+        if "." in candidate and candidate.rsplit(".", 1)[-1] in US_MARKET_CODE_BY_SUFFIX:
+            return [candidate]
+
+    code = str(snapshot.code or snapshot.ticker or "").strip().upper().split(".", 1)[0]
+    if not code:
+        return []
+    return [us_ticker_for_eastmoney_market(code, market_code) for market_code in ("105", "106", "107")]
+
+
+def fetch_eastmoney_v1_rows(
+    session: requests.sessions.Session,
+    *,
+    report_name: str,
+    columns: str,
+    filter_clause: str,
+    timeout: float,
+    request_delay: float,
+    distinct: str | None = None,
+    page_size: int = 1000,
+    sort_columns: str = "REPORT_DATE,STD_ITEM_CODE",
+    sort_types: str = "-1,1",
+) -> list[dict[str, Any]]:
+    params = {
+        "reportName": report_name,
+        "columns": columns,
+        "filter": filter_clause,
+        "pageNumber": 1,
+        "pageSize": page_size,
+        "sortTypes": sort_types,
+        "sortColumns": sort_columns,
+        "source": "SECURITIES",
+        "client": "PC",
+    }
+    if distinct:
+        params["distinct"] = distinct
+    payload = get_json(session, EASTMONEY_DATA_V1_URL, params=params, request_delay=request_delay, timeout=timeout)
+    return (payload.get("result") or {}).get("data") or []
+
+
+def is_us_annual_report(row: dict[str, Any]) -> bool:
+    report = str(row.get("REPORT") or "").strip().upper()
+    date_type = str(row.get("DATE_TYPE_CODE") or "").strip()
+    report_type = str(row.get("REPORT_TYPE") or "").strip()
+    return report.endswith("/FY") or date_type == "001" or report_type == "年报"
+
+
+def us_report_year(row: dict[str, Any]) -> str:
+    report_date = str(row.get("REPORT_DATE") or row.get("FINANCIAL_DATE") or "").strip()
+    if len(report_date) >= 4:
+        return report_date[:4]
+    report = str(row.get("REPORT") or "").strip()
+    return report.split("/", 1)[0] if "/" in report else report[:4]
+
+
+def fetch_us_report_rows(
+    secucode: str,
+    *,
+    session: requests.sessions.Session,
+    timeout: float,
+    request_delay: float,
+) -> list[dict[str, Any]]:
+    rows = fetch_eastmoney_v1_rows(
+        session,
+        report_name="RPT_USSK_FN_CASHFLOW",
+        columns=(
+            "SECUCODE,SECURITY_CODE,SECURITY_NAME_ABBR,REPORT,REPORT_DATE,FISCAL_YEAR,"
+            "CURRENCY,ACCOUNT_STANDARD,DATE_TYPE_CODE,REPORT_TYPE"
+        ),
+        filter_clause=f'(SECUCODE="{secucode}")(DATE_TYPE_CODE="001")',
+        timeout=timeout,
+        request_delay=request_delay,
+        distinct="REPORT_DATE,DATE_TYPE_CODE",
+        page_size=MIN_FINANCIAL_YEARS + 5,
+        sort_columns="REPORT_DATE,DATE_TYPE_CODE",
+        sort_types="-1,1",
+    )
+    annual_rows: list[dict[str, Any]] = []
+    seen_reports: set[str] = set()
+    for row in rows:
+        report = str(row.get("REPORT") or "").strip()
+        if not report or report in seen_reports or not is_us_annual_report(row):
+            continue
+        annual_rows.append(row)
+        seen_reports.add(report)
+        if len(annual_rows) >= MIN_FINANCIAL_YEARS:
+            break
+    return annual_rows
+
+
+def fetch_us_statement_rows(
+    secucode: str,
+    *,
+    reports: list[str],
+    report_name: str,
+    columns: str,
+    session: requests.sessions.Session,
+    timeout: float,
+    request_delay: float,
+) -> list[dict[str, Any]]:
+    report_filter = ",".join(f'"{report}"' for report in reports)
+    return fetch_eastmoney_v1_rows(
+        session,
+        report_name=report_name,
+        columns=columns,
+        filter_clause=f'(SECUCODE="{secucode}")(REPORT in ({report_filter}))',
+        timeout=timeout,
+        request_delay=request_delay,
+        page_size=1000,
+    )
+
+
+def amount_rows_by_report_and_item(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    mapped: dict[str, dict[str, float]] = {}
+    for row in rows:
+        report = str(row.get("REPORT") or "").strip()
+        item_code = str(row.get("STD_ITEM_CODE") or "").strip()
+        amount = to_float(row.get("AMOUNT"))
+        if not report or not item_code or amount is None:
+            continue
+        mapped.setdefault(report, {})[item_code] = amount
+    return mapped
+
+
+def first_amount(items: dict[str, float], codes: tuple[str, ...] | str) -> float | None:
+    for code in (codes if isinstance(codes, tuple) else (codes,)):
+        if code in items:
+            return items[code]
+    return None
+
+
+def fetch_us_financial_rows(
+    snapshot: MarketSnapshot,
+    *,
+    session: requests.sessions.Session,
+    timeout: float,
+    request_delay: float = 0.0,
+) -> list[dict[str, Any]]:
+    report_rows: list[dict[str, Any]] = []
+    secucode = ""
+    for candidate in us_secucode_candidates(snapshot):
+        report_rows = fetch_us_report_rows(candidate, session=session, timeout=timeout, request_delay=request_delay)
+        if report_rows:
+            secucode = candidate
+            break
+    if not report_rows or not secucode:
+        return []
+
+    reports = [str(row["REPORT"]) for row in report_rows]
+    statement_columns = "SECUCODE,SECURITY_CODE,SECURITY_NAME_ABBR,REPORT,REPORT_DATE,STD_ITEM_CODE,ITEM_NAME,AMOUNT,CURRENCY"
+    income_rows = fetch_us_statement_rows(
+        secucode,
+        reports=reports,
+        report_name="RPT_USF10_FN_INCOME",
+        columns=statement_columns,
+        session=session,
+        timeout=timeout,
+        request_delay=request_delay,
+    )
+    cash_rows = fetch_us_statement_rows(
+        secucode,
+        reports=reports,
+        report_name="RPT_USSK_FN_CASHFLOW",
+        columns=statement_columns,
+        session=session,
+        timeout=timeout,
+        request_delay=request_delay,
+    )
+    balance_rows = fetch_us_statement_rows(
+        secucode,
+        reports=reports,
+        report_name="RPT_USF10_FN_BALANCE",
+        columns=statement_columns,
+        session=session,
+        timeout=timeout,
+        request_delay=request_delay,
+    )
+    indicator_rows = fetch_eastmoney_v1_rows(
+        session,
+        report_name="RPT_USF10_FN_GMAININDICATOR",
+        columns=(
+            "SECUCODE,SECURITY_CODE,SECURITY_NAME_ABBR,REPORT_DATE,FINANCIAL_DATE,CURRENCY,"
+            "DATE_TYPE_CODE,REPORT_TYPE,OPERATE_INCOME,PARENT_HOLDER_NETPROFIT,ROE_AVG,ROA,DEBT_ASSET_RATIO"
+        ),
+        filter_clause=f'(SECUCODE="{secucode}")(DATE_TYPE_CODE="001")',
+        timeout=timeout,
+        request_delay=request_delay,
+        page_size=MIN_FINANCIAL_YEARS + 5,
+        sort_columns="REPORT_DATE",
+        sort_types="-1",
+    )
+
+    income_by_report = amount_rows_by_report_and_item(income_rows)
+    cash_by_report = amount_rows_by_report_and_item(cash_rows)
+    balance_by_report = amount_rows_by_report_and_item(balance_rows)
+    by_year: dict[str, dict[str, Any]] = {}
+    year_by_report: dict[str, str] = {}
+    for report_row in report_rows:
+        report = str(report_row.get("REPORT") or "")
+        year = us_report_year(report_row)
+        if not report or not year:
+            continue
+        year_by_report[report] = year
+        by_year.setdefault(
+            year,
+            {
+                "year": year,
+                "currency": normalize_currency(report_row.get("CURRENCY"), snapshot.currency),
+            },
+        )
+
+    for report in reports:
+        year = year_by_report.get(report)
+        if not year:
+            continue
+        income_items = income_by_report.get(report) or {}
+        cash_items = cash_by_report.get(report) or {}
+        balance_items = balance_by_report.get(report) or {}
+
+        operating_cash_flow = first_amount(cash_items, US_CASHFLOW_ITEM_CODES["operating_cash_flow"])
+        capex_amount = first_amount(cash_items, US_CASHFLOW_ITEM_CODES["capex"])
+        capex = abs(capex_amount) if capex_amount is not None else None
+        total_assets = first_amount(balance_items, US_BALANCE_ITEM_CODES["total_assets"])
+        total_liabilities = first_amount(balance_items, US_BALANCE_ITEM_CODES["total_liabilities"])
+        equity = first_amount(balance_items, US_BALANCE_ITEM_CODES["equity"])
+        if equity is None and total_assets is not None and total_liabilities is not None:
+            equity = total_assets - total_liabilities
+        short_debt = first_amount(balance_items, US_BALANCE_ITEM_CODES["short_debt"])
+        long_debt = first_amount(balance_items, US_BALANCE_ITEM_CODES["long_debt"])
+        total_debt = sum_present_values(short_debt, long_debt)
+
+        by_year[year].update(
+            {
+                "revenue": first_amount(income_items, US_INCOME_ITEM_CODES["revenue"]),
+                "net_profit": first_amount(income_items, US_INCOME_ITEM_CODES["net_profit"]),
+                "operating_cash_flow": operating_cash_flow,
+                "capex": capex,
+                "free_cash_flow": operating_cash_flow - capex
+                if operating_cash_flow is not None and capex is not None
+                else None,
+                "cash_and_equivalents": first_amount(balance_items, US_BALANCE_ITEM_CODES["cash_and_equivalents"]),
+                "current_financial_assets": first_amount(balance_items, US_BALANCE_ITEM_CODES["current_financial_assets"]),
+                "noncurrent_financial_assets": first_amount(
+                    balance_items, US_BALANCE_ITEM_CODES["noncurrent_financial_assets"]
+                ),
+                "short_debt": short_debt,
+                "long_debt": long_debt,
+                "total_debt": total_debt,
+                "total_assets": total_assets,
+                "total_liabilities": total_liabilities,
+                "goodwill": 0.0,
+                "equity": equity,
+                "payout_ratio": None,
+            }
+        )
+
+    for row in indicator_rows:
+        if not is_us_annual_report(row):
+            continue
+        year = us_report_year(row)
+        if year not in by_year:
+            continue
+        by_year[year].update(
+            {
+                "roe": percent_or_none(row.get("ROE_AVG")),
+                "debt_to_assets_percent": percent_or_none(row.get("DEBT_ASSET_RATIO")),
+            }
+        )
+        if by_year[year].get("net_profit") is None:
+            by_year[year]["net_profit"] = to_float(row.get("PARENT_HOLDER_NETPROFIT"))
+        if by_year[year].get("revenue") is None:
+            by_year[year]["revenue"] = to_float(row.get("OPERATE_INCOME"))
+
     return [by_year[year] for year in sorted(by_year.keys(), reverse=True)]
 
 
@@ -656,4 +880,6 @@ def fetch_financial_rows(
         return fetch_a_financial_rows(snapshot, session=client, request_delay=request_delay, timeout=timeout)
     if snapshot.market == "HK":
         return fetch_hk_financial_rows(snapshot, session=client, request_delay=request_delay, timeout=timeout)
+    if snapshot.market == "US":
+        return fetch_us_financial_rows(snapshot, session=client, request_delay=request_delay, timeout=timeout)
     return []

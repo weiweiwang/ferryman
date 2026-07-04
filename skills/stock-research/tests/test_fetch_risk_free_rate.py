@@ -94,12 +94,6 @@ CHINABOND_SAMPLE_HTML = """
 </body></html>
 """
 
-MOF_JGB_SAMPLE_CSV = """Interest Rate (June 2026),,,,,,,,,,,,,,,(Unit : %)
-Date,1Y,2Y,3Y,4Y,5Y,6Y,7Y,8Y,9Y,10Y,15Y,20Y,25Y,30Y,40Y
-2026/6/29,1.173,1.411,1.547,1.753,1.916,2.053,2.201,2.367,2.513,2.644,3.204,3.54,3.791,3.785,3.715
-2026/6/30,1.165,1.382,1.531,1.755,1.937,2.075,2.231,2.398,2.553,2.69,3.271,3.625,3.883,3.873,3.792
-"""
-
 HKMA_SAMPLE_XLS_BYTES = b"hkma-xls"
 
 
@@ -107,7 +101,7 @@ def test_risk_free_fetcher_keeps_runtime_dependencies_lightweight():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert "import requests" in source
-    for heavy_import in ("pandas", "yfinance", "openpyxl", "bs4", "lxml"):
+    for heavy_import in ("pandas", "openpyxl", "bs4", "lxml"):
         assert heavy_import not in source
 
 
@@ -135,8 +129,8 @@ def test_fetch_usd_rate_from_fred_session():
     assert result["currency"] == "USD"
     assert result["ratePercent"] == 4.38
     assert result["asOf"] == "2026-06-30"
-    assert result["confidence"] == "official"
-    assert result["staleDays"] == 1
+    assert "confidence" not in result
+    assert "staleDays" not in result
     assert result["multipleCaps"]["conservativeN2"] == 11.42
     assert session.calls == [("get", module.FRED_DGS10_CSV_URL, 3)]
 
@@ -164,19 +158,12 @@ def test_fetch_cny_rate_from_chinabond_session():
     assert result["currency"] == "CNY"
     assert result["ratePercent"] == 1.733
     assert result["asOf"] == "2026-06-30"
-    assert result["confidence"] == "official-web"
+    assert "confidence" not in result
+    assert "staleDays" not in result
     assert result["multipleCaps"]["conservativeN2"] == 20.0
     assert session.calls[0][0] == "post"
     assert session.calls[0][1] == module.CHINABOND_YC_DETAIL_URL
     assert session.calls[0][2]["ycDefIds"] == module.CHINABOND_CGB_YC_DEF_ID
-
-
-def test_parse_mof_jgb_current_csv_extracts_jpy_10y_yield():
-    module = load_rate_module()
-
-    parsed = module.parse_mof_jgb_current_csv(MOF_JGB_SAMPLE_CSV)
-
-    assert parsed == {"asOf": "2026-06-30", "ratePercent": 2.69}
 
 
 def test_parse_hkma_hkd_benchmark_workbook_extracts_latest_10y_yield():
@@ -185,22 +172,6 @@ def test_parse_hkma_hkd_benchmark_workbook_extracts_latest_10y_yield():
     parsed = module.parse_hkma_hkd_benchmark_workbook(FakeWorkbook())
 
     assert parsed == {"asOf": "2026-05-29", "ratePercent": 3.21}
-
-
-def test_fetch_jpy_rate_from_mof_session():
-    module = load_rate_module()
-    session = FakeSession(FakeResponse(MOF_JGB_SAMPLE_CSV))
-    now = datetime(2026, 7, 1, tzinfo=timezone.utc)
-
-    result = module.fetch_jpy_rate(session=session, timeout=7, now=now)
-
-    assert result["ok"] is True
-    assert result["currency"] == "JPY"
-    assert result["ratePercent"] == 2.69
-    assert result["asOf"] == "2026-06-30"
-    assert result["confidence"] == "official"
-    assert result["multipleCaps"]["conservativeN2"] == 18.59
-    assert session.calls == [("get", module.MOF_JGB_CURRENT_CSV_URL, 7)]
 
 
 def test_fetch_hkd_rate_from_hkma_session(monkeypatch):
@@ -219,7 +190,8 @@ def test_fetch_hkd_rate_from_hkma_session(monkeypatch):
     assert result["currency"] == "HKD"
     assert result["ratePercent"] == 3.21
     assert result["asOf"] == "2026-05-29"
-    assert result["confidence"] == "official"
+    assert "confidence" not in result
+    assert "staleDays" not in result
     assert result["multipleCaps"]["conservativeN2"] == 15.58
     assert session.calls == [("get", module.HKMA_HKD_BENCHMARK_XLS_URL, 9)]
 
@@ -305,7 +277,8 @@ def test_fetch_usd_rate_from_fred_live():
     assert result["currency"] == "USD"
     assert 0 < result["ratePercent"] < 20
     assert result["asOf"]
-    assert result["confidence"] == "official"
+    assert "confidence" not in result
+    assert "staleDays" not in result
 
 
 def test_fetch_cny_rate_from_chinabond_live():
@@ -319,22 +292,9 @@ def test_fetch_cny_rate_from_chinabond_live():
     assert result["currency"] == "CNY"
     assert 0 < result["ratePercent"] < 10
     assert result["asOf"]
-    assert result["confidence"] == "official-web"
+    assert "confidence" not in result
+    assert "staleDays" not in result
     assert "ChinaBond" in result["source"]
-
-
-def test_fetch_jpy_rate_from_mof_live():
-    if os.environ.get("STOCK_RESEARCH_RUN_LIVE_TESTS") != "1":
-        pytest.skip("Set STOCK_RESEARCH_RUN_LIVE_TESTS=1 to run live source tests.")
-    module = load_rate_module()
-
-    result = module.fetch_risk_free_rate("JPY", timeout=45)
-
-    assert result["ok"] is True, result
-    assert result["currency"] == "JPY"
-    assert 0 < result["ratePercent"] < 20
-    assert result["asOf"]
-    assert result["confidence"] == "official"
 
 
 def test_fetch_hkd_rate_from_hkma_live():
@@ -348,5 +308,6 @@ def test_fetch_hkd_rate_from_hkma_live():
     assert result["currency"] == "HKD"
     assert 0 < result["ratePercent"] < 20
     assert result["asOf"]
-    assert result["confidence"] == "official"
+    assert "confidence" not in result
+    assert "staleDays" not in result
     assert "HKMA" in result["source"]

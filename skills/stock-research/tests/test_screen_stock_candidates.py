@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -129,6 +130,7 @@ class FakeListResponse:
     def __init__(self, payload):
         self.payload = payload
         self.text = json.dumps(payload)
+        self.content = self.text.encode("utf-8")
 
     def raise_for_status(self):
         return None
@@ -144,7 +146,7 @@ class RecordingFailListSession:
 
     def get(self, url, params, timeout):
         self.calls.append((url, params, timeout))
-        raise RuntimeError("primary host failed")
+        raise RuntimeError("provider request failed")
 
 
 class AlwaysFailListSession:
@@ -168,14 +170,32 @@ def test_screener_does_not_import_django_or_radar_runtime():
         )
     )
 
-    for forbidden in ("django", "celery", "mysql", "radar.models", "insights.", "subprocess"):
+    for forbidden in (
+        "django",
+        "celery",
+        "mysql",
+        "radar.models",
+        "insights.",
+        "subprocess",
+        "TENCENT_QUOTE_URL",
+        "HKEX_SECURITIES_LIST_URL",
+        "EASTMONEY_XUANGU_LIST_URL",
+        "EASTMONEY_LIST_URL",
+        "https://push2.eastmoney.com/api/qt/clist/get",
+        "https://data.eastmoney.com/dataapi/xuangu/list",
+        "https://qt.gtimg.cn",
+        "https://www.hkex.com.hk",
+        "fetch_hkex_listings",
+        "fetch_hk_tencent_market_snapshots",
+        "fetch_a_share_selector_market_snapshots",
+    ):
         assert forbidden not in source
     assert "--" + "enrich-limit" not in source
     assert "curl_get_json" not in source
     assert "EASTMONEY_LIST_URLS" not in source
 
 
-def test_market_snapshot_fetcher_uses_primary_eastmoney_host():
+def test_market_snapshot_fetcher_uses_eastmoney_webguest_host():
     module = load_screen_module()
 
     class PrimaryListSession:
@@ -199,12 +219,160 @@ def test_market_snapshot_fetcher_uses_primary_eastmoney_host():
     assert errors == []
     assert len(session.calls) == 1
     url, params, _ = session.calls[0]
-    assert url == module.EASTMONEY_LIST_URL
+    assert url == module.EASTMONEY_WEBGUEST_LIST_URL
     assert params["ut"] == module.EASTMONEY_QUOTE_UT
     assert params["fltt"] == 1
     assert params["dect"] == 1
     assert params["wbp2u"] == module.EASTMONEY_WBP2U
+    assert params["timil"] == 1
+    assert params["cb"] == "jQuery1124"
     assert snapshots[0].ticker == "601398.SH"
+
+
+def test_market_snapshot_fetcher_uses_one_webguest_endpoint_for_all_markets():
+    module = load_screen_module()
+
+    class AllMarketListSession:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+
+        def get(self, url, params, timeout):
+            self.calls.append((url, params, timeout))
+            fs = params["fs"]
+            if "m:1+" in fs:
+                rows = [{"f12": "601398", "f13": 1, "f14": "工商银行", "f20": 1000, "f100": "银行Ⅱ"}]
+            elif "m:0+" in fs:
+                rows = [{"f12": "300750", "f13": 0, "f14": "宁德时代", "f20": 900, "f100": "电池"}]
+            elif "m:116" in fs:
+                rows = [{"f12": "00700", "f13": 116, "f14": "腾讯控股", "f20": 800, "f100": "软件服务"}]
+            elif "m:105" in fs:
+                rows = [{"f12": "NVDA", "f13": 105, "f14": "英伟达", "f20": 700, "f100": "信息技术"}]
+            else:
+                raise AssertionError(f"unexpected fs {fs}")
+            return FakeListResponse({"data": {"diff": rows}})
+
+    session = AllMarketListSession()
+
+    snapshots, errors = module.fetch_market_snapshots(
+        markets=["SH", "SZ", "HK", "US"],
+        max_count=1,
+        sort_by="market_cap",
+        min_market_cap=1,
+        session=session,
+    )
+
+    assert errors == []
+    assert len(session.calls) == 4
+    assert {call[0] for call in session.calls} == {module.MARKET_SNAPSHOT_ENDPOINT}
+    assert all(call[1]["timil"] == 1 for call in session.calls)
+    assert all(call[1]["cb"] == "jQuery1124" for call in session.calls)
+    assert {snapshot.market for snapshot in snapshots} == {"SH", "SZ", "HK", "US"}
+    assert {snapshot.source for snapshot in snapshots} == {"eastmoney"}
+    assert {snapshot.industry for snapshot in snapshots} == {"银行Ⅱ", "电池", "软件服务", "信息技术"}
+
+
+def test_market_snapshot_fetcher_uses_webguest_host_for_us_market_cap_floor():
+    module = load_screen_module()
+
+    class UsListSession:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+
+        def get(self, url, params, timeout):
+            self.calls.append((url, params, timeout))
+            return FakeListResponse(
+                {
+                    "data": {
+                        "diff": [
+                            {
+                                "f1": 3,
+                                "f2": 194830,
+                                "f12": "NVDA",
+                                "f13": 105,
+                                "f14": "英伟达",
+                                "f20": 4_714_886_000_000,
+                                "f23": 2412,
+                                "f100": "信息技术",
+                                "f115": 2954,
+                                "f152": 2,
+                            }
+                        ]
+                    }
+                }
+            )
+
+    session = UsListSession()
+
+    snapshots, errors = module.fetch_market_snapshots(
+        markets=["US"],
+        max_count=1,
+        sort_by="market_cap",
+        min_market_cap=1,
+        session=session,
+    )
+
+    assert errors == []
+    assert len(session.calls) == 1
+    url, params, _ = session.calls[0]
+    assert url == module.EASTMONEY_WEBGUEST_LIST_URL
+    assert params["timil"] == 1
+    assert params["cb"] == "jQuery1124"
+    assert snapshots[0].ticker == "NVDA.O"
+    assert snapshots[0].currency == "USD"
+    assert snapshots[0].industry == "信息技术"
+
+
+def test_market_snapshot_fetcher_uses_webguest_host_for_hk_industry_list():
+    module = load_screen_module()
+
+    class HkListSession:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+
+        def get(self, url, params, timeout):
+            self.calls.append((url, params, timeout))
+            return FakeListResponse(
+                {
+                    "data": {
+                        "diff": [
+                            {
+                                "f1": 3,
+                                "f2": 431200,
+                                "f12": "00700",
+                                "f13": 116,
+                                "f14": "腾讯控股",
+                                "f20": 3_920_571_663_439,
+                                "f23": 308,
+                                "f100": "软件服务",
+                                "f115": 1491,
+                                "f152": 2,
+                            }
+                        ]
+                    }
+                }
+            )
+
+    session = HkListSession()
+
+    snapshots, errors = module.screen_stock_providers.fetch_eastmoney_list_market_snapshots(
+        markets=["HK"],
+        max_count=1,
+        sort_by="market_cap",
+        min_market_cap=1,
+        session=session,
+    )
+
+    assert errors == []
+    assert len(session.calls) == 1
+    url, params, _ = session.calls[0]
+    assert url == module.EASTMONEY_WEBGUEST_LIST_URL
+    assert params["timil"] == 1
+    assert params["cb"] == "jQuery1124"
+    assert snapshots[0].ticker == "00700.HK"
+    assert snapshots[0].industry == "软件服务"
 
 
 def test_market_snapshot_fetcher_does_not_try_alternate_path_when_primary_fails():
@@ -220,9 +388,9 @@ def test_market_snapshot_fetcher_does_not_try_alternate_path_when_primary_fails(
 
     assert snapshots == []
     assert len(session.calls) == 1
-    assert session.calls[0][0] == module.EASTMONEY_LIST_URL
+    assert session.calls[0][0] == module.EASTMONEY_WEBGUEST_LIST_URL
     assert errors[0]["phase"] == "market_snapshot"
-    assert "primary host failed" in errors[0]["error"]
+    assert "provider request failed" in errors[0]["error"]
 
 
 def test_market_snapshot_fetcher_keeps_max_count_per_market():
@@ -257,98 +425,41 @@ def test_market_snapshot_fetcher_keeps_max_count_per_market():
     assert [snapshot.ticker for snapshot in snapshots] == ["600001.SH", "600002.SH", "000001.SZ", "000002.SZ"]
 
 
-def test_market_snapshot_fetcher_uses_listing_universe_when_max_count_is_zero(monkeypatch):
+def test_market_snapshot_fetcher_uses_eastmoney_list_when_max_count_is_zero():
     module = load_screen_module()
 
-    full_universe = [
-        sample_snapshot(
-            module,
-            ticker="600001.SH",
-            code="600001",
-            market="SH",
-            market_cap=500,
-            source="eastmoney_xuangu",
-        ),
-        sample_snapshot(
-            module,
-            ticker="600002.SH",
-            code="600002",
-            market="SH",
-            market_cap=400,
-            source="eastmoney_xuangu",
-        ),
-    ]
+    class FullUniverseListSession:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
 
-    def fake_a_share_selector(**kwargs):
-        assert kwargs["markets"] == ["SH"]
-        assert kwargs["min_market_cap"] == 300
-        return full_universe, []
+        def get(self, url, params, timeout):
+            self.calls.append((url, params, timeout))
+            return FakeListResponse(
+                {
+                    "data": {
+                        "diff": [
+                            {"f12": "600001", "f14": "SH One", "f20": 500, "f100": "软件服务"},
+                            {"f12": "600002", "f14": "SH Two", "f20": 400, "f100": "软件服务"},
+                            {"f12": "600003", "f14": "SH Small", "f20": 200, "f100": "软件服务"},
+                        ]
+                    }
+                }
+            )
 
-    monkeypatch.setattr(module.screen_stock_providers, "fetch_a_share_selector_market_snapshots", fake_a_share_selector)
-    monkeypatch.setattr(
-        module.screen_stock_providers,
-        "fetch_hk_tencent_market_snapshots",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("HK should not be fetched")),
-    )
+    session = FullUniverseListSession()
     snapshots, errors = module.fetch_market_snapshots(
         markets=["SH"],
         max_count=0,
         sort_by="market_cap",
         min_market_cap=300,
+        session=session,
     )
 
     assert errors == []
+    assert session.calls[0][0] == module.EASTMONEY_WEBGUEST_LIST_URL
     assert [snapshot.ticker for snapshot in snapshots] == ["600001.SH", "600002.SH"]
-    assert [snapshot.source for snapshot in snapshots] == ["eastmoney_xuangu", "eastmoney_xuangu"]
-
-
-def test_parse_a_share_selector_snapshot_maps_stock_selector_fields():
-    module = load_screen_module()
-
-    snapshot = module.parse_a_share_selector_snapshot(
-        {
-            "SECUCODE": "601398.SH",
-            "SECURITY_CODE": "601398",
-            "SECURITY_NAME_ABBR": "工商银行",
-            "NEW_PRICE": 7.05,
-            "PE9": 6.76635091,
-            "PBNEWMRQ": 0.63728979,
-            "TOTAL_MARKET_CAP": 2_512_664_112_477,
-            "INDUSTRY": "银行",
-        }
-    )
-
-    assert snapshot is not None
-    assert snapshot.ticker == "601398.SH"
-    assert snapshot.source == "eastmoney_xuangu"
-    assert snapshot.price == 7.05
-    assert snapshot.pe == 6.76635091
-    assert snapshot.pb == 0.63728979
-    assert snapshot.market_cap == 2_512_664_112_477
-    assert snapshot.industry == "银行"
-
-
-def test_parse_tencent_hk_quote_maps_price_valuation_and_market_cap():
-    module = load_screen_module()
-    text = (
-        'v_hk00700="100~腾讯控股~00700~430.200~429.800~442.600~40905100.0~0~0~430.200~0~0~0~0~0~0~0~0~0~'
-        '430.200~0~0~0~0~0~0~0~0~0~40905100.0~2026/07/02 16:08:25~0.400~0.09~447.000~429.400~'
-        '430.200~40905100.0~17910774601.960~0~15.71~~0~0~4.09~39114.7943~39114.7943~TENCENT~1.24~'
-        '677.700~411.000~1.18~44.47~0~0~0~0~0~14.69~3.10~0.45~100~-27.54~0.33~GP~20.59~'
-        '11.53~-3.84~-10.67~-10.13~9092234841.00~9092234841.00~14.86~5.315~437.862~-35.91~HKD~1~50";'
-    )
-
-    records = module.parse_tencent_quote_records(text)
-    snapshot = module.parse_tencent_hk_snapshot(records["hk00700"])
-
-    assert snapshot is not None
-    assert snapshot.ticker == "00700.HK"
-    assert snapshot.source == "tencent_quote"
-    assert snapshot.currency == "HKD"
-    assert snapshot.price == 430.2
-    assert snapshot.pe == 15.71
-    assert snapshot.pb == 3.1
-    assert snapshot.market_cap == 3_911_479_430_000.0
+    assert [snapshot.source for snapshot in snapshots] == ["eastmoney", "eastmoney"]
 
 
 def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail():
@@ -364,7 +475,7 @@ def test_screen_stocks_returns_stable_failure_when_all_market_snapshots_fail():
 
     assert payload["ok"] is False
     assert payload["phase"] == "market_snapshot"
-    assert payload["error"] == "No market snapshots fetched; see data_limits.errors."
+    assert payload["error"] == "No market snapshots fetched from Eastmoney for requested markets."
     assert payload["summary"]["total"] == 0
     assert payload["results"] == []
     assert payload["data_limits"]["errors"][0]["market"] == "HK"
@@ -431,6 +542,32 @@ def test_parse_market_snapshot_maps_eastmoney_fields_to_snake_case_contract():
     assert snapshot.pe == 9.8
     assert snapshot.pb == 1.1
     assert snapshot.market_cap == 1000
+
+
+def test_parse_market_snapshot_maps_us_exchange_suffix_and_currency():
+    module = load_screen_module()
+
+    snapshot = module.parse_market_snapshot(
+        {
+            "f12": "AAPL",
+            "f13": 105,
+            "f14": "苹果",
+            "f2": 212.4,
+            "f115": 28.5,
+            "f23": 45.0,
+            "f20": 3_100_000_000_000,
+            "f100": "信息技术",
+        },
+        "US",
+    )
+
+    assert snapshot.ticker == "AAPL.O"
+    assert snapshot.code == "AAPL"
+    assert snapshot.market == "US"
+    assert snapshot.currency == "USD"
+    assert snapshot.price == 212.4
+    assert snapshot.market_cap == 3_100_000_000_000
+    assert snapshot.industry == "信息技术"
 
 
 def test_parse_market_snapshot_scales_official_eastmoney_quote_values():
@@ -509,6 +646,23 @@ def test_build_result_item_marks_candidate_without_quality_or_valuation_flags():
     assert "screen_score" not in item
     assert item["metrics"]["pe"] == 10.0
     assert item["metrics"]["expected_return"] is not None
+
+
+@pytest.mark.parametrize("market,currency", [("SH", "CNY"), ("HK", "HKD"), ("US", "USD")])
+def test_build_result_item_marks_missing_industry_as_data_gap_for_any_market(market, currency):
+    module = load_screen_module()
+    rows = [row | {"currency": currency} for row in sample_financial_rows()]
+
+    item = module.build_result_item(
+        sample_snapshot(module, market=market, currency=currency, industry=None),
+        financial_rows=rows,
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert item["status"] == "CANDIDATE"
+    assert "industry_unavailable" in item["data_gaps"]
+    assert item["reject_reasons"] == []
 
 
 def test_build_result_item_does_not_reject_non_positive_pe_by_itself():
@@ -609,6 +763,169 @@ def test_a_share_financial_rows_propagate_company_type_errors(monkeypatch):
             timeout=1,
             request_delay=0,
         )
+
+
+def test_us_financial_rows_use_pc_f10_statements_to_build_five_year_fcf():
+    module = load_screen_module()
+    snapshot = sample_snapshot(module, ticker="AAPL.O", code="AAPL", market="US", currency="USD")
+
+    years = ["2025", "2024", "2023", "2022", "2021"]
+
+    class FakeUsF10Session:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+
+        def get(self, url, params, timeout):
+            self.calls.append((url, params, timeout))
+            report_name = params["reportName"]
+            filter_clause = params["filter"]
+            if report_name == "RPT_USSK_FN_CASHFLOW" and "REPORT in" not in filter_clause:
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                {
+                                    "SECUCODE": "AAPL.O",
+                                    "REPORT": f"{year}/FY",
+                                    "REPORT_DATE": f"{year}-09-30",
+                                    "CURRENCY": "美元",
+                                    "DATE_TYPE_CODE": "001",
+                                }
+                                for year in years
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USF10_FN_INCOME":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                item
+                                for year in years
+                                for item in (
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004001999",
+                                        "AMOUNT": 390_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004015999",
+                                        "AMOUNT": 100_000_000_000.0,
+                                    },
+                                )
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USSK_FN_CASHFLOW":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                item
+                                for year in years
+                                for item in (
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "003999",
+                                        "AMOUNT": 120_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "005002",
+                                        "AMOUNT": -12_000_000_000.0,
+                                    },
+                                )
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USF10_FN_BALANCE":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                item
+                                for year in years
+                                for item in (
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004001001",
+                                        "AMOUNT": 35_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004005999",
+                                        "AMOUNT": 350_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004007007",
+                                        "AMOUNT": 10_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004009005",
+                                        "AMOUNT": 90_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004011999",
+                                        "AMOUNT": 250_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004017999",
+                                        "AMOUNT": 100_000_000_000.0,
+                                    },
+                                )
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USF10_FN_GMAININDICATOR":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                {
+                                    "SECUCODE": "AAPL.O",
+                                    "REPORT_DATE": f"{year}-09-30",
+                                    "DATE_TYPE_CODE": "001",
+                                    "ROE_AVG": 95.0,
+                                    "DEBT_ASSET_RATIO": 71.4,
+                                }
+                                for year in years
+                            ]
+                        }
+                    }
+                )
+            raise AssertionError(f"unexpected reportName {report_name}")
+
+    rows = module.fetch_us_financial_rows(snapshot, session=FakeUsF10Session(), timeout=1, request_delay=0)
+
+    assert [row["year"] for row in rows] == years
+    assert rows[0]["currency"] == "USD"
+    assert rows[0]["net_profit"] == 100_000_000_000.0
+    assert rows[0]["operating_cash_flow"] == 120_000_000_000.0
+    assert rows[0]["capex"] == 12_000_000_000.0
+    assert rows[0]["free_cash_flow"] == 108_000_000_000.0
+    assert rows[0]["cash_and_equivalents"] == 35_000_000_000.0
+    assert rows[0]["total_debt"] == 100_000_000_000.0
+    assert rows[0]["roe"] == 95.0
 
 
 def test_build_result_item_uses_reject_reasons_for_obvious_rejects():
@@ -736,6 +1053,8 @@ def test_screen_stocks_analyzes_all_market_cap_floor_rows(monkeypatch):
     )
 
     assert fetched == ["000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ", "000005.SZ"]
+    assert payload["data_limits"]["market_snapshot_provider"] == module.MARKET_SNAPSHOT_PROVIDER
+    assert payload["data_limits"]["market_snapshot_endpoint"] == module.MARKET_SNAPSHOT_ENDPOINT
     assert payload["data_limits"]["financial_analysis_scope"] == "all_rows_at_or_above_market_cap_floor"
     assert payload["data_limits"]["financial_analysis_selected_count"] == 5
     assert payload["data_limits"]["analyzed_count"] == 5
@@ -918,6 +1237,8 @@ def test_fresh_run_dir_resets_old_checkpoint(monkeypatch, tmp_path):
 
     assert payload["ok"] is True
     universe = json.loads((run_dir / "universe.json").read_text(encoding="utf-8"))
+    assert universe["market_snapshot_provider"] == module.MARKET_SNAPSHOT_PROVIDER
+    assert universe["market_snapshot_endpoint"] == module.MARKET_SNAPSHOT_ENDPOINT
     assert universe["snapshots"][0]["ticker"] == "000001.SZ"
     rows = [json.loads(line) for line in (run_dir / "enrich.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [row["ticker"] for row in rows] == ["000001.SZ"]
@@ -1037,6 +1358,44 @@ def test_resume_rejects_cross_day_checkpoint(tmp_path):
     assert payload["results"] == []
 
 
+def test_resume_rejects_checkpoint_from_missing_market_snapshot_provider(tmp_path):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    run_dir = tmp_path / "reports" / "stock-screen" / "2026-07-02"
+    module.write_universe(
+        run_dir,
+        run_date="2026-07-02",
+        markets=["SZ"],
+        snapshots=[snapshot],
+        errors=[],
+        min_market_cap=1,
+    )
+    universe_path = run_dir / "universe.json"
+    universe = json.loads(universe_path.read_text(encoding="utf-8"))
+    universe.pop("market_snapshot_provider")
+    universe.pop("market_snapshot_endpoint")
+    universe_path.write_text(json.dumps(universe), encoding="utf-8")
+
+    payload = module.screen_stocks(
+        markets=["SZ"],
+        max_count=0,
+        sort_by="market_cap",
+        min_market_cap=1,
+        run_date="2026-07-02",
+        run_dir=run_dir,
+        resume=True,
+    )
+
+    assert payload["ok"] is False
+    assert payload["phase"] == "resume_checkpoint"
+    assert "different market snapshot provider" in payload["error"]
+    assert payload["data_limits"]["market_snapshot_provider"] == module.MARKET_SNAPSHOT_PROVIDER
+    assert payload["data_limits"]["market_snapshot_endpoint"] == module.MARKET_SNAPSHOT_ENDPOINT
+    assert payload["data_limits"]["checkpoint_market_snapshot_provider"] is None
+    assert payload["data_limits"]["checkpoint_market_snapshot_endpoint"] is None
+    assert payload["results"] == []
+
+
 def test_financial_cache_reuses_rows_without_refetch(monkeypatch, tmp_path):
     module = load_screen_module()
     snapshot = sample_snapshot(module)
@@ -1051,6 +1410,66 @@ def test_financial_cache_reuses_rows_without_refetch(monkeypatch, tmp_path):
     rows, from_cache = module.fetch_financial_rows_cached(
         snapshot,
         cache_dir=cache_dir,
+        cache_max_age_days=7,
+        session=module.configure_session(module.requests.Session()),
+        request_delay=0,
+        timeout=1,
+    )
+
+    assert from_cache is True
+    assert rows == sample_financial_rows()
+
+
+def test_financial_cache_refetches_when_fetched_at_is_stale(monkeypatch, tmp_path):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    cache_dir = tmp_path / "reports" / "stock-screen" / "cache" / "financials"
+    module.write_financial_rows_cache(cache_dir, snapshot, sample_financial_rows())
+    cache_path = module.financial_cache_path(cache_dir, snapshot)
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["fetched_at"] = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+    fetched = []
+
+    def fake_fetch_financial_rows(snapshot, **kwargs):
+        fetched.append(snapshot.ticker)
+        return [row | {"year": "2026"} for row in sample_financial_rows()]
+
+    monkeypatch.setattr(module, "fetch_financial_rows", fake_fetch_financial_rows)
+
+    rows, from_cache = module.fetch_financial_rows_cached(
+        snapshot,
+        cache_dir=cache_dir,
+        cache_max_age_days=7,
+        session=module.configure_session(module.requests.Session()),
+        request_delay=0,
+        timeout=1,
+    )
+
+    assert from_cache is False
+    assert fetched == ["000001.SZ"]
+    assert {row["year"] for row in rows} == {"2026"}
+
+
+def test_financial_cache_ttl_can_be_disabled(monkeypatch, tmp_path):
+    module = load_screen_module()
+    snapshot = sample_snapshot(module)
+    cache_dir = tmp_path / "reports" / "stock-screen" / "cache" / "financials"
+    module.write_financial_rows_cache(cache_dir, snapshot, sample_financial_rows())
+    cache_path = module.financial_cache_path(cache_dir, snapshot)
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["fetched_at"] = (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fail_fetch(*args, **kwargs):
+        raise AssertionError("disabled TTL should allow stale cache reuse")
+
+    monkeypatch.setattr(module, "fetch_financial_rows", fail_fetch)
+
+    rows, from_cache = module.fetch_financial_rows_cached(
+        snapshot,
+        cache_dir=cache_dir,
+        cache_max_age_days=0,
         session=module.configure_session(module.requests.Session()),
         request_delay=0,
         timeout=1,

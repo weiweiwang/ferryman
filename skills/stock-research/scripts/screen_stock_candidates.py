@@ -5,6 +5,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +16,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+# Screening universe snapshots are locked to the single Eastmoney webguest
+# clist provider defined in screen_stock_common. Financial enrich can use
+# market-specific Eastmoney statement APIs; market snapshots cannot mix sources.
 from fetch_risk_free_rate import fetch_risk_free_rate  # noqa: E402
 import screen_stock_providers  # noqa: E402
 from screen_stock_common import (  # noqa: E402
-    A_SHARE_SELECTOR_FIELDS,
     CURRENCY_ALIASES,
-    DEFAULT_HEADERS,
+    DEFAULT_FINANCIAL_CACHE_MAX_AGE_DAYS,
     DEFAULT_MIN_MARKET_CAP,
     DEFAULT_PAGE_SIZE,
     DEFAULT_PROGRESS_INTERVAL,
@@ -32,10 +35,11 @@ from screen_stock_common import (  # noqa: E402
     INDUSTRY_REVIEW_KEYWORDS,
     LOGGER,
     MARKET_CONFIGS,
+    MARKET_SNAPSHOT_ENDPOINT,
+    MARKET_SNAPSHOT_PROVIDER,
     MIN_FINANCIAL_YEARS,
     SORT_FIELDS,
     UNIVERSE_FILENAME,
-    ListingEntry,
     MarketSnapshot,
     append_jsonl,
     checkpoint_status_counts,
@@ -79,37 +83,24 @@ from screen_stock_metrics import (  # noqa: E402
     sort_results,
 )
 from screen_stock_parsers import (  # noqa: E402
-    market_from_secucode,
-    parse_a_share_selector_snapshot,
     parse_market_snapshot,
-    parse_tencent_hk_snapshot,
-    parse_tencent_quote_records,
-    tencent_quote_field,
-    tencent_quote_number,
 )
 from screen_stock_providers import (  # noqa: E402
     EASTMONEY_DATA_URL,
+    EASTMONEY_DATA_V1_URL,
     EASTMONEY_HK_DATA_URL,
-    EASTMONEY_LIST_URL,
-    EASTMONEY_XUANGU_LIST_URL,
-    HKEX_SECURITIES_LIST_URL,
-    TENCENT_QUOTE_URL,
+    EASTMONEY_WEBGUEST_LIST_URL,
     annotate_market_cap_universe,
-    chunked,
     fetch_a_company_type,
     fetch_a_financial_rows,
-    fetch_a_share_selector_market_snapshots,
     fetch_a_statement_rows,
     fetch_financial_rows,
     fetch_hk_company_type,
     fetch_hk_financial_rows,
-    fetch_hk_tencent_market_snapshots,
-    fetch_hkex_listings,
-    fetch_listing_universe_market_snapshots,
     fetch_market_snapshots,
+    fetch_us_financial_rows,
     get_json,
     get_with_retry,
-    limit_snapshots_per_market,
 )
 
 
@@ -117,13 +108,35 @@ def financial_cache_path(cache_dir: Path, snapshot: MarketSnapshot) -> Path:
     return cache_dir / snapshot.market / f"{snapshot.code}.json"
 
 
-def load_financial_rows_from_cache(cache_dir: Path | None, snapshot: MarketSnapshot) -> list[dict[str, Any]] | None:
+def cache_payload_is_fresh(payload: dict[str, Any], max_age_days: float | None) -> bool:
+    if max_age_days is None or max_age_days <= 0:
+        return True
+    fetched_at = payload.get("fetched_at")
+    if not isinstance(fetched_at, str) or not fetched_at.strip():
+        return False
+    try:
+        parsed = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - parsed <= timedelta(days=max_age_days)
+
+
+def load_financial_rows_from_cache(
+    cache_dir: Path | None,
+    snapshot: MarketSnapshot,
+    *,
+    max_age_days: float | None = DEFAULT_FINANCIAL_CACHE_MAX_AGE_DAYS,
+) -> list[dict[str, Any]] | None:
     if cache_dir is None:
         return None
     path = financial_cache_path(cache_dir, snapshot)
     if not path.exists():
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if not cache_payload_is_fresh(payload, max_age_days):
+        return None
     rows = payload.get("financial_rows")
     if not isinstance(rows, list):
         return None
@@ -149,11 +162,12 @@ def fetch_financial_rows_cached(
     snapshot: MarketSnapshot,
     *,
     cache_dir: Path | None,
+    cache_max_age_days: float | None = DEFAULT_FINANCIAL_CACHE_MAX_AGE_DAYS,
     session: requests.sessions.Session,
     request_delay: float,
     timeout: float,
 ) -> tuple[list[dict[str, Any]], bool]:
-    cached = load_financial_rows_from_cache(cache_dir, snapshot)
+    cached = load_financial_rows_from_cache(cache_dir, snapshot, max_age_days=cache_max_age_days)
     if cached is not None:
         return cached, True
     rows = fetch_financial_rows(snapshot, session=session, request_delay=request_delay, timeout=timeout)
@@ -176,6 +190,8 @@ def write_universe(
             "run_date": run_date,
             "fetched_at": now_iso(),
             "markets": markets,
+            "market_snapshot_provider": MARKET_SNAPSHOT_PROVIDER,
+            "market_snapshot_endpoint": MARKET_SNAPSHOT_ENDPOINT,
             "min_market_cap": min_market_cap,
             "snapshot_count": len(snapshots),
             "errors": errors,
@@ -252,6 +268,7 @@ def screen_stocks(
     run_dir: Path | None = None,
     resume: bool = False,
     cache_dir: Path | None = None,
+    cache_max_age_days: float | None = DEFAULT_FINANCIAL_CACHE_MAX_AGE_DAYS,
     progress_interval: int = 0,
     logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
@@ -268,6 +285,8 @@ def screen_stocks(
         universe_source = "checkpoint"
         universe_fetched_at = universe_payload.get("fetched_at")
         universe_run_date = universe_payload.get("run_date")
+        universe_provider = universe_payload.get("market_snapshot_provider")
+        universe_endpoint = universe_payload.get("market_snapshot_endpoint")
         if universe_run_date and universe_run_date != run_date:
             return {
                 "ok": False,
@@ -281,10 +300,15 @@ def screen_stocks(
                     "run_date": run_date,
                     "run_dir": str(run_dir),
                     "cache_dir": str(cache_dir) if cache_dir is not None else None,
+                    "financial_cache_max_age_days": cache_max_age_days,
                     "resume": resume,
                     "universe_source": universe_source,
                     "universe_fetched_at": universe_fetched_at,
                     "universe_run_date": universe_run_date,
+                    "market_snapshot_provider": MARKET_SNAPSHOT_PROVIDER,
+                    "market_snapshot_endpoint": MARKET_SNAPSHOT_ENDPOINT,
+                    "checkpoint_market_snapshot_provider": universe_provider,
+                    "checkpoint_market_snapshot_endpoint": universe_endpoint,
                     "snapshot_sources": sorted({snapshot.source for snapshot in snapshots if snapshot.source}),
                     "financial_analysis_scope": "all_rows_at_or_above_market_cap_floor",
                     "financial_analysis_selected_count": 0,
@@ -307,6 +331,53 @@ def screen_stocks(
                 "error": (
                     f"Cannot resume run_date {run_date} from checkpoint run_date {universe_run_date}. "
                     "Start a new date directory or pass the checkpoint run_date explicitly."
+                ),
+                "results": [],
+            }
+        if universe_provider != MARKET_SNAPSHOT_PROVIDER or universe_endpoint != MARKET_SNAPSHOT_ENDPOINT:
+            return {
+                "ok": False,
+                "fetched_at": now_iso(),
+                "markets": supported_markets,
+                "unsupported_markets": unsupported,
+                "source": "secondary_market_data",
+                "data_limits": {
+                    "secondary_source_only": True,
+                    "max_count": max_count,
+                    "run_date": run_date,
+                    "run_dir": str(run_dir),
+                    "cache_dir": str(cache_dir) if cache_dir is not None else None,
+                    "financial_cache_max_age_days": cache_max_age_days,
+                    "resume": resume,
+                    "universe_source": universe_source,
+                    "universe_fetched_at": universe_fetched_at,
+                    "universe_run_date": universe_run_date,
+                    "market_snapshot_provider": MARKET_SNAPSHOT_PROVIDER,
+                    "market_snapshot_endpoint": MARKET_SNAPSHOT_ENDPOINT,
+                    "checkpoint_market_snapshot_provider": universe_provider,
+                    "checkpoint_market_snapshot_endpoint": universe_endpoint,
+                    "snapshot_sources": sorted({snapshot.source for snapshot in snapshots if snapshot.source}),
+                    "financial_analysis_scope": "all_rows_at_or_above_market_cap_floor",
+                    "financial_analysis_selected_count": 0,
+                    "analyzed_count": 0,
+                    "financial_fetch_attempts": 0,
+                    "min_market_cap": min_market_cap,
+                    "request_delay_seconds": request_delay,
+                    "progress_interval": progress_interval,
+                    "errors": errors,
+                },
+                "risk_free_rates": {},
+                "summary": {
+                    "total": 0,
+                    "candidate": 0,
+                    "rejected": 0,
+                    "insufficient_data": 0,
+                    "industry_review_required": 0,
+                },
+                "phase": "resume_checkpoint",
+                "error": (
+                    "Cannot resume checkpoint from a different market snapshot provider. "
+                    f"Expected {MARKET_SNAPSHOT_PROVIDER} at {MARKET_SNAPSHOT_ENDPOINT}."
                 ),
                 "results": [],
             }
@@ -379,6 +450,7 @@ def screen_stocks(
                 financial_rows, from_cache = fetch_financial_rows_cached(
                     snapshot,
                     cache_dir=cache_dir,
+                    cache_max_age_days=cache_max_age_days,
                     session=client,
                     request_delay=request_delay,
                     timeout=timeout,
@@ -470,9 +542,12 @@ def screen_stocks(
             "run_date": run_date,
             "run_dir": str(run_dir) if run_dir is not None else None,
             "cache_dir": str(cache_dir) if cache_dir is not None else None,
+            "financial_cache_max_age_days": cache_max_age_days,
             "resume": resume,
             "universe_source": universe_source,
             "universe_fetched_at": universe_fetched_at,
+            "market_snapshot_provider": MARKET_SNAPSHOT_PROVIDER,
+            "market_snapshot_endpoint": MARKET_SNAPSHOT_ENDPOINT,
             "snapshot_sources": snapshot_sources,
             "financial_analysis_scope": "all_rows_at_or_above_market_cap_floor",
             "financial_analysis_selected_count": sum(1 for item in snapshots if item.selected_for_financial_analysis),
@@ -642,6 +717,12 @@ def main(argv: list[str] | None = None) -> int:
         "--cache-dir",
         help="Financial-row cache directory. Defaults to reports/stock-screen/cache/financials when checkpointing.",
     )
+    parser.add_argument(
+        "--cache-max-age-days",
+        type=float,
+        default=DEFAULT_FINANCIAL_CACHE_MAX_AGE_DAYS,
+        help="Maximum age for financial-row cache reuse. Default: 7 days. Use 0 or less to disable TTL.",
+    )
     parser.add_argument("--json-out")
     parser.add_argument("--xlsx-out")
     args = parser.parse_args(argv)
@@ -662,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir=run_dir,
         resume=args.resume,
         cache_dir=cache_dir,
+        cache_max_age_days=args.cache_max_age_days,
         progress_interval=progress_interval,
         logger=logger,
     )

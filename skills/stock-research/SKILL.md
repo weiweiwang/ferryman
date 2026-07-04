@@ -18,8 +18,9 @@ mispriced by the market; do not repackage low-quality cheap stocks.
 - Use `scripts/fetch_risk_free_rate.py --currency <financialCurrency-or-currency>`
   for the same-currency 10Y sovereign yield used in valuation; add
   `--json-out <path>` when the result should be persisted.
-- If imports fail, install the lightweight runtime dependencies from
-  `requirements.txt` in the Python environment used to run the scripts.
+- If imports fail, stop, report the missing dependency, and ask the user before
+  installing lightweight runtime dependencies from `requirements.txt` in the
+  Python environment used to run the scripts.
 - Use the Signal Gate Contract below for `BUY`, `STRONG_BUY`, fair-value,
   evidence-gate, and blocked-report decisions.
 - Save `reports/<current_date>/stock-audit-<ticker>-<current_date>.md` from
@@ -68,9 +69,10 @@ mispriced by the market; do not repackage low-quality cheap stocks.
   evidence gaps cap the internal evidence gate at 70%, so the report cannot
   reach `BUY` or `STRONG_BUY`; fewer than two independent anchors supporting
   `current price / base fair value <= 0.50` caps the internal evidence gate at
-  80%, so the report cannot reach `STRONG_BUY`; failed or stale risk-free-rate
-  data caps the internal evidence gate at 85%; material accounting, leverage, or
-  value-trap risk caps the internal evidence gate at 60% or forces `AVOID`.
+  80%, so the report cannot reach `STRONG_BUY`; failed or unavailable
+  risk-free-rate data blocks publication until a same-currency rate is obtained;
+  material accounting, leverage, or value-trap risk caps the internal evidence
+  gate at 60% or forces `AVOID`.
   Missing or unusable five-year FCF blocks a published stock-audit report under
   the Completion Gate.
 
@@ -80,7 +82,11 @@ mispriced by the market; do not repackage low-quality cheap stocks.
 
 Do not publish a stock-audit report unless current price, share count,
 financial/quote currency, five complete fiscal years of revenue, net profit,
-OCF, capex, FCF, debt/cash, and primary filing evidence are available.
+OCF, capex, FCF, cash/cash equivalents, debt, and primary filing evidence are
+available. Current and non-current financial-asset fields must stay separate in
+the data and report. If either field is blank, block only when the missing value
+is material to valuation; otherwise use primary evidence to mark it as zero,
+not material, or no disclosed balance.
 
 If required data cannot be obtained, return the data-gap checklist from
 `assets/blocked-data-template.md` instead of a stock-audit report. It must not
@@ -89,28 +95,40 @@ price, or index row. Persist only when useful as
 `reports/<current_date>/blocked-data-<ticker>-<current_date>.md`.
 
 Before finalizing, fail the report if any critical required field is blank,
-zero, `N/A`, or placeholder: market cap, currency, five-year rows for revenue,
-net profit, OCF, capex, FCF, debt/cash, conservative/base/optimistic scenario
-fair value, FCF/Net Income, management/accounting score, or primary source
-citation URL. Non-critical derived metrics such as ROIC may be `N/A` only when
-invested capital cannot be reliably reconstructed; explain the reason in the
-report. A published stock-audit report must contain numeric conservative, base,
-and optimistic fair values; if evidence is too weak to produce all three
-without fabrication, output the data-gap checklist instead.
-Before publishing any report from `assets/report-template.md`, do a final
-placeholder check: no unreplaced bracketed template fields from the template
-such as `[Ticker]`, `[金额]`, `[日期]`, `[URL]`, or `[一句话...]`; no relative
-fiscal-year labels such as `最近完整财年`, `前1个完整财年`, `前2个完整财年`,
-`前3个完整财年`, or `前4个完整财年`. Normal Markdown links are allowed.
+`N/A`, zero where a positive numeric value is required, or placeholder: market
+cap, currency, five-year rows for revenue, net profit, OCF, capex, FCF,
+cash/cash equivalents, debt, current price, quality score,
+conservative/base/optimistic scenario fair value, FCF/Net Income,
+management/accounting score, or primary source citation URL.
+Current price, share count, market cap, revenue, net profit, OCF, FCF, quality
+score, and conservative/base/optimistic fair values must not be zero. Debt,
+financial assets, unusual items, and capex may be zero when the zero is
+supported by source data and explained where material. Non-critical derived
+metrics such as ROIC may be `N/A` only when invested capital cannot be reliably
+reconstructed; explain the reason in the report. A published stock-audit report
+must contain numeric conservative, base, and optimistic fair values; if evidence
+is too weak to produce all three without fabrication, output the data-gap
+checklist instead.
+Before publishing any user-facing output from `assets/report-template.md` or
+`assets/blocked-data-template.md`, do a final placeholder check: no unreplaced
+bracketed template fields such as `[Ticker]`, `[金额]`, `[日期]`, `[URL]`, or
+`[一句话...]`; no relative fiscal-year labels such as `最近完整财年`,
+`前1个完整财年`, `前2个完整财年`, `前3个完整财年`, or `前4个完整财年`. Normal
+Markdown links are allowed.
 
-1. **Data**: Reuse current-thread audit data only if less than 24 hours old;
-   otherwise run the fetcher and same-currency risk-free-rate script. Disclose
-   `dataLimits`, returned years, missing fields, `currency`,
-   `financialCurrency`, any `fxRate`, and the risk-free-rate source/as-of date.
-   If `dataLimits.needsPrimarySourceForFiveYearNormalization` is true, use
-   primary filings to satisfy the Completion Gate before publishing. If
-   `financialCurrency` is missing, use `currency` as the rate
-   currency and mark the cash-flow currency assumption.
+1. **Data**: Run the fetcher fresh for the target ticker at the start of each
+   single-stock report; do not rely on an implicit cache. For every published
+   stock-audit report, run the same-currency risk-free-rate script again. In the
+   `财务审计` section, write only a short `审计口径` paragraph: five fiscal years
+   used, quote/financial currency, FX conversion if any, and risk-free-rate
+   date. Do not name market-data providers, official filing venues, API calls,
+   POST parameters, org IDs, script output keys such as `dataLimits`/`fxRate`,
+   or debugging fetch steps in the report body. Put data providers, official
+   filing venues, source dates, URLs, and supported uses only in the final
+   `数据来源` section. If `dataLimits.needsPrimarySourceForFiveYearNormalization`
+   is true, use primary filings to satisfy the Completion Gate before
+   publishing. If `financialCurrency` is missing, use `currency` as the rate
+   currency and mark the cash-flow currency assumption in reader-facing prose.
 2. **Raw-row audit**: Inspect raw rows for abnormal losses, peak profits,
    unusual FCF, margin spikes, leverage, cash, working capital, goodwill/equity,
    and receivables/revenue. Never invent missing metrics.
@@ -127,7 +145,8 @@ fiscal-year labels such as `最近完整财年`, `前1个完整财年`, `前2个
 6. **Valuation Model**: Use the model below. Show concrete fair value numbers,
    not only ratios. Use one main scenario table with fair-value market cap,
    fair-value per-share price in the quote currency,
-   `current_price/fair_value`, scenario weight, and key arithmetic. Put FCF/EPS/reverse-DCF/balance
+  `current price / fair value`, scenario weight, and key arithmetic. In Chinese
+   reports, render the ratio as `现价/FV`. Put FCF/EPS/reverse-DCF/balance
    sheet checks in short cross-check bullets unless they add materially
    different information; avoid two tables that repeat the same valuation.
 7. **Value Trap Rejection**: Downgrade or reject for declining moat, structural
@@ -140,17 +159,6 @@ spaces around `/`, such as `FCF/Revenue`, `FCF/Net Income`, `FCF/营收`, and
 `FCF/净利润`. Do not rename these ratios as secondary terms like FCF margin or
 cash conversion unless quoting a source field.
 
-## Candidate Screening
-
-Use `scripts/screen_stock_candidates.py --markets SH SZ HK` only to narrow the
-research pool. It may output `CANDIDATE`, `REJECTED`, `INSUFFICIENT_DATA`, or
-`INDUSTRY_REVIEW_REQUIRED`; it must not create `BUY`, `STRONG_BUY`, fair value,
-or evidence-gate conclusions. Treat candidates as leads only; always re-check
-with the single-stock workflow and primary sources. Use stdout for quick screens
-and persist only with `--json-out` or `--xlsx-out` when useful. For full-universe
-or resumable screens, read `references/screener.md` for provider, no-fallback,
-checkpoint, and persistence rules.
-
 ## Publishing Taxonomy
 
 Before setting frontmatter tags, read `references/taxonomy.md`. Tags are for
@@ -160,19 +168,20 @@ present, and preserve prior company tags unless the business mix changed.
 ## Primary Source Routing
 
 Use browser/search only against official disclosure venues before relying on
-company IR. Record the source, date, URL, and supported assumption in the report.
-Do not cite internal script names as user-facing sources. If data was fetched by
-a script, cite the underlying provider or venue instead, such as Yahoo Finance
-via yfinance for market data, FRED/Federal Reserve for USD 10Y yields,
-ChinaBond for CNY 10Y yields, HKMA for HKD government-bond benchmarks, or the
-relevant exchange/filing venue for primary disclosures.
+company IR. Record source, date, URL, and supported assumption in the final
+`数据来源` table. Do not cite internal script names as user-facing sources. Keep
+raw API queries, POST bodies, org IDs, provider fallbacks, and download/debug
+steps out of the report body. The report body should cite facts and filings, not
+explain the fetch process. For secondary market or financial baselines, use a
+reader-facing label such as `行情与二级财务数据库`; cite official exchanges/filing
+venues for primary disclosures, ChinaBond for CNY 10Y yields, FRED/Federal
+Reserve for USD 10Y yields, and HKMA for HKD government-bond benchmarks.
 
 | Market | Primary source priority |
 |:---|:---|
 | US/ADR | SEC EDGAR: 10-K, 10-Q, 8-K, 20-F, 6-K |
 | Hong Kong | HKEXnews: annual/interim reports, results announcements, circulars |
 | China A-share | CNINFO, SSE, SZSE: annual/quarterly reports and announcements |
-| Japan | EDINET, TDnet: securities reports and earnings releases |
 | Company IR | Supplemental only: presentations, transcripts, investor days |
 
 Required evidence checks: abnormal items, repeatable FCF, dilution, buyback
@@ -202,22 +211,27 @@ an easy business is not excellent unless the model itself is attractive.
 
 Score management/accounting from primary evidence only, not reputation.
 
-15-point split: shareholder alignment 3; capital allocation 4;
-incentives/dilution 3; accounting quality 3; governance/related parties 2.
+Use a 100-point management/accounting subscore, then convert it into the
+15-point total-score contribution as `subscore * 15 / 100`, shown to one
+decimal when needed. In reports, show both forms, for example
+`管理层与会计：82/100（折算12.3/15）`. Do not score only with coarse 2/3 or
+3/4 buckets.
+
+100-point split: shareholder alignment 20; capital allocation 25;
+incentives/dilution 20; accounting quality 20; governance/related parties 15.
 
 Apply caps unless primary evidence removes the concern:
 
-- Incentives not checked from annual/proxy/remuneration filing: max 10/15.
-- Material SBC/options/convertibles without net dilution quantified: max 11/15.
+- Incentives not checked from annual/proxy/remuneration filing: max 67/100.
+- Material SBC/options/convertibles without net dilution quantified: max 73/100.
 - Material buybacks: verify net share-count change and buyback price vs fair
   value.
 - Investment gains, fair-value marks, subsidies, capitalization, impairments, or
-  aggressive non-GAAP not normalized: max 12/15.
-- Material related-party, VIE, or control-shareholder risk: max 10/15.
-- 14-15/15 requires all five subchecks verified and no material unresolved issue.
+  aggressive non-GAAP not normalized: max 80/100.
+- Material related-party, VIE, or control-shareholder risk: max 67/100.
+- 93+/100 requires all five subchecks verified and no material unresolved issue.
 
-Show a compact breakdown table only when this score affects total score or
-signal.
+Show the compact breakdown table when this score affects total score or signal.
 
 For platform businesses, explicitly check both sides of the marketplace,
 take-rate durability, user acquisition cost, network effects, regulatory risk,
@@ -262,9 +276,16 @@ and whether working-capital timing inflates operating cash flow.
   | Debt, leases, preferred claims, guarantees | subtract 100%; subtract more for refinancing or off-balance-sheet stress |
   | Minority interest, options/RSUs, deferred tax, contingencies | deduct by materiality and ordinary-shareholder claim impact |
 
+  Treat cash/cash equivalents, current financial assets, and non-current
+  financial assets as separate line items. Do not apply one blended recognition
+  rate across cash and financial assets. If a material financial-asset category
+  affects valuation, verify the composition from filings before assigning the
+  recognition rate.
+
 - **Fair-value output**: Show current market cap, share count, valuation
   currency, quote currency, FX rate if used, fair-value market cap, per-share
-  fair value, and `current_price/fair_value`.
+  fair value, and `current price / fair value`; render it as `现价/FV` in
+  Chinese reports.
 - **Scenario output**: Show conservative, base, and optimistic fair values as
   numeric values in every published stock-audit report. The optimistic scenario
   is a bounded upside sensitivity, not a recommendation and not a reason to
@@ -272,12 +293,13 @@ and whether working-capital timing inflates operating cash flow.
   scenario, the report is incomplete and must become the data-gap checklist.
   Judge the 2x signal from `current price / base fair value <= 0.50`; do not
   add a separate 2x price field when the scenario table already shows fair
-  values and `current_price/fair_value`.
+  values and `current price / fair value`.
 - **Risk-free rate**: Match the 10Y sovereign yield to the cash-flow currency,
   not necessarily the quote currency. For CNY financials and HKD quote, value in
   CNY first, then convert with `fxRate`.
-- If the risk-free-rate script returns `ok:false` or stale data, disclose it and
-  apply the Signal Gate Contract evidence cap.
+- If the risk-free-rate script returns `ok:false` or no usable same-currency
+  rate, output the data-gap checklist instead of publishing a stock-audit
+  report.
 - **Multiples**: Use `min(20x, 100/(n * risk_free_rate_percent))`. Use
   `n=2.0` for conservative cases. Use `n=1.5` only for a strong excellent
   business base case. Upside multiples cannot support `STRONG_BUY`.
@@ -311,7 +333,7 @@ Use only these signals: `STRONG_BUY`, `BUY`, `WATCHLIST`, `TACTICAL_BUY`, and
   boundaries; keep normal spaces inside English/numeric phrases. Examples:
   `2025年`, `HKEX 2025年报`, `434.40 HKD`, `FCF/净利润`.
 - Before finalizing any user-facing report, run a publication cleanup scan on
-  the saved Markdown file: `rg -n "stock-research|Stock Research|股票研究|数据脚本|fetch_.*\\.py|screen_.*\\.py" <report.md>`.
+  the saved Markdown file: `rg -n "stock-research|Stock Research|股票研究|数据脚本|fetch_.*\\.py|POST|hisAnnouncement/query|orgId|secCode|gssz|gssh|dataLimits|fxRate" <report.md>`.
   If it matches, replace internal names with reader-facing language and cite
   underlying data providers or official venues.
 - Technical analysis can inform timing and risk controls, but cannot upgrade the

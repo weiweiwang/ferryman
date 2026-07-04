@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 import io
 import json
 import re
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +19,6 @@ FRED_DGS10_PAGE_URL = "https://fred.stlouisfed.org/series/DGS10"
 CHINABOND_CGB_YC_DEF_ID = "2c9081e50a2f9606010a3068cae70001"
 CHINABOND_YC_DETAIL_URL = "https://yield.chinabond.com.cn/cbweb-mn/yc/ycDetail"
 CHINABOND_YIELD_MAIN_URL = "https://yield.chinabond.com.cn/cbweb-mn/yield_main?locale=zh_CN"
-MOF_JGB_CURRENT_CSV_URL = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/jgbcme.csv"
-MOF_JGB_INTEREST_RATE_PAGE_URL = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/"
 HKMA_HKD_BENCHMARK_XLS_URL = (
     "https://www.hkma.gov.hk/media/eng/doc/market-data-and-statistics/"
     "monthly-statistical-bulletin/T10040301.xls"
@@ -44,11 +42,6 @@ SOVEREIGN_SOURCES: dict[str, dict[str, str]] = {
     "HKD": {
         "name": "HKMA Monthly Statistical Bulletin Table 10.4.3.1 HKD Government Bond Benchmark Yield",
         "url": HKMA_HKD_BENCHMARK_PAGE_URL,
-        "tenor": "10Y",
-    },
-    "JPY": {
-        "name": "Japan 10-Year Government Bond Yield",
-        "url": MOF_JGB_INTEREST_RATE_PAGE_URL,
         "tenor": "10Y",
     },
 }
@@ -92,15 +85,6 @@ def iso_now(now: datetime | None = None) -> str:
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
     return current.astimezone(timezone.utc).isoformat()
-
-
-def stale_days(as_of: str, now: datetime | None = None) -> int | None:
-    try:
-        as_of_date = date.fromisoformat(as_of)
-    except ValueError:
-        return None
-    current = now or datetime.now(timezone.utc)
-    return (current.date() - as_of_date).days
 
 
 def multiple_cap(rate_percent: float, n: float, absolute_cap: float = 20.0) -> float:
@@ -160,41 +144,6 @@ def parse_chinabond_yc_detail_html(text: str) -> dict[str, Any]:
                 raise RiskFreeRateError(f"ChinaBond 10Y yield is not numeric: {value}") from exc
 
     raise RiskFreeRateError("ChinaBond detail page returned no 10.0y yield row.")
-
-
-def parse_mof_jgb_current_csv(text: str) -> dict[str, Any]:
-    rows = list(csv.reader(io.StringIO(text)))
-    header_index = None
-    for index, row in enumerate(rows):
-        if row and row[0].strip() == "Date":
-            header_index = index
-            break
-    if header_index is None:
-        raise RiskFreeRateError("MOF JGB CSV returned no Date header row.")
-
-    header = [cell.strip() for cell in rows[header_index]]
-    try:
-        date_index = header.index("Date")
-        ten_year_index = header.index("10Y")
-    except ValueError as exc:
-        raise RiskFreeRateError("MOF JGB CSV returned no 10Y column.") from exc
-
-    latest: dict[str, Any] | None = None
-    for row in rows[header_index + 1 :]:
-        if len(row) <= max(date_index, ten_year_index):
-            continue
-        date_text = row[date_index].strip()
-        value = row[ten_year_index].strip()
-        if not date_text or not value:
-            continue
-        try:
-            as_of = datetime.strptime(date_text, "%Y/%m/%d").date().isoformat()
-            latest = {"asOf": as_of, "ratePercent": float(value)}
-        except ValueError:
-            continue
-    if latest is None:
-        raise RiskFreeRateError("MOF JGB CSV returned no usable 10Y yield observations.")
-    return latest
 
 
 def parse_hkma_hkd_benchmark_workbook(book: Any) -> dict[str, Any]:
@@ -261,7 +210,6 @@ def success_payload(
     as_of: str | None,
     source: str,
     source_url: str,
-    confidence: str,
     fetched_at: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -273,9 +221,7 @@ def success_payload(
         "asOf": as_of,
         "source": source,
         "sourceUrl": source_url,
-        "confidence": confidence,
         "fetchedAt": fetched_at or iso_now(now),
-        "staleDays": stale_days(as_of, now) if as_of else None,
         "multipleCaps": multiple_caps(rate_percent),
     }
     return result
@@ -324,7 +270,6 @@ def fetch_usd_rate(
         as_of=parsed["asOf"],
         source=SOVEREIGN_SOURCES["USD"]["name"],
         source_url=FRED_DGS10_PAGE_URL,
-        confidence="official",
         now=now,
     )
 
@@ -360,32 +305,6 @@ def fetch_cny_rate(
         as_of=parsed["asOf"],
         source=f"{parsed['curveName']} / ChinaBond",
         source_url=CHINABOND_YIELD_MAIN_URL,
-        confidence="official-web",
-        now=now,
-    )
-
-
-def fetch_jpy_rate(
-    *,
-    session: requests.sessions.Session | None = None,
-    timeout: float = 20,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    client = session or requests.Session()
-    try:
-        response = client.get(MOF_JGB_CURRENT_CSV_URL, timeout=timeout)
-        response.raise_for_status()
-        parsed = parse_mof_jgb_current_csv(response.text)
-    except Exception as exc:
-        raise RiskFreeRateError(f"JPY 10Y yield fetch failed: {exc}") from exc
-
-    return success_payload(
-        currency="JPY",
-        rate_percent=parsed["ratePercent"],
-        as_of=parsed["asOf"],
-        source=SOVEREIGN_SOURCES["JPY"]["name"],
-        source_url=MOF_JGB_INTEREST_RATE_PAGE_URL,
-        confidence="official",
         now=now,
     )
 
@@ -410,7 +329,6 @@ def fetch_hkd_rate(
         as_of=parsed["asOf"],
         source=SOVEREIGN_SOURCES["HKD"]["name"],
         source_url=HKMA_HKD_BENCHMARK_XLS_URL,
-        confidence="official",
         now=now,
     )
 
@@ -448,18 +366,6 @@ def fetch_risk_free_rate(
                 now=now,
             )
 
-    if normalized_currency == "JPY":
-        try:
-            return fetch_jpy_rate(session=session, timeout=timeout, now=now)
-        except RiskFreeRateError as exc:
-            return failure_payload(
-                currency="JPY",
-                error=str(exc),
-                source=SOVEREIGN_SOURCES["JPY"]["name"],
-                source_url=SOVEREIGN_SOURCES["JPY"]["url"],
-                now=now,
-            )
-
     if normalized_currency == "HKD":
         try:
             return fetch_hkd_rate(session=session, timeout=timeout, now=now)
@@ -491,7 +397,7 @@ def fetch_risk_free_rate(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fetch a same-currency 10Y sovereign/risk-free yield.")
-    parser.add_argument("--currency", required=True, help="Cash-flow currency, e.g. USD, CNY, HKD, JPY.")
+    parser.add_argument("--currency", required=True, help="Cash-flow currency, e.g. USD, CNY, HKD.")
     parser.add_argument("--timeout", type=float, default=20)
     parser.add_argument("--json-out", help="Optional path to write the JSON payload.")
     args = parser.parse_args(argv)

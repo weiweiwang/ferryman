@@ -165,6 +165,8 @@ def build_result_item(
     reject_reasons = quick_reject_reasons(snapshot, min_market_cap)
     fin_currency = financial_currency(financial_rows, snapshot.currency)
     metrics, data_gaps = compute_metrics(snapshot, financial_rows, risk_free)
+    if not snapshot.industry:
+        data_gaps.append("industry_unavailable")
     if fin_currency != snapshot.currency:
         metrics["market_cap_to_avg_profit"] = None
         metrics["market_cap_to_avg_fcf"] = None

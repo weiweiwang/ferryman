@@ -38,23 +38,31 @@ MARKET_CONFIGS: dict[str, dict[str, Any]] = {
         "currency": "HKD",
         "secid_prefix": "116",
     },
+    "US": {
+        "name": "United States",
+        "fs": "m:105,m:106,m:107",
+        "currency": "USD",
+        "secid_prefix": "",
+    },
 }
 
 EASTMONEY_QUOTE_UT = "fa5fd1943c7b386f172d6893dbfba10b"
 EASTMONEY_WBP2U = "|0|0|0|web"
+# Market snapshot universe is intentionally locked to one Eastmoney webguest
+# clist endpoint across SH/SZ/HK/US. Do not add mixed market snapshot providers
+# or alternate list hosts without explicit user review.
+MARKET_SNAPSHOT_PROVIDER = "eastmoney_webguest_clist"
+MARKET_SNAPSHOT_ENDPOINT = "https://push2.eastmoney.com/webguest/api/qt/clist/get"
 SORT_FIELDS = {"market_cap": "f20", "change_pct": "f3"}
 EASTMONEY_LIST_FIELDS = (
     "f1,f2,f3,f5,f6,f8,f9,f10,f12,f13,f14,f20,f21,f23,f24,"
     "f25,f62,f100,f115,f152"
 )
-A_SHARE_SELECTOR_FIELDS = (
-    "SECUCODE,SECURITY_CODE,SECURITY_NAME_ABBR,NEW_PRICE,CHANGE_RATE,"
-    "PE9,PBNEWMRQ,TOTAL_MARKET_CAP,INDUSTRY"
-)
 MIN_FINANCIAL_YEARS = 5
 DEFAULT_MIN_MARKET_CAP = 5_000_000_000
 DEFAULT_REQUEST_DELAY_SECONDS = 0.2
 DEFAULT_PROGRESS_INTERVAL = 50
+DEFAULT_FINANCIAL_CACHE_MAX_AGE_DAYS = 7
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_REPORTS_ROOT = Path("reports") / "stock-screen"
 CACHE_DIR_NAME = "cache"
@@ -83,11 +91,20 @@ CURRENCY_ALIASES = {
     "hkd": "HKD",
     "美元": "USD",
     "usd": "USD",
-    "日元": "JPY",
-    "日圆": "JPY",
-    "日圓": "JPY",
-    "jpy": "JPY",
+    "欧元": "EUR",
+    "歐元": "EUR",
+    "eur": "EUR",
+    "澳大利亚元": "AUD",
+    "澳大利亞元": "AUD",
+    "澳元": "AUD",
+    "澳幣": "AUD",
+    "aud": "AUD",
+    "英镑": "GBP",
+    "英鎊": "GBP",
+    "gbp": "GBP",
 }
+US_MARKET_SUFFIX_BY_F13 = {"105": "O", "106": "N", "107": "A"}
+US_MARKET_CODE_BY_SUFFIX = {"O": "105", "N": "106", "A": "107"}
 
 
 @dataclass
@@ -107,19 +124,6 @@ class MarketSnapshot:
     market_cap_percentile: float | None = None
     selected_for_financial_analysis: bool = False
     source: str = "eastmoney"
-
-
-@dataclass
-class ListingEntry:
-    code: str
-    secid: str
-    market: str
-    official_name: str | None = None
-    listing_date: str | None = None
-    board: str | None = None
-    trading_currency: str | None = None
-    listing_source: str | None = None
-
 
 def snapshot_to_dict(snapshot: MarketSnapshot) -> dict[str, Any]:
     return asdict(snapshot)
@@ -164,7 +168,7 @@ def default_cache_dir() -> Path:
 def json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): json_safe(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
+    if isinstance(value, (list, tuple)):
         return [json_safe(item) for item in value]
     if hasattr(value, "item"):
         return value.item()
@@ -255,7 +259,7 @@ def to_scaled_float(value: Any, precision: Any) -> float | None:
         return None
     if scale is None:
         return number
-    if isinstance(value, int | float) and float(value).is_integer():
+    if isinstance(value, (int, float)) and float(value).is_integer():
         return number / (10 ** int(scale))
     if isinstance(value, str) and value.strip().lstrip("-").isdigit():
         return number / (10 ** int(scale))
@@ -365,6 +369,14 @@ def ticker_for_market(code: str, market: str) -> str:
     if market in {"SH", "SZ"}:
         return f"{code}.{market}"
     return code
+
+
+def us_ticker_for_eastmoney_market(code: str, eastmoney_market_code: Any = None) -> str:
+    normalized_code = str(code or "").strip().upper()
+    if "." in normalized_code:
+        return normalized_code
+    suffix = US_MARKET_SUFFIX_BY_F13.get(str(eastmoney_market_code or "").strip())
+    return f"{normalized_code}.{suffix}" if suffix else normalized_code
 
 
 def normalize_currency(currency: Any, default_currency: str) -> str:
