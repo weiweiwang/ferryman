@@ -127,9 +127,9 @@ tags:
 
 ## 数据来源
 
-| 类别 | 来源 | 日期 | URL | 用途 |
-|:---|:---|:---|:---|:---|
-| 官方披露 | HKEX 2025年报 | 2026-04-08 | https://www.hkexnews.hk/example.pdf | 年报、治理和风险披露 |
+| 用途 | 来源 | 日期 | URL |
+|:---|:---|:---|:---|
+| 年报、治理和风险披露 | HKEX 2025年报 | 2026-04-08 | https://www.hkexnews.hk/example.pdf |
 """
 
     assert_clean_published_report(report)
@@ -167,6 +167,7 @@ def test_report_template_uses_granular_management_score_and_data_sources():
     assert "### 管理层与会计：[x/100，折算x.x/15]" in template
     assert "| **合计** | **100** | **[x/100]**" in template
     assert "## 数据来源" in template
+    assert "| 用途 | 来源 | 日期 | URL |" in template
     assert "流动金融资产" in template
     assert "非流动金融资产" in template
     assert "净现金/净债务（现金及等价物-总债务）" in template
@@ -180,12 +181,12 @@ def test_report_template_includes_shareholder_return_without_double_counting_div
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     skill = SKILL_PATH.read_text(encoding="utf-8")
 
-    assert "### 股东回报" in template
+    assert "## 股东回报" in template
     assert "| 股息率 | [xx%] | [股息率区间和变化] | [是否提供等待回报] |" in template
     assert "| 分红支付率 | [xx%] | [分红/净利润是否稳定] | [是否可持续] |" in template
     assert "| 分红/FCF | [xx%] | [是否被FCF覆盖] | [是否透支现金流] |" in template
     assert "| 回购与稀释 | [净变化] | [股本、回购、股权激励和稀释变化] | [是否提高每股价值] |" in template
-    assert "分红、稀释与回购质量" in template
+    assert "年报、财务报表、分红、回购、治理、关联交易、激励和风险披露" in template
     assert "不把分红重复加进FV" in template
 
     assert "Shareholder return check" in skill
@@ -275,13 +276,16 @@ def test_skill_does_not_advertise_unsupported_japan_single_stock_routing():
     assert "TDnet" not in skill
 
 
-def test_report_template_does_not_allow_unverified_required_checks():
+def test_report_template_integrates_required_checks_into_body_and_data_sources():
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    skill = SKILL_PATH.read_text(encoding="utf-8")
 
     assert "未验证" not in template
-    assert "不适用（说明原因）" in template
-    assert "| 异常项目与利润正常化 | [年报注释/业绩公告] | 通过/不通过 |" in template
-    assert "| 可重复FCF | [现金流量表/管理层解释] | 通过/不通过 |" in template
+    assert "## 必查证据清单" not in template
+    assert "主要证据" not in template
+    assert "关键判断核验" not in template
+    assert "Cover these checks in the body and final `数据来源`用途 rows" in skill
+    assert_compact_contains(skill, "do not add a standalone evidence checklist")
 
 
 def test_blocked_data_template_excludes_report_signals_and_valuation_fields():
@@ -319,12 +323,38 @@ def test_blocked_data_template_excludes_report_signals_and_valuation_fields():
     assert "Before publishing any user-facing output" in skill
 
 
-def test_value_trap_risk_cannot_be_marked_not_applicable():
+def test_report_template_uses_reader_facing_risk_section_and_no_old_risk_sections():
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    assert "## 需要跟踪的风险" in template
+    assert "### 当前风险" in template
+    assert "### 触发重估的信号" in template
+    assert "## 风险控制" not in template
+    assert "## 价值陷阱检查" not in template
+    assert "价值陷阱风险" not in template
+    assert "投资逻辑失效条件" not in template
+    assert_compact_contains(skill, "Downgrade or reject when moat, FCF quality, leverage, accounting, dilution, capital allocation, or peak-earnings risk undermines the thesis")
+
+
+def test_report_template_uses_reader_facing_section_order():
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
-    value_trap_line = next(line for line in template.splitlines() if line.startswith("- **价值陷阱风险**"))
-    assert "N/A" not in value_trap_line
-    assert "若未发现重大风险" in value_trap_line
+    h2s = [line.strip() for line in template.splitlines() if line.startswith("## ")]
+    expected = [
+        "## 核心结论",
+        "## 好公司评分：[x/100]",
+        "## 财务审计",
+        "## 股东回报",
+        "## 估值",
+        "## 买入与跟踪",
+        "## 需要跟踪的风险",
+        "## 数据来源",
+    ]
+
+    assert h2s == expected
+    for forbidden in ("## 质量与错杀检查", "## 必查证据清单", "## 风险控制"):
+        assert forbidden not in template
 
 
 def test_wait_signal_is_not_a_public_signal():

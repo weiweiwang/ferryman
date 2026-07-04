@@ -149,10 +149,9 @@ Markdown links are allowed.
    reports, render the ratio as `现价/FV`. Put FCF/EPS/reverse-DCF/balance
    sheet checks in short cross-check bullets unless they add materially
    different information; avoid two tables that repeat the same valuation.
-7. **Value Trap Rejection**: Downgrade or reject for declining moat, structural
-   margin pressure, excessive leverage, weak FCF/net-income or OCF/net-income
-   conversion, opaque accounting,
-   dilution, poor capital allocation, or peak-earnings cheapness.
+7. **Risk Review**: Downgrade or reject when moat, FCF quality, leverage,
+   accounting, dilution, capital allocation, or peak-earnings risk undermines
+   the thesis.
 
 In user-facing reports, show cash-flow ratios as explicit formulas with no
 spaces around `/`, such as `FCF/Revenue`, `FCF/Net Income`, `FCF/营收`, and
@@ -167,15 +166,11 @@ present, and preserve prior company tags unless the business mix changed.
 
 ## Primary Source Routing
 
-Use browser/search only against official disclosure venues before relying on
-company IR. Record source, date, URL, and supported assumption in the final
-`数据来源` table. Do not cite internal script names as user-facing sources. Keep
-raw API queries, POST bodies, org IDs, provider fallbacks, and download/debug
-steps out of the report body. The report body should cite facts and filings, not
-explain the fetch process. For secondary market or financial baselines, use a
-reader-facing label such as `行情与二级财务数据库`; cite official exchanges/filing
-venues for primary disclosures, ChinaBond for CNY 10Y yields, FRED/Federal
-Reserve for USD 10Y yields, and HKMA for HKD government-bond benchmarks.
+Use official disclosure venues before company IR. In published reports, put
+source/date/URL/use only in the final `数据来源` table. Keep raw API queries,
+internal script names, provider fallbacks, and debug steps out of the report
+body. Use reader-facing labels for secondary baselines and official benchmark
+sources for risk-free rates.
 
 | Market | Primary source priority |
 |:---|:---|
@@ -190,6 +185,8 @@ receivables/inventory/goodwill risk, segment profit, related parties, and
 management incentives. If a required or material check lacks primary evidence,
 output the data-gap checklist instead of a stock-audit report. Use `N/A` only
 when a check truly does not apply, and explain why.
+Cover these checks in the body and final `数据来源`用途 rows; do not add a
+standalone evidence checklist.
 
 ## Business Quality Scorecard
 
