@@ -131,7 +131,7 @@ Markdown links are allowed.
    currency and mark the cash-flow currency assumption in reader-facing prose.
 2. **Raw-row audit**: Inspect raw rows for abnormal losses, peak profits,
    unusual FCF, margin spikes, leverage, cash, working capital, goodwill/equity,
-   and receivables/revenue. Never invent missing metrics.
+   receivables/revenue, dividends, and buybacks. Never invent missing metrics.
 3. **Primary evidence**: Explain abnormal items and normalization with filings,
    results announcements, or earnings transcripts. If a material assumption
    cannot be verified from primary evidence, output the data-gap checklist
@@ -145,7 +145,7 @@ Markdown links are allowed.
 6. **Valuation Model**: Use the model below. Show concrete fair value numbers,
    not only ratios. Use one main scenario table with fair-value market cap,
    fair-value per-share price in the quote currency,
-  `current price / fair value`, scenario weight, and key arithmetic. In Chinese
+   `current price / fair value`, scenario weight, and key arithmetic. In Chinese
    reports, render the ratio as `现价/FV`. Put FCF/EPS/reverse-DCF/balance
    sheet checks in short cross-check bullets unless they add materially
    different information; avoid two tables that repeat the same valuation.
@@ -184,12 +184,12 @@ Reserve for USD 10Y yields, and HKMA for HKD government-bond benchmarks.
 | China A-share | CNINFO, SSE, SZSE: annual/quarterly reports and announcements |
 | Company IR | Supplemental only: presentations, transcripts, investor days |
 
-Required evidence checks: abnormal items, repeatable FCF, dilution, buyback
-quality, hidden liabilities, receivables/inventory/goodwill risk, segment
-profit, related parties, and management incentives. If a required or material
-check lacks primary evidence, output the data-gap checklist instead of a
-stock-audit report. Use `N/A` only when a check truly does not apply, and
-explain why.
+Required evidence checks: abnormal items, repeatable FCF, dividend policy and
+coverage, dilution, buyback quality, hidden liabilities,
+receivables/inventory/goodwill risk, segment profit, related parties, and
+management incentives. If a required or material check lacks primary evidence,
+output the data-gap checklist instead of a stock-audit report. Use `N/A` only
+when a check truly does not apply, and explain why.
 
 ## Business Quality Scorecard
 
@@ -224,6 +224,9 @@ Apply caps unless primary evidence removes the concern:
 
 - Incentives not checked from annual/proxy/remuneration filing: max 67/100.
 - Material SBC/options/convertibles without net dilution quantified: max 73/100.
+- Material dividends: verify dividend per share or cash dividends, current
+  dividend yield, payout ratio, and dividends/FCF. A high yield without
+  repeatable FCF coverage is a value-trap warning, not a positive signal.
 - Material buybacks: verify net share-count change and buyback price vs fair
   value.
 - Investment gains, fair-value marks, subsidies, capitalization, impairments, or
@@ -261,6 +264,13 @@ and whether working-capital timing inflates operating cash flow.
   EPS and reverse-DCF only as cross-checks after the Completion Gate is met. Add
   excess cash only when accessible; subtract net debt, dilution, and
   off-balance-sheet risks.
+- **Shareholder return check**: Show dividend yield, payout ratio,
+  dividends/FCF, and buyback impact when dividends or buybacks are material.
+  Dividend data is not a Completion Gate field by itself, but any dividend yield
+  used in the thesis must be verified from filings or exchange/company
+  distribution records. Do not add dividends on top of fair value as a separate
+  price target; use them only as a total-return and capital-allocation
+  cross-check.
 - **Balance-sheet adjustment**: Treat it as an equity-value bridge, not book
   value. Add conservatively recognized non-operating assets; subtract senior
   claims and per-share dilution. For each material item, disclose book value,

@@ -16,8 +16,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-# Screening universe snapshots are locked to the single Eastmoney webguest
-# clist provider defined in screen_stock_common. Financial enrich can use
+# This CLI is intentionally retained as a manual/internal screener even though
+# SKILL.md routes the main skill to single-stock research only.
+# Screening universe snapshots are locked to the single Eastmoney webguest clist
+# provider defined in screen_stock_common. Financial enrich can use
 # market-specific Eastmoney statement APIs; market snapshots cannot mix sources.
 from fetch_risk_free_rate import fetch_risk_free_rate  # noqa: E402
 import screen_stock_providers  # noqa: E402
@@ -100,7 +102,6 @@ from screen_stock_providers import (  # noqa: E402
     fetch_market_snapshots,
     fetch_us_financial_rows,
     get_json,
-    get_with_retry,
 )
 
 

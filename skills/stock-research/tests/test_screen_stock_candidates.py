@@ -928,6 +928,155 @@ def test_us_financial_rows_use_pc_f10_statements_to_build_five_year_fcf():
     assert rows[0]["roe"] == 95.0
 
 
+def test_us_financial_rows_keep_extra_report_when_latest_year_is_incomplete():
+    module = load_screen_module()
+    snapshot = sample_snapshot(module, ticker="AAPL.O", code="AAPL", market="US", currency="USD")
+
+    report_years = ["2026", "2025", "2024", "2023", "2022", "2021"]
+    complete_years = report_years[1:]
+
+    class FakeIncompleteLatestUsSession:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, url, params, timeout):
+            report_name = params["reportName"]
+            filter_clause = params["filter"]
+            if report_name == "RPT_USSK_FN_CASHFLOW" and "REPORT in" not in filter_clause:
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                {
+                                    "SECUCODE": "AAPL.O",
+                                    "REPORT": f"{year}/FY",
+                                    "REPORT_DATE": f"{year}-09-30",
+                                    "CURRENCY": "美元",
+                                    "DATE_TYPE_CODE": "001",
+                                }
+                                for year in report_years
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USF10_FN_INCOME":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                item
+                                for year in report_years
+                                for item in (
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004001999",
+                                        "AMOUNT": 390_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004015999",
+                                        "AMOUNT": 100_000_000_000.0,
+                                    },
+                                )
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USSK_FN_CASHFLOW":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                item
+                                for year in complete_years
+                                for item in (
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "003999",
+                                        "AMOUNT": 120_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "005002",
+                                        "AMOUNT": -12_000_000_000.0,
+                                    },
+                                )
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USF10_FN_BALANCE":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                item
+                                for year in report_years
+                                for item in (
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004005999",
+                                        "AMOUNT": 350_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004011999",
+                                        "AMOUNT": 250_000_000_000.0,
+                                    },
+                                    {
+                                        "REPORT": f"{year}/FY",
+                                        "REPORT_DATE": f"{year}-09-30",
+                                        "STD_ITEM_CODE": "004017999",
+                                        "AMOUNT": 100_000_000_000.0,
+                                    },
+                                )
+                            ]
+                        }
+                    }
+                )
+            if report_name == "RPT_USF10_FN_GMAININDICATOR":
+                return FakeListResponse(
+                    {
+                        "result": {
+                            "data": [
+                                {
+                                    "REPORT_DATE": f"{year}-09-30",
+                                    "DATE_TYPE_CODE": "001",
+                                    "ROE_AVG": 95.0,
+                                }
+                                for year in report_years
+                            ]
+                        }
+                    }
+                )
+            raise AssertionError(f"unexpected reportName {report_name}")
+
+    rows = module.fetch_us_financial_rows(
+        snapshot,
+        session=FakeIncompleteLatestUsSession(),
+        timeout=1,
+        request_delay=0,
+    )
+    item = module.build_result_item(
+        snapshot,
+        financial_rows=rows,
+        risk_free=risk_free_payload(),
+        min_market_cap=100_000_000,
+    )
+
+    assert [row["year"] for row in rows] == report_years
+    assert rows[0]["free_cash_flow"] is None
+    assert item["status"] == "CANDIDATE"
+    assert item["metrics"]["complete_financial_years"] == 5
+    assert "missing_5y_financial_rows" not in item["data_gaps"]
+
+
 def test_build_result_item_uses_reject_reasons_for_obvious_rejects():
     module = load_screen_module()
 

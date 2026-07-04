@@ -55,6 +55,7 @@ US_BALANCE_ITEM_CODES = {
     "total_liabilities": "004011999",
     "equity": "004017999",
 }
+US_REPORT_LOOKBACK_YEARS = MIN_FINANCIAL_YEARS + 5
 
 
 def sum_present_values(*values: Any) -> float | None:
@@ -64,47 +65,6 @@ def sum_present_values(*values: Any) -> float | None:
 
 def sum_present_fields(row: dict[str, Any], keys: tuple[str, ...]) -> float | None:
     return sum_present_values(*(row.get(key) for key in keys))
-
-
-def get_with_retry(
-    session: requests.sessions.Session,
-    url: str,
-    *,
-    params: dict[str, Any] | None = None,
-    headers: dict[str, str] | None = None,
-    timeout: float = 30,
-    attempts: int = 3,
-    request_delay: float = 0.0,
-) -> requests.Response:
-    last_error: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            response = session.get(url, params=params, headers=headers, timeout=timeout)
-            response.raise_for_status()
-            return response
-        except Exception as exc:
-            last_error = exc
-            if attempt < attempts:
-                sleep_if_needed(max(request_delay, 0.5 * attempt))
-        finally:
-            sleep_if_needed(request_delay)
-    assert last_error is not None
-    raise last_error
-
-
-def limit_snapshots_per_market(
-    snapshots: list[MarketSnapshot],
-    *,
-    markets: list[str],
-    max_count: int,
-) -> list[MarketSnapshot]:
-    if max_count <= 0:
-        return snapshots
-    limited: list[MarketSnapshot] = []
-    for market in markets:
-        market_snapshots = [snapshot for snapshot in snapshots if snapshot.market == market]
-        limited.extend(market_snapshots[:max_count])
-    return limited
 
 
 def eastmoney_list_url_for_market(market: str) -> str:
@@ -665,7 +625,7 @@ def fetch_us_report_rows(
         timeout=timeout,
         request_delay=request_delay,
         distinct="REPORT_DATE,DATE_TYPE_CODE",
-        page_size=MIN_FINANCIAL_YEARS + 5,
+        page_size=US_REPORT_LOOKBACK_YEARS,
         sort_columns="REPORT_DATE,DATE_TYPE_CODE",
         sort_types="-1,1",
     )
@@ -677,7 +637,7 @@ def fetch_us_report_rows(
             continue
         annual_rows.append(row)
         seen_reports.add(report)
-        if len(annual_rows) >= MIN_FINANCIAL_YEARS:
+        if len(annual_rows) >= US_REPORT_LOOKBACK_YEARS:
             break
     return annual_rows
 

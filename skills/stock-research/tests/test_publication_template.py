@@ -176,6 +176,27 @@ def test_report_template_uses_granular_management_score_and_data_sources():
     assert "Do not apply one blended" in skill
 
 
+def test_report_template_includes_shareholder_return_without_double_counting_dividends():
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    assert "### 股东回报" in template
+    assert "| 股息率 | [xx%] | [股息率区间和变化] | [是否提供等待回报] |" in template
+    assert "| 分红支付率 | [xx%] | [分红/净利润是否稳定] | [是否可持续] |" in template
+    assert "| 分红/FCF | [xx%] | [是否被FCF覆盖] | [是否透支现金流] |" in template
+    assert "| 回购与稀释 | [净变化] | [股本、回购、股权激励和稀释变化] | [是否提高每股价值] |" in template
+    assert "分红、稀释与回购质量" in template
+    assert "不把分红重复加进FV" in template
+
+    assert "Shareholder return check" in skill
+    assert "dividend yield" in skill
+    assert "payout ratio" in skill
+    assert "dividends/FCF" in skill
+    assert "not a Completion Gate field by itself" in skill
+    assert "Do not add dividends on top of fair value" in skill
+    assert_compact_contains(skill, "A high yield without repeatable FCF coverage is a value-trap warning")
+
+
 def test_report_template_does_not_use_zero_yaml_placeholders_for_required_positive_values():
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     skill = SKILL_PATH.read_text(encoding="utf-8")
