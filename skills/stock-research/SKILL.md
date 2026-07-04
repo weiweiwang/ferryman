@@ -81,12 +81,16 @@ mispriced by the market; do not repackage low-quality cheap stocks.
 ### Completion Gate
 
 Do not publish a stock-audit report unless current price, share count,
-financial/quote currency, five complete fiscal years of revenue, net profit,
-OCF, capex, FCF, cash/cash equivalents, debt, and primary filing evidence are
-available. Current and non-current financial-asset fields must stay separate in
-the data and report. If either field is blank, block only when the missing value
-is material to valuation; otherwise use primary evidence to mark it as zero,
-not material, or no disclosed balance.
+financial/quote currency, and five complete fiscal years of revenue, net profit,
+OCF, capex, FCF, cash/cash equivalents, and debt are available. Market and
+financial data platforms may be used for the five-year financial baseline when
+the fields are complete and internally consistent. Primary filings are required
+for material thesis checks, abnormal normalization, shareholder return,
+governance/accounting, and any balance-sheet or financial-asset composition
+that affects valuation. Current and non-current financial-asset fields must
+stay separate in the data and report. If either field is blank, block only when
+the missing value is material to valuation; otherwise use evidence to mark it
+as zero, not material, or no disclosed balance.
 
 If required data cannot be obtained, return the data-gap checklist from
 `assets/blocked-data-template.md` instead of a stock-audit report. It must not
@@ -99,7 +103,7 @@ Before finalizing, fail the report if any critical required field is blank,
 cap, currency, five-year rows for revenue, net profit, OCF, capex, FCF,
 cash/cash equivalents, debt, current price, quality score,
 conservative/base/optimistic scenario fair value, FCF/Net Income,
-management/accounting score, or primary source citation URL.
+management/accounting score, or required data/evidence citation URL.
 Current price, share count, market cap, revenue, net profit, OCF, FCF, quality
 score, and conservative/base/optimistic fair values must not be zero. Debt,
 financial assets, unusual items, and capex may be zero when the zero is
@@ -125,10 +129,11 @@ Markdown links are allowed.
    POST parameters, org IDs, script output keys such as `dataLimits`/`fxRate`,
    or debugging fetch steps in the report body. Put data providers, official
    filing venues, source dates, URLs, and supported uses only in the final
-   `数据来源` section. If `dataLimits.needsPrimarySourceForFiveYearNormalization`
-   is true, use primary filings to satisfy the Completion Gate before
-   publishing. If `financialCurrency` is missing, use `currency` as the rate
-   currency and mark the cash-flow currency assumption in reader-facing prose.
+   `数据来源` section. If the fetcher marks the five-year FCF baseline as
+   incomplete or requiring normalization support, verify the affected years from
+   filings before publishing. If `financialCurrency` is missing, use `currency`
+   as the rate currency and mark the cash-flow currency assumption in
+   reader-facing prose.
 2. **Raw-row audit**: Inspect raw rows for abnormal losses, peak profits,
    unusual FCF, margin spikes, leverage, cash, working capital, goodwill/equity,
    receivables/revenue, dividends, and buybacks. Never invent missing metrics.
@@ -273,7 +278,10 @@ and whether working-capital timing inflates operating cash flow.
   claims and per-share dilution. For each material item, disclose book value,
   recognition rate, recognized value, and reason.
 
-  | Item | Default treatment |
+  Do not infer subtypes from broad financial-asset fields. Use subtype-specific
+  recognition only when filings disclose the composition.
+
+  | Balance-sheet item or disclosed subtype | Recognition rule |
   |:---|:---|
   | Cash/cash equivalents | 80%-100%; lower if restricted, trapped, regulatory, or operating cash |
   | Short-duration deposits/treasuries | 85%-100%; lower for duration, credit, currency, or liquidity risk |
@@ -287,7 +295,9 @@ and whether working-capital timing inflates operating cash flow.
   financial assets as separate line items. Do not apply one blended recognition
   rate across cash and financial assets. If a material financial-asset category
   affects valuation, verify the composition from filings before assigning the
-  recognition rate.
+  recognition rate. In the report table, default to the broad fields above; only
+  expand into listed equity, unlisted investment, associates/JVs, or similar
+  subcategories when filings clearly disclose the composition.
 
 - **Fair-value output**: Show current market cap, share count, valuation
   currency, quote currency, FX rate if used, fair-value market cap, per-share
@@ -307,9 +317,14 @@ and whether working-capital timing inflates operating cash flow.
 - If the risk-free-rate script returns `ok:false` or no usable same-currency
   rate, output the data-gap checklist instead of publishing a stock-audit
   report.
-- **Multiples**: Use `min(20x, 100/(n * risk_free_rate_percent))`. Use
-  `n=2.0` for conservative cases. Use `n=1.5` only for a strong excellent
-  business base case. Upside multiples cannot support `STRONG_BUY`.
+- **FCF multiples**: Use `r=10%` as the default required return. Choose scenario
+  FCF multiples from sustainable long-term FCF growth, FCF durability, ROIC
+  durability, cyclicality, leverage, governance/accounting risk, and
+  customer/regulatory concentration. Use `(1+g)/(r-g)` as a reasonableness
+  check, not as a mechanical report output. The risk-free-rate formula
+  `min(20x, 100/(n * risk_free_rate_percent))` is only a ceiling. Scenario rows
+  must briefly explain why the selected multiple is reasonable. Upside multiples
+  cannot support `STRONG_BUY`.
 - **Conservative fair value**: Start from the normalized FCF anchor after
   balance-sheet adjustment, then cut it further if EPS, reverse-DCF, or primary
   evidence contradicts it. Do not use EPS as a replacement when five-year FCF is
@@ -336,9 +351,9 @@ Use only these signals: `STRONG_BUY`, `BUY`, `WATCHLIST`, `TACTICAL_BUY`, and
 ## Guardrails
 
 - Keep the report compact and evidence-backed.
-- Chinese report spacing: no spaces at Chinese/Latin or Chinese/number
-  boundaries; keep normal spaces inside English/numeric phrases. Examples:
-  `2025年`, `HKEX 2025年报`, `434.40 HKD`, `FCF/净利润`.
+- Chinese formatting: no spaces at Chinese/Latin or Chinese/number boundaries;
+  add one space between metric labels and values (`ROE 81.7%`,
+  `现价/基准FV 0.68`); use natural amount units (`18亿元`, not `1.8十亿元`).
 - Before finalizing any user-facing report, run a publication cleanup scan on
   the saved Markdown file: `rg -n "stock-research|Stock Research|股票研究|数据脚本|fetch_.*\\.py|POST|hisAnnouncement/query|orgId|secCode|gssz|gssh|dataLimits|fxRate" <report.md>`.
   If it matches, replace internal names with reader-facing language and cite
