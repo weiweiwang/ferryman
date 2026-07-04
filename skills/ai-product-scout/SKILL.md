@@ -61,6 +61,15 @@ When generating a cover image:
 - Avoid generic AI cliches, fake UI clutter, unreadable text, giant numbers, and decorative visuals that do not add meaning.
 - Visual direction: emphasize product mechanism, workflow compression, commercialization logic, growth loop, or builder lesson.
 
+## Product Media Anchor
+
+For featured single-case articles, add one opener media asset only when it helps readers understand the product quickly.
+
+- Prefer official product screenshots, product-showing hero images, demo videos, demo thumbnails, or customer-case workflow screenshots; skip generic, low-information, broken, oversized, or rights-unclear assets.
+- Save usable images as `ai-product-visual-<case_slug>.<ext>` and videos as `ai-product-media-<case_slug>.<ext>` in the report directory. Insert images as `![...](...)`; insert videos as `[Product demo video](ai-product-media-<case_slug>.mp4)` immediately after the H1, followed by a short italic source caption.
+- Record source URL, asset type, and caveat in the research brief; official promotional media is not third-party evidence.
+- Keep generated cover art and article opener media separate: cover art sells the article, opener media explains the product.
+
 ## Efficiency & Stopping Rules
 
 Research with intent, not volume. Your job is to find a case worth learning from, not to produce an encyclopedia.

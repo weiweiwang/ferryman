@@ -81,6 +81,16 @@ TH_STYLE = (
     "color:#2c3e50;font-weight:600;text-align:left;vertical-align:top;"
 )
 TD_STYLE = "padding:9px 10px;border:1px solid #dbe7ef;text-align:left;vertical-align:top;"
+FIGURE_STYLE = "margin:10px 0 18px;padding:0;text-align:center;"
+IMG_STYLE = (
+    "display:block;width:100%;max-width:100%;height:auto;margin:0 auto;"
+    "border-radius:4px;border:0;"
+)
+VIDEO_STYLE = (
+    "display:block;width:100%;max-width:100%;height:auto;margin:0 auto;"
+    "border-radius:4px;border:0;background:#0f172a;"
+)
+VIDEO_SOURCE_RE = re.compile(r"\.(?:mp4|webm|mov|m4v)(?:[?#].*)?$", re.I)
 
 
 @dataclass(frozen=True)
@@ -161,6 +171,15 @@ def render_body_html(markdown_body: str) -> str:
         if token.type == "paragraph_open":
             inline = _next_inline(tokens, index)
             if inline:
+                video = _video_link_from_inline(inline)
+                if video:
+                    rendered.append(_render_video_paragraph(*video))
+                    index += 3
+                    continue
+                if _is_image_only_inline(inline):
+                    rendered.append(_render_image_paragraph(inline))
+                    index += 3
+                    continue
                 is_lead = not lead_used
                 style = LEAD_STYLE if is_lead else P_STYLE
                 rendered.append(f'<p style="{style}">{render_inline_tokens(inline.children or [])}</p>')
@@ -201,6 +220,45 @@ def _next_inline(tokens: list[Token], index: int) -> Token | None:
     if index + 1 < len(tokens) and tokens[index + 1].type == "inline":
         return tokens[index + 1]
     return None
+
+
+def _is_image_only_inline(inline_token: Token) -> bool:
+    children = inline_token.children or []
+    meaningful = [token for token in children if token.type not in {"softbreak", "hardbreak"}]
+    return (
+        len(meaningful) == 1
+        and meaningful[0].type == "image"
+        and not is_video_source(str(meaningful[0].attrGet("src") or ""))
+    )
+
+
+def _render_image_paragraph(inline_token: Token) -> str:
+    image = next(token for token in inline_token.children or [] if token.type == "image")
+    return f'<figure style="{FIGURE_STYLE}">{render_image_token(image)}</figure>'
+
+
+def _video_link_from_inline(inline_token: Token) -> tuple[str, str] | None:
+    children = inline_token.children or []
+    meaningful = [
+        token for token in children
+        if not (token.type == "text" and not token.content.strip())
+        and token.type not in {"softbreak", "hardbreak"}
+    ]
+    if len(meaningful) == 1 and meaningful[0].type == "image":
+        src = str(meaningful[0].attrGet("src") or "")
+        if is_video_source(src):
+            return src, meaningful[0].content or "Product demo video"
+    if len(meaningful) < 2 or meaningful[0].type != "link_open" or meaningful[-1].type != "link_close":
+        return None
+    href = str(meaningful[0].attrGet("href") or "")
+    if not is_video_source(href):
+        return None
+    label = normalize_chinese_spacing(_plain_inline_text(meaningful[1:-1])).strip() or "Product demo video"
+    return href, label
+
+
+def _render_video_paragraph(src: str, label: str) -> str:
+    return f'<figure style="{FIGURE_STYLE}">{render_video(src, label)}</figure>'
 
 
 def _render_heading_token(open_token: Token, inline_token: Token) -> str:
@@ -324,6 +382,8 @@ def render_inline_tokens(tokens: list[Token]) -> str:
             rendered.append(f'<a href="{href}" style="{A_STYLE}">')
         elif token.type == "link_close":
             rendered.append("</a>")
+        elif token.type == "image":
+            rendered.append(render_image_token(token))
         elif token.type == "softbreak":
             rendered.append(" ")
         elif token.type == "hardbreak":
@@ -331,6 +391,29 @@ def render_inline_tokens(tokens: list[Token]) -> str:
         else:
             rendered.append(html.escape(token.content, quote=True))
     return "".join(rendered)
+
+
+def render_image_token(token: Token) -> str:
+    src = html.escape(str(token.attrGet("src") or ""), quote=True)
+    alt = html.escape(normalize_chinese_spacing(token.content or ""), quote=True)
+    title = html.escape(str(token.attrGet("title") or ""), quote=True)
+    title_attr = f' title="{title}"' if title else ""
+    return f'<img src="{src}" alt="{alt}"{title_attr} style="{IMG_STYLE}">'
+
+
+def is_video_source(value: str) -> bool:
+    return bool(VIDEO_SOURCE_RE.search(value))
+
+
+def render_video(src: str, label: str) -> str:
+    safe_src = html.escape(src, quote=True)
+    safe_label = html.escape(normalize_chinese_spacing(label), quote=True)
+    return (
+        f'<video src="{safe_src}" controls preload="metadata" '
+        f'aria-label="{safe_label}" style="{VIDEO_STYLE}">'
+        f'<a href="{safe_src}" style="{A_STYLE}">{safe_label}</a>'
+        "</video>"
+    )
 
 
 def render_heading_tokens(tokens: list[Token]) -> str:

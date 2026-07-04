@@ -126,6 +126,48 @@ def test_renders_markdown_tables_as_html_tables():
     assert "| 竞品 |" not in html
 
 
+def test_renders_article_opener_product_image():
+    html = render_article_html.render_full_html(
+        render_article_html.Article(
+            title="标题",
+            body=(
+                "![产品界面截图](ai-product-visual-demo.png)\n\n"
+                "*Source: official product page, unchecked promotional material.*\n\n"
+                "第一段正文。"
+            ),
+        )
+    )
+
+    assert "<figure" in html
+    assert '<img src="ai-product-visual-demo.png"' in html
+    assert 'alt="产品界面截图"' in html
+    assert "<em style=" in html
+    assert "Source: official product page" in html
+    assert "第一段正文。" in html
+    assert html.index("<figure") < html.index("第一段正文。")
+
+
+def test_renders_article_opener_product_video():
+    html = render_article_html.render_full_html(
+        render_article_html.Article(
+            title="标题",
+            body=(
+                "[Product demo video](ai-product-media-demo.mp4)\n\n"
+                "*Source: official product page, unchecked promotional material.*\n\n"
+                "第一段正文。"
+            ),
+        )
+    )
+
+    assert "<figure" in html
+    assert '<video src="ai-product-media-demo.mp4"' in html
+    assert "controls" in html
+    assert 'aria-label="Product demo video"' in html
+    assert "Source: official product page" in html
+    assert "第一段正文。" in html
+    assert html.index("<video") < html.index("第一段正文。")
+
+
 def test_render_file_uses_article_html_filename(tmp_path):
     source = tmp_path / "ai-product-case-article-demo.md"
     source.write_text("# 标题\n\n正文", encoding="utf-8")
