@@ -45,12 +45,28 @@ Adapt the headings and labels to match the user's requested language and channel
 ### 2. [Product Name]
 *(Repeat as needed; usually 3-5 cases are enough)*
 
+## Coverage History Check
+
+- **History Index Used**: [reports/ai-product-scout-history.json / merged from existing index / rebuilt from reports / unavailable]
+- **Previously Covered Matches Checked**: [Product names, slugs, and domains checked]
+- **Duplicate Risk**: [None / Low / Medium / High, with reason]
+
 ## Featured Case
 
 - **Product Name**: [Name]
 - **URL**: [Link]
 - **Why This One Wins**: [Why this is the strongest case today]
 - **Format Decision**: [Single featured case / Roundup]
+
+## Product Media Anchor
+
+- **Attempted**: [Yes / No, with reason if No]
+- **Asset Type**: [Image / Video / None]
+- **Source URL**: [Official source URL or none]
+- **Local Filename**: [ai-product-visual-... / ai-product-media-... / none]
+- **Visual Semantic Check**: [What the asset visibly shows and why it helps readers understand the product]
+- **Validation Result**: [File exists and HTML contains expected img/video tag / failed with reason]
+- **Caveat**: [e.g. official promotional media; not third-party evidence]
 
 ### Productization Breakdown
 
@@ -78,6 +94,13 @@ Adapt the headings and labels to match the user's requested language and channel
 ### Builder Lessons
 
 - **What Builders Can Learn**: [Concrete lessons or patterns worth copying]
+
+## Opening Readability Check
+
+- **Thesis**: [One-sentence thesis under 45 Chinese characters, or N/A for non-Chinese output]
+- **First-Screen Signals**: [Exactly 3 short bullets included / not applicable, with reason]
+- **Early Paragraph Length**: [First two sections are skimmable / issue noted]
+- **Source Link Style**: [Markdown links used instead of raw URLs / issue noted]
 
 ## Claim Layers
 
@@ -108,6 +131,15 @@ Bind each key factual claim to a specific source so readers can quickly verify t
 - **Blocked/Weak Sources**: [Any that failed to load or lacked useful content]
 - **Navigation Notes**: [Brief summary of search strategy and pivots]
 - **Why Research Stopped Here**: [Why the evidence was sufficient or why deeper browsing would have low return]
+
+## Generated Files Checklist
+
+- **Research Brief**: [Path written]
+- **Publishable Article Markdown**: [Path written]
+- **Formatted Article HTML**: [Path written]
+- **Cover Image**: [Path written / not generated, with reason]
+- **Opener Media**: [Path written / none found / failed validation, with reason]
+- **Coverage History Index**: [Path written / unavailable, with reason]
 ```
 
 ## Article Draft
@@ -124,10 +156,10 @@ Do not include date metadata, publication profile, article strategy, title candi
 
 ## Formatted Article HTML
 
-After saving the publishable article Markdown, generate the formatted HTML file with:
+After saving the publishable article Markdown, generate the formatted HTML file with the render script from this skill directory. Outside the skill directory, use `python3` with the script's absolute path:
 
 ```sh
-scripts/render_article_html.py reports/<yyyy-mm-dd>/ai-product-case-article-<case_slug>.md
+python3 scripts/render_article_html.py reports/<yyyy-mm-dd>/ai-product-case-article-<case_slug>.md
 ```
 
 The generated file must be named:
