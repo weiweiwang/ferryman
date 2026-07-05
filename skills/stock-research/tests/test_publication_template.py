@@ -486,6 +486,30 @@ def test_report_template_integrates_required_checks_into_body_and_data_sources()
     assert "## 必查证据清单" not in template
     assert "主要证据" not in template
     assert "关键判断核验" not in template
+    assert "## 业务拆解" in template
+    assert "[前4年]收入" in template
+    assert "[前3年]收入" in template
+    assert "[前2年]收入" in template
+    assert "[前1年]收入" in template
+    assert "[最新年]收入" in template
+    assert "业务/产品/地区" in template
+    assert "5年变化" in template
+    assert "毛利率/分部利润" in template
+    assert "管理层展望" in template
+    assert "Business Breakdown" in skill
+    assert "five-year revenue trend" in skill
+    assert_compact_contains(skill, "Do not use a single-year split as the main business-breakdown table for a multi-segment company")
+    assert_compact_contains(skill, "company IR pages that host official filings/results as primary sources")
+    assert "Supplemental only" not in skill
+    assert "| Primary source |" in skill
+    assert "| Route | Primary source |" not in skill
+    assert "| Market | Primary source |" not in skill
+    assert "[前4年]收入" in skill
+    assert "[最新年]收入" in skill
+    assert "segment revenue and disclosed segment" in skill
+    assert "management outlook when disclosed" in skill
+    assert_compact_contains(skill, "block only when the missing disclosure is material to the thesis")
+    assert "do not infer it" in skill
     assert "Cover these checks in the body and final `数据来源`用途 rows" in skill
     assert_compact_contains(skill, "do not add a standalone evidence checklist")
 
@@ -549,6 +573,7 @@ def test_report_template_uses_reader_facing_section_order():
     h2s = [line.strip() for line in template.splitlines() if line.startswith("## ")]
     expected = [
         "## 核心结论",
+        "## 业务拆解",
         "## 好公司评分：[x/100]",
         "## 财务审计",
         "## 股东回报",

@@ -26,8 +26,8 @@ mispriced by the market; do not repackage low-quality cheap stocks.
 - Save `reports/<current_date>/stock-audit-<ticker>-<current_date>.md` from
   `assets/report-template.md`; use `YYYY-MM-DD`.
 - When using `assets/report-template.md`, replace relative year placeholders
-  such as `最近完整财年` and `前1个完整财年` with actual complete fiscal years
-  before publication.
+  such as `最近完整财年`, `前1个完整财年`, and business-breakdown fiscal-year
+  headers with actual complete fiscal years before publication.
 - Keep YAML frontmatter compact: identity, conclusion, price, fair values,
   score, and controlled `tags.market`, `tags.sector`, `tags.industry`, and
   `tags.theme` from `references/taxonomy.md`. Use snake_case keys; percentages
@@ -116,9 +116,11 @@ checklist instead.
 Before publishing any user-facing output from `assets/report-template.md` or
 `assets/blocked-data-template.md`, do a final placeholder check: no unreplaced
 bracketed template fields such as `[Ticker]`, `[金额]`, `[日期]`, `[URL]`, or
-`[一句话...]`; no relative fiscal-year labels such as `最近完整财年`,
-`前1个完整财年`, `前2个完整财年`, `前3个完整财年`, or `前4个完整财年`. Normal
-Markdown links are allowed.
+`[一句话...]`; no business-breakdown placeholders such as `[前4年]收入`,
+`[前3年]收入`, `[前2年]收入`, `[前1年]收入`, or `[最新年]收入`; no relative
+fiscal-year labels such as `最近完整财年`, `前1个完整财年`,
+`前2个完整财年`, `前3个完整财年`, or `前4个完整财年`. Normal Markdown links
+are allowed.
 
 1. **Data**: Run the fetcher fresh for the target ticker at the start of each
    single-stock report; do not rely on an implicit cache. For every published
@@ -141,20 +143,27 @@ Markdown links are allowed.
    results announcements, or earnings transcripts. If a material assumption
    cannot be verified from primary evidence, output the data-gap checklist
    instead of a stock-audit report.
-4. **Business Quality Gate**: Score the business with the 100-point scorecard
+4. **Business Breakdown**: After the conclusion, show a five-year revenue trend
+   by disclosed segment, product line, or region, plus latest-year gross margin
+   or segment profit when available. For single-segment companies, say so and
+   use disclosed product or region mix if material. Do not use a single-year
+   split as the main business-breakdown table for a multi-segment company. If
+   filings do not disclose segment profit or margin, say so and do not infer it.
+   Tie this section to the quality score and valuation multiple.
+5. **Business Quality Gate**: Score the business with the 100-point scorecard
    below. A company is `Excellent` at >= 80, `Good/Watch` at 65-79, and
    not excellent below 65. Do not call a company excellent from adjectives
    alone; show the score, key evidence, and main deduction.
-5. **Mispricing Gate**: Explain market fear, why it may be temporary or
+6. **Mispricing Gate**: Explain market fear, why it may be temporary or
    exaggerated, evidence that quality remains intact, and the reversion trigger.
-6. **Valuation Model**: Use the model below. Show concrete fair value numbers,
+7. **Valuation Model**: Use the model below. Show concrete fair value numbers,
    not only ratios. Use one main scenario table with fair-value market cap,
    fair-value per-share price in the quote currency,
    `current price / fair value`, scenario weight, and key arithmetic. In Chinese
    reports, render the ratio as `现价/FV`. Put FCF/EPS/reverse-DCF/balance
    sheet checks in short cross-check bullets unless they add materially
    different information; avoid two tables that repeat the same valuation.
-7. **Risk Review**: Downgrade or reject when moat, FCF quality, leverage,
+8. **Risk Review**: Downgrade or reject when moat, FCF quality, leverage,
    accounting, dilution, capital allocation, or peak-earnings risk undermines
    the thesis.
 
@@ -171,25 +180,29 @@ present, and preserve prior company tags unless the business mix changed.
 
 ## Primary Source Routing
 
-Use official disclosure venues before company IR. In published reports, put
-source/date/URL/use only in the final `数据来源` table. Keep raw API queries,
-internal script names, provider fallbacks, and debug steps out of the report
-body. Use reader-facing labels for secondary baselines and official benchmark
-sources for risk-free rates.
+Use official exchange disclosure venues and company IR pages that host official
+filings/results as primary sources. In published reports, put source/date/URL/use
+only in the final `数据来源` table. Keep raw API queries, internal script names,
+provider fallbacks, and debug steps out of the report body. Use reader-facing
+labels for secondary baselines and official benchmark sources for risk-free
+rates.
 
-| Market | Primary source priority |
-|:---|:---|
-| US/ADR | SEC EDGAR: 10-K, 10-Q, 8-K, 20-F, 6-K |
-| Hong Kong | HKEXnews: annual/interim reports, results announcements, circulars |
-| China A-share | CNINFO, SSE, SZSE: annual/quarterly reports and announcements |
-| Company IR | Supplemental only: presentations, transcripts, investor days |
+| Primary source |
+|:---|
+| US/ADR: SEC EDGAR 10-K, 10-Q, 8-K, 20-F, 6-K |
+| Hong Kong: HKEXnews annual/interim reports, results announcements, circulars |
+| China A-share: CNINFO, SSE, SZSE annual/quarterly reports and announcements |
+| Company IR: primary when hosting official annual/interim reports, results announcements, circulars, or distribution records; supplemental for presentations, transcripts, and investor days |
 
 Required evidence checks: abnormal items, repeatable FCF, dividend policy and
 coverage, dilution, buyback quality, hidden liabilities,
-receivables/inventory/goodwill risk, segment profit, related parties, and
-management incentives. If a required or material check lacks primary evidence,
-output the data-gap checklist instead of a stock-audit report. Use `N/A` only
-when a check truly does not apply, and explain why.
+receivables/inventory/goodwill risk, segment revenue and disclosed segment
+profit/margin, management outlook when disclosed, related parties, and
+management incentives. If segment profit/margin or outlook is not disclosed,
+state that directly and do not infer it; block only when the missing disclosure
+is material to the thesis. If a required or material check lacks primary
+evidence, output the data-gap checklist instead of a stock-audit report. Use
+`N/A` only when a check truly does not apply, and explain why.
 Cover these checks in the body and final `数据来源`用途 rows; do not add a
 standalone evidence checklist.
 
