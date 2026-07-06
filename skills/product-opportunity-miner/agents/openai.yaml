@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Opportunity Miner"
+  short_description: "Find solo-buildable product opportunities"
+  default_prompt: "Use $product-opportunity-miner to find solo-builder-friendly app or web tool opportunities from real user demand, then judge competition, SEO feasibility, MVP wedge, monetization, and go/no-go."
