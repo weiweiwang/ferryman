@@ -152,7 +152,7 @@ Use this exact structure for the publishable article output. The article file is
 [Final copy-paste-ready article body only]
 ```
 
-Do not include date metadata, publication profile, article strategy, title candidates, fact-check notes, source URLs, `Operations Publishing Zone` markers, or handoff instructions in this article file. Put all non-publication material in the research brief.
+Keep research-only material out of the article: metadata, strategy notes, candidate shortlist/comparisons, rejected products, selection rationale, fact-check notes, and handoff instructions. Put them in the brief. Mention rejected products only for user-requested comparison/roundup.
 
 ## Formatted Article HTML
 
