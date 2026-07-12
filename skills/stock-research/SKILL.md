@@ -153,7 +153,11 @@ are allowed.
 5. **Business Quality Gate**: Score the business with the 100-point scorecard
    below. A company is `Excellent` at >= 80, `Good/Watch` at 65-79, and
    not excellent below 65. Do not call a company excellent from adjectives
-   alone; show the score, key evidence, and main deduction.
+   alone; show the score, key evidence, and main deduction. Do not turn
+   unverified but required evidence into arbitrary score cuts: block instead.
+   A sub-65 score requires hard evidence of weak FCF, weak balance sheet,
+   structural decline, accounting/governance failure, or poor capital
+   allocation.
 6. **Mispricing Gate**: Explain market fear, why it may be temporary or
    exaggerated, evidence that quality remains intact, and the reversion trigger.
 7. **Valuation Model**: Use the model below. Show concrete fair value numbers,
@@ -177,6 +181,9 @@ cash conversion unless quoting a source field.
 Before setting frontmatter tags, read `references/taxonomy.md`. Tags are for
 site filtering, so use only the controlled vocabulary, keep the four tag arrays
 present, and preserve prior company tags unless the business mix changed.
+Treat `signal` only as recommendation strength. Express recovery, cyclicality,
+restructuring, policy change, or event dependence through `tags.theme`; a thesis
+type never upgrades the signal or bypasses the evidence and downside gates.
 
 ## Primary Source Routing
 
@@ -330,14 +337,18 @@ and whether working-capital timing inflates operating cash flow.
 - If the risk-free-rate script returns `ok:false` or no usable same-currency
   rate, output the data-gap checklist instead of publishing a stock-audit
   report.
-- **FCF multiples**: Use `r=10%` as the default required return. Choose scenario
-  FCF multiples from sustainable long-term FCF growth, FCF durability, ROIC
-  durability, cyclicality, leverage, governance/accounting risk, and
-  customer/regulatory concentration. Use `(1+g)/(r-g)` as a reasonableness
-  check, not as a mechanical report output. The risk-free-rate formula
-  `min(20x, 100/(n * risk_free_rate_percent))` is only a ceiling. Scenario rows
-  must briefly explain why the selected multiple is reasonable. Upside multiples
-  cannot support `STRONG_BUY`.
+- **FCF multiples**: Use only sustainable long-term FCF growth `g` to anchor
+  multiples. Set `r=10%` and start from `(1+g)/(r-g)`, capped at `20x`; the
+  risk-free-rate formula is only a ceiling. Use conservative/base/optimistic
+  `g` tied to the FCF pattern: impaired `-2%-1%`, stable low growth `0%-2%`,
+  stable mid growth `1%-3%`, structural growth `2%-5%`. Base `g` must not
+  exceed the lower of 5-year revenue CAGR and 5-year FCF CAGR unless filings
+  prove early years are not representative. Apply a haircut for weak FCF
+  durability, falling ROIC/ROE, cyclicality, leverage, governance/accounting
+  risk, or concentration. Base multiples below `10x` require explicit negative
+  evidence; below `8x` require structural decline or quality failure. Scenario
+  rows must show `g`, multiple, and the haircut reason. Upside multiples cannot
+  support `STRONG_BUY`.
 - **Conservative fair value**: Start from the normalized FCF anchor after
   balance-sheet adjustment, then cut it further if EPS, reverse-DCF, or primary
   evidence contradicts it. Do not use EPS as a replacement when five-year FCF is
@@ -351,13 +362,17 @@ and whether working-capital timing inflates operating cash flow.
 
 ## Signals
 
-Use only these signals: `STRONG_BUY`, `BUY`, `WATCHLIST`, `TACTICAL_BUY`, and
-`AVOID`. `STRONG_BUY`, `BUY`, and `WATCHLIST` follow the Signal Gate Contract.
+Use only these signals: `STRONG_BUY`, `BUY`, `WATCHLIST`, and `AVOID`. Do not
+create an intermediate buy grade. `STRONG_BUY`, `BUY`, and `WATCHLIST` follow
+the Signal Gate Contract.
 
-- **TACTICAL_BUY**: upside depends on recovery, cyclicality, restructuring,
-  policy change, or uncertain normalization. This is not a core quality signal;
-  use only when the report clearly labels the thesis as tactical and higher
-  risk.
+- Recovery, cyclicality, restructuring, policy change, and event dependence are
+  thesis types, not recommendation grades. Record them with controlled
+  `tags.theme` values such as `turnaround`, `cyclical`, or `event-driven`.
+- A non-core thesis may still be `BUY` only when it satisfies every `BUY` gate.
+  If price, downside protection, timing, or non-critical evidence is not good
+  enough, use `WATCHLIST`. If required data or evidence is missing, return the
+  blocked-data checklist and do not publish a stock-audit report.
 - **AVOID**: business quality, balance sheet, accounting, or capital allocation
   fails.
 

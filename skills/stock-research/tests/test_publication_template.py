@@ -419,12 +419,16 @@ def test_report_template_requires_multiple_basis_and_broad_financial_asset_lines
     assert "默认r=10%" not in template
     assert "(1+g)/(r-g)" not in template
     assert "无风险利率公式只作上限" not in template
-    assert "[低倍数原因]" in template
-    assert "[合理倍数原因]" in template
-    assert "[高倍数约束]" in template
+    assert "g、倍数、折价原因" in template
+    assert "g、倍数、约束原因" in template
+    assert "[低倍数原因]" not in template
+    assert "[合理倍数原因]" not in template
+    assert "[高倍数约束]" not in template
     assert "`r=10%`" in skill
     assert "(1+g)/(r-g)" in skill
-    assert_compact_contains(skill, "reasonableness check, not as a mechanical report output")
+    assert_compact_contains(skill, "Use only sustainable long-term FCF growth `g` to anchor multiples")
+    assert_compact_contains(skill, "Set `r=10%` and start from `(1+g)/(r-g)`")
+    assert "reasonableness check, not as a mechanical report output" not in skill
     assert "Business type | Conservative g" not in skill
 
 
@@ -588,6 +592,21 @@ def test_report_template_uses_reader_facing_section_order():
         assert forbidden not in template
 
 
+def test_fcf_multiple_rules_are_growth_anchored_and_stable():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert_compact_contains(skill, "Use only sustainable long-term FCF growth `g` to anchor multiples")
+    assert_compact_contains(skill, "Set `r=10%` and start from `(1+g)/(r-g)`")
+    assert_compact_contains(skill, "Base multiples below `10x` require explicit negative evidence")
+    assert_compact_contains(skill, "below `8x` require structural decline or quality failure")
+    assert_compact_contains(
+        skill,
+        "Do not turn unverified but required evidence into arbitrary score cuts: block instead",
+    )
+    assert "g、倍数、折价原因" in template
+
+
 def test_wait_signal_is_not_a_public_signal():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -612,6 +631,20 @@ def test_watchlist_requires_completion_gate():
 
     assert "`WATCHLIST` requires the Completion Gate to be satisfied" in skill
     assert "not `WATCHLIST`" in skill
+
+
+def test_signal_strength_is_separate_from_thesis_type():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    taxonomy = (SKILL_PATH.parent / "references" / "taxonomy.md").read_text(encoding="utf-8")
+
+    assert "Use only these signals: `STRONG_BUY`, `BUY`, `WATCHLIST`, and `AVOID`" in skill
+    assert_compact_contains(skill, "Do not create an intermediate buy grade")
+    assert "thesis types, not recommendation grades" in skill
+    assert "`tags.theme`" in skill
+    assert "TACTICAL_BUY" not in skill
+    assert "TACTICAL_BUY" not in template
+    assert "event-driven" in taxonomy
 
 
 def test_skill_requires_publication_cleanup_scan():

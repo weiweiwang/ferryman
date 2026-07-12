@@ -78,4 +78,5 @@ Leave uncertain categories empty.
 - asset-light
 - turnaround
 - cyclical
+- event-driven
 - rate-sensitive
