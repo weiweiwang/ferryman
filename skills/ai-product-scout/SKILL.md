@@ -10,7 +10,7 @@ metadata:
   version: 0.1.0
   author: Ferryman
   created: 2026-03-17
-  updated: 2026-07-06
+  updated: 2026-07-12
 ---
 
 # AI Product Scout
@@ -205,14 +205,11 @@ When the user's target audience or output language is Chinese, include China-rel
 
 ## Headline Strategy
 
-When creating the publishable article, create title candidates using distinct click drivers:
+Derive the title from the article's strongest case-specific insight.
 
-- **Consequence-led**: what changes for builders or the market
-- **Contrast-led**: the strategic tension or surprising move
-- **Reframing-led**: what seems to matter versus what actually matters
-- **Builder-stakes-led**: what founders, PMs, or makers should learn from this case
-
-Titles should make the payoff legible, not merely sound exciting.
+- Center the title on the product mechanism, customer pain, workflow change, or business logic that makes the case worth reading.
+- Use concrete details from the case to create curiosity and distinguish the product.
+- Choose the title that accurately promises the article's core insight and reader value.
 
 ## Chinese Finalization Pass
 
