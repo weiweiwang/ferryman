@@ -10,7 +10,7 @@ metadata:
   version: 0.1.0
   author: Ferryman
   created: 2026-03-17
-  updated: 2026-07-12
+  updated: 2026-07-13
 ---
 
 # AI Product Scout
@@ -69,6 +69,7 @@ For featured single-case articles, actively look for one official opener media a
 - Reject abstract backgrounds, decorative gradients, logo-only images, stock photos, and brand mood visuals, even when official.
 - For Framer/Webflow-style sites, prefer video posters and product/demo-context images over the largest image.
 - Save usable images as `ai-product-visual-<case_slug>.<ext>` and videos as `ai-product-media-<case_slug>.<ext>` in the report directory. Verify the local file exists and is non-empty before linking it.
+- For WeChat deliverables, verify animated GIFs contain no more than 300 frames.
 - Insert images as `![...](...)`; insert videos as `[Product demo video](ai-product-media-<case_slug>.<ext>)` immediately after the H1, followed by a short italic source caption. Use the actual saved extension.
 - Before linking media, inspect it and record: `Visual Semantic Check: shows <visible scene> and helps readers understand <product/workflow>.` If the asset cannot pass that sentence, skip opener media and record `none found`.
 - After rendering HTML, confirm the generated HTML contains the expected opener `<img>` or `<video>` tag for the saved media filename. If validation fails, fix the Markdown link or remove the media from the article and record the failure in the research brief.
@@ -209,6 +210,7 @@ Derive the title from the article's strongest case-specific insight.
 
 - Center the title on the product mechanism, customer pain, workflow change, or business logic that makes the case worth reading.
 - Use concrete details from the case to create curiosity and distinguish the product.
+- Keep Chinese titles within 18-28 characters and focused on one case-specific insight.
 - Choose the title that accurately promises the article's core insight and reader value.
 
 ## Chinese Finalization Pass
