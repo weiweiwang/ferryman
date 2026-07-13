@@ -3,7 +3,8 @@ name: stock-research
 description: >
   Use this for concise research on excellent companies that appear temporarily
   mispriced, with a disciplined 2x base-case signal, conservative downside
-  protection, and a strict internal 90% evidence gate.
+  protection, deterministic evidence classification, and reproducible signal
+  gates.
 ---
 
 # Investment Quality Review
@@ -21,17 +22,28 @@ mispriced by the market; do not repackage low-quality cheap stocks.
 - If imports fail, stop, report the missing dependency, and ask the user before
   installing lightweight runtime dependencies from `requirements.txt` in the
   Python environment used to run the scripts.
-- Use the Signal Gate Contract below for `BUY`, `STRONG_BUY`, fair-value,
-  evidence-gate, and blocked-report decisions.
+- Before scoring or choosing a signal, read
+  `references/evidence-and-signal-gates.md` completely. It is the source of
+  truth for evidence classification, independent valuation anchors, signal
+  gates, and blocked-report decisions.
 - Save `reports/<current_date>/stock-audit-<ticker>-<current_date>.md` from
-  `assets/report-template.md`; use `YYYY-MM-DD`.
+  `assets/report-template.md`; use `YYYY-MM-DD`. Use this one template for every
+  report language: localize all reader-facing headings, table labels, prose, and
+  disclaimer while preserving the section order and semantic fields. Do not
+  create or require a language-specific duplicate template.
+- For every stock-audit report, copy `assets/evidence-working-note.yaml` to the
+  same directory as `evidence-<ticker>-<current_date>.yaml`. Fill every evidence
+  state, source URL, boolean gate, valuation anchor, and signal decision. Keep
+  this sidecar internal; never publish, import, cite, or link it from the report.
 - When using `assets/report-template.md`, replace relative year placeholders
   such as `最近完整财年`, `前1个完整财年`, and business-breakdown fiscal-year
   headers with actual complete fiscal years before publication.
 - Keep YAML frontmatter compact: identity, conclusion, price, fair values,
   score, and controlled `tags.market`, `tags.sector`, `tags.industry`, and
   `tags.theme` from `references/taxonomy.md`. Use snake_case keys; percentages
-  are 0-100 numbers without `%`.
+  are 0-100 numbers without `%`. Write `quality_score`, `current_price.value`,
+  and all `fair_value` scenario values as unquoted YAML numbers, never `x/100`
+  strings.
 - Use `company.zh` and `company.en`; leave unavailable official names as
   `null`. `fair_value` is per-share by default; use `fair_value_market_cap`
   only when needed.
@@ -39,42 +51,20 @@ mispriced by the market; do not repackage low-quality cheap stocks.
   reports as `# <company.en> Investment Quality Review (<ticker>)`. Avoid
   generic `股票研究` / `Stock Research` unless the user asks for it.
 
-## Signal Gate Contract
+## Evidence And Signal Gates
 
-- The 90% evidence gate is internal; do not render it as a report label, prose
-  metric, or YAML field.
+- Classify every evidence gap before scoring as `required`, `material`, or
+  `non_critical`, then apply exactly the action defined in
+  `references/evidence-and-signal-gates.md`. Missing evidence never becomes an
+  arbitrary score deduction.
+- Use boolean publication, BUY-evidence, and STRONG_BUY-evidence gates. Do not
+  calculate, display, or store an evidence percentage.
 - In Chinese reports, write the first fair-value abbreviation as
   `基准公允价值(FV)`, then use `FV` afterward; use
   `估值位置：现价/基准公允价值(FV) x.xx` as the header metric.
-- `STRONG_BUY` requires all gates: excellent business, credible temporary
-  mispricing, `current price / base fair value <= 0.50`, conservative fair
-  value showing clear downside protection, the internal 90% evidence gate, and
-  no value-trap failure.
-- If `current price / conservative fair value <= 0.50`, label it as an
-  exceptional deep-value case rather than the default high-signal hurdle.
-- `BUY` requires an excellent or high-end `Good/Watch` business, credible
-  temporary mispricing, `current price / base fair value <= 0.70`,
-  conservative fair value giving at least reasonable downside protection
-  (`current price / conservative fair value <= 1.00` unless a clearly explained
-  special situation applies), no value-trap failure, and enough primary evidence
-  that the thesis is not only an optimistic-case story. It is below
-  `STRONG_BUY` because the 2x hurdle, internal 90% evidence gate, or conservative
-  downside protection is not strong enough.
-- `WATCHLIST` requires the Completion Gate to be satisfied. It means the
-  company quality may be attractive, but price, timing, mispricing thesis, or
-  non-critical thesis evidence is not good enough yet. Missing required data or
-  required primary evidence must become the data-gap checklist, not `WATCHLIST`.
-- Internal evidence caps: missing required primary evidence blocks a published
-  stock-audit report under the Completion Gate. Non-critical but thesis-relevant
-  evidence gaps cap the internal evidence gate at 70%, so the report cannot
-  reach `BUY` or `STRONG_BUY`; fewer than two independent anchors supporting
-  `current price / base fair value <= 0.50` caps the internal evidence gate at
-  80%, so the report cannot reach `STRONG_BUY`; failed or unavailable
-  risk-free-rate data blocks publication until a same-currency rate is obtained;
-  material accounting, leverage, or value-trap risk caps the internal evidence
-  gate at 60% or forces `AVOID`.
-  Missing or unusable five-year FCF blocks a published stock-audit report under
-  the Completion Gate.
+- If the publication gate fails, output the data-gap checklist without a signal
+  or score. If it passes, choose exactly one of `STRONG_BUY`, `BUY`, `WATCHLIST`,
+  or `AVOID` from the reference contract.
 
 ## Workflow
 
@@ -142,7 +132,9 @@ are allowed.
 3. **Primary evidence**: Explain abnormal items and normalization with filings,
    results announcements, or earnings transcripts. If a material assumption
    cannot be verified from primary evidence, output the data-gap checklist
-   instead of a stock-audit report.
+   instead of a stock-audit report. Apply the evidence-state actions from
+   `references/evidence-and-signal-gates.md`; do not substitute a score cap for
+   missing required or material evidence.
 4. **Business Breakdown**: After the conclusion, show a five-year revenue trend
    by disclosed segment, product line, or region, plus latest-year gross margin
    or segment profit when available. For single-segment companies, say so and
@@ -205,11 +197,10 @@ Required evidence checks: abnormal items, repeatable FCF, dividend policy and
 coverage, dilution, buyback quality, hidden liabilities,
 receivables/inventory/goodwill risk, segment revenue and disclosed segment
 profit/margin, management outlook when disclosed, related parties, and
-management incentives. If segment profit/margin or outlook is not disclosed,
-state that directly and do not infer it; block only when the missing disclosure
-is material to the thesis. If a required or material check lacks primary
-evidence, output the data-gap checklist instead of a stock-audit report. Use
-`N/A` only when a check truly does not apply, and explain why.
+management incentives. Classify each check before scoring. If segment
+profit/margin or outlook is not disclosed, state that directly and do not infer
+it; use the materiality rules in the gate reference to decide whether to block.
+Use `N/A` only when a check truly does not apply, and explain why.
 Cover these checks in the body and final `数据来源`用途 rows; do not add a
 standalone evidence checklist.
 
@@ -242,18 +233,24 @@ decimal when needed. In reports, show both forms, for example
 100-point split: shareholder alignment 20; capital allocation 25;
 incentives/dilution 20; accounting quality 20; governance/related parties 15.
 
-Apply caps unless primary evidence removes the concern:
+Do not cap a score merely because evidence was not checked. Missing required or
+material management/accounting evidence blocks publication; a documented
+non-critical gap caps the signal at `WATCHLIST`. Apply score caps only to
+verified adverse facts:
 
-- Incentives not checked from annual/proxy/remuneration filing: max 67/100.
-- Material SBC/options/convertibles without net dilution quantified: max 73/100.
+- Verified material incentive misalignment: max 67/100.
+- Verified material SBC/options/convertibles with harmful net dilution: max
+  73/100.
 - Material dividends: verify dividend per share or cash dividends, current
   dividend yield, payout ratio, and dividends/FCF. A high yield without
   repeatable FCF coverage is a value-trap warning, not a positive signal.
 - Material buybacks: verify net share-count change and buyback price vs fair
   value.
-- Investment gains, fair-value marks, subsidies, capitalization, impairments, or
-  aggressive non-GAAP not normalized: max 80/100.
-- Material related-party, VIE, or control-shareholder risk: max 67/100.
+- Verified recurring investment gains, fair-value marks, subsidies,
+  capitalization, impairments, or aggressive non-GAAP that reduce accounting
+  reliability after normalization: max 80/100.
+- Verified material related-party, VIE, or control-shareholder risk: max
+  67/100.
 - 93+/100 requires all five subchecks verified and no material unresolved issue.
 
 Show the compact breakdown table when this score affects total score or signal.
@@ -267,7 +264,9 @@ and whether working-capital timing inflates operating cash flow.
 - **Report language**: Write the report in the user's language. Preserve
   tickers, source names, filing names, accounting terms, and metric IDs when
   they are clearer in English, but do not leave table headers or scenario
-  explanations in English when the user is writing in another language.
+  explanations in English when the user is writing in another language. Use
+  `assets/report-template.md` as the shared semantic template and localize it in
+  place; a separate English template is neither required nor supported.
 - **Normalize earnings**: Use full fiscal-year FCF as the main valuation anchor.
   The Completion Gate requires five complete FCF years; if FCF is missing or
   unusable, block the report instead of falling back to EPS. TTM FCF is only a
@@ -358,13 +357,14 @@ and whether working-capital timing inflates operating cash flow.
   probability that the stock reaches the stated fair-value price. The 2x signal
   is primarily judged against `current price / base fair value <= 0.50`;
   optimistic scenarios may not be the sole support for a positive signal.
-  Apply the Signal Gate Contract caps by evidence quality.
+  Apply the boolean evidence gates from
+  `references/evidence-and-signal-gates.md`.
 
 ## Signals
 
 Use only these signals: `STRONG_BUY`, `BUY`, `WATCHLIST`, and `AVOID`. Do not
-create an intermediate buy grade. `STRONG_BUY`, `BUY`, and `WATCHLIST` follow
-the Signal Gate Contract.
+create an intermediate buy grade. Apply their thresholds only from
+`references/evidence-and-signal-gates.md`.
 
 - Recovery, cyclicality, restructuring, policy change, and event dependence are
   thesis types, not recommendation grades. Record them with controlled
@@ -386,6 +386,11 @@ the Signal Gate Contract.
   the saved Markdown file: `rg -n "stock-research|Stock Research|股票研究|数据脚本|fetch_.*\\.py|POST|hisAnnouncement/query|orgId|secCode|gssz|gssh|dataLimits|fxRate" <report.md>`.
   If it matches, replace internal names with reader-facing language and cite
   underlying data providers or official venues.
+- Run `python scripts/validate_report.py <report.md>` on every saved stock-audit
+  report or blocked-data checklist. For a stock-audit report the command
+  automatically requires and validates its same-directory `evidence-*.yaml`
+  sidecar, recomputes the three boolean gates and final signal, and checks the
+  declared report language. Do not publish when the validator fails.
 - Technical analysis can inform timing and risk controls, but cannot upgrade the
   fundamental signal.
 - Do not recommend position size without portfolio context, time horizon,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,10 @@ REQUIRED_ANNUAL_FIELDS = (
     "Total Debt",
 )
 LIVE_FETCH_TICKERS = ("AAPL.O", "600809.SH", "00700.HK", "00992.HK")
+LIVE_TEST = pytest.mark.skipif(
+    os.environ.get("STOCK_RESEARCH_RUN_LIVE_TESTS") != "1",
+    reason="Set STOCK_RESEARCH_RUN_LIVE_TESTS=1 to run live source tests.",
+)
 
 
 class FakeResponse:
@@ -271,6 +276,7 @@ def test_financial_data_limits_require_five_complete_fcf_years_and_required_fiel
     }
 
 
+@LIVE_TEST
 @pytest.mark.parametrize("ticker", LIVE_FETCH_TICKERS)
 def test_fetch_stock_data_returns_complete_data_for_us_a_hk_from_real_api(ticker):
     module = load_fetch_module()
@@ -293,6 +299,7 @@ def test_fx_rate_uses_identity_for_matching_currencies():
     assert rate["symbol"] is None
 
 
+@LIVE_TEST
 def test_fx_rate_supports_cny_hkd_via_real_eastmoney_api():
     module = load_fetch_module()
 
@@ -305,6 +312,7 @@ def test_fx_rate_supports_cny_hkd_via_real_eastmoney_api():
     assert rate["symbol"] == "133.HKDCNH"
 
 
+@LIVE_TEST
 def test_fx_rate_supports_usd_hkd_cross_via_real_eastmoney_api():
     module = load_fetch_module()
 
@@ -504,6 +512,7 @@ def test_main_serializes_error_code_source_and_details(monkeypatch, capsys):
     }
 
 
+@LIVE_TEST
 def test_main_can_write_explicit_json_out_from_real_api(tmp_path, capsys):
     module = load_fetch_module()
     output_path = tmp_path / "stock-data.json"
@@ -516,6 +525,7 @@ def test_main_can_write_explicit_json_out_from_real_api(tmp_path, capsys):
     assert_complete_stock_data_contract(stdout_payload, "AAPL.O", "US")
 
 
+@LIVE_TEST
 def test_main_returns_stable_error_payload_from_real_api(capsys):
     module = load_fetch_module()
 

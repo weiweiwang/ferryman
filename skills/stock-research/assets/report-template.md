@@ -7,15 +7,15 @@ exchange: "[交易所]"
 report_date: "[YYYY-MM-DD]"
 fetched_at: "[YYYY-MM-DD HH:MM UTC]"
 signal: "[STRONG_BUY | BUY | WATCHLIST | AVOID]"
-quality_score: "[x/100]"
+quality_score: null
 summary: "[一句话结论]"
 current_price:
-  value: "[当前价格]"
+  value: null
   currency: "[报价币种]"
 fair_value:
-  conservative: "[保守每股公允价]"
-  base: "[基准每股公允价]"
-  optimistic: "[乐观每股公允价]"
+  conservative: null
+  base: null
+  optimistic: null
   currency: "[报价币种]"
 tags:
   market: []

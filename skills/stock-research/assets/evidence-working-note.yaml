@@ -1,0 +1,47 @@
+version: 1
+report_language: "[zh|en]"
+ticker: "[Ticker]"
+report_date: "[YYYY-MM-DD]"
+checks:
+  current_price: {class: required, state: verified, source_urls: ["[URL]"]}
+  share_count: {class: required, state: verified, source_urls: ["[URL]"]}
+  financial_currency: {class: required, state: verified, source_urls: ["[URL]"]}
+  quote_currency: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_revenue: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_net_profit: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_ocf: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_capex: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_fcf: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_cash: {class: required, state: verified, source_urls: ["[URL]"]}
+  five_year_debt: {class: required, state: verified, source_urls: ["[URL]"]}
+  risk_free_rate: {class: required, state: verified, source_urls: ["[URL]"]}
+  required_citations: {class: required, state: verified, source_urls: ["[URL]"]}
+  shareholder_alignment: {class: material, state: verified, source_urls: ["[URL]"]}
+  capital_allocation: {class: material, state: verified, source_urls: ["[URL]"]}
+  incentives_dilution: {class: material, state: verified, source_urls: ["[URL]"]}
+  accounting_quality: {class: material, state: verified, source_urls: ["[URL]"]}
+  governance_related_parties: {class: material, state: verified, source_urls: ["[URL]"]}
+  abnormal_normalization: {class: material, state: verified, source_urls: ["[URL]"]}
+  repeatable_fcf: {class: material, state: verified, source_urls: ["[URL]"]}
+  shareholder_return: {class: material, state: verified, source_urls: ["[URL]"]}
+  hidden_liabilities: {class: material, state: verified, source_urls: ["[URL]"]}
+  receivables_inventory_goodwill: {class: material, state: verified, source_urls: ["[URL]"]}
+  segment_economics: {class: material, state: verified, source_urls: ["[URL]"]}
+  management_outlook: {class: material, state: verified, source_urls: ["[URL]"]}
+  financial_asset_composition: {class: material, state: verified, source_urls: ["[URL]"]}
+  mispricing_explanation: {class: material, state: verified, source_urls: ["[URL]"]}
+  normalized_fcf_anchor: {class: material, state: verified, source_urls: ["[URL]"]}
+  non_fcf_cross_check: {class: material, state: verified, source_urls: ["[URL]"]}
+  avoid_failure: {class: material, state: not_applicable, rationale: "[Why no AVOID failure applies]"}
+valuation_anchors:
+  - family: normalized_fcf
+    supports_2x: false
+    source_urls: ["[URL]"]
+gates:
+  publication: true
+  buy_evidence: true
+  strong_buy_evidence: false
+signal_decision:
+  selected: "[STRONG_BUY|BUY|WATCHLIST|AVOID]"
+  reasons:
+    - "[Decision-table reason]"

@@ -9,6 +9,7 @@ TEMPLATE_PATH = SKILL_DIR / "assets" / "report-template.md"
 BLOCKED_TEMPLATE_PATH = SKILL_DIR / "assets" / "blocked-data-template.md"
 SKILL_PATH = SKILL_DIR / "SKILL.md"
 TAXONOMY_PATH = SKILL_DIR / "references" / "taxonomy.md"
+GATE_PATH = SKILL_DIR / "references" / "evidence-and-signal-gates.md"
 SCREENER_PATH = SKILL_DIR / "references" / "screener.md"
 
 
@@ -392,11 +393,12 @@ def test_report_template_does_not_use_zero_yaml_placeholders_for_required_positi
     for term in forbidden:
         assert term not in template
 
-    assert 'quality_score: "[x/100]"' in template
-    assert 'value: "[当前价格]"' in template
-    assert 'conservative: "[保守每股公允价]"' in template
-    assert 'base: "[基准每股公允价]"' in template
-    assert 'optimistic: "[乐观每股公允价]"' in template
+    assert "quality_score: null" in template
+    assert "current_price:\n  value: null" in template
+    assert "conservative: null" in template
+    assert "base: null" in template
+    assert "optimistic: null" in template
+    assert_compact_contains(skill, "Write `quality_score`, `current_price.value`, and all `fair_value` scenario values as unquoted YAML numbers")
     assert "quality score" in skill
     assert "conservative/base/optimistic fair values must not be zero" in skill
 
@@ -434,10 +436,19 @@ def test_report_template_requires_multiple_basis_and_broad_financial_asset_lines
 
 def test_skill_centralizes_signal_gate_contract():
     skill = SKILL_PATH.read_text(encoding="utf-8")
+    gates = GATE_PATH.read_text(encoding="utf-8")
 
-    assert "## Signal Gate Contract" in skill
-    assert "Use the Signal Gate Contract below" in skill
-    assert "Internal evidence caps:" in skill
+    assert "## Evidence And Signal Gates" in skill
+    assert "references/evidence-and-signal-gates.md" in skill
+    assert_compact_contains(skill, "Do not calculate, display, or store an evidence percentage")
+    assert "## Evidence Classification" in gates
+    assert "| `required` |" in gates
+    assert "| `material` |" in gates
+    assert "| `non_critical` |" in gates
+    assert "## Boolean Gates" in gates
+    assert "current price / conservative fair value <= 0.85" in gates
+    assert "Quality score >=75" in gates
+    assert "Never lower a score to 64 merely to create `AVOID`" in gates
     assert "Chinese formatting:" in skill
     assert "metric labels and values" in skill
     assert "ROE 81.7%" in skill
@@ -512,7 +523,7 @@ def test_report_template_integrates_required_checks_into_body_and_data_sources()
     assert "[最新年]收入" in skill
     assert "segment revenue and disclosed segment" in skill
     assert "management outlook when disclosed" in skill
-    assert_compact_contains(skill, "block only when the missing disclosure is material to the thesis")
+    assert_compact_contains(skill, "use the materiality rules in the gate reference to decide whether to block")
     assert "do not infer it" in skill
     assert "Cover these checks in the body and final `数据来源`用途 rows" in skill
     assert_compact_contains(skill, "do not add a standalone evidence checklist")
@@ -628,9 +639,34 @@ def test_skill_requires_placeholder_cleanup_scan():
 
 def test_watchlist_requires_completion_gate():
     skill = SKILL_PATH.read_text(encoding="utf-8")
+    gates = GATE_PATH.read_text(encoding="utf-8")
 
-    assert "`WATCHLIST` requires the Completion Gate to be satisfied" in skill
-    assert "not `WATCHLIST`" in skill
+    assert "If the publication gate fails" in skill
+    assert "If false, output the blocked-data checklist" in gates
+    assert "not `WATCHLIST` or `AVOID`" in gates
+
+
+def test_skill_localizes_one_shared_report_template_instead_of_duplicating_by_language():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    assert_compact_contains(skill, "Use this one template for every report language")
+    assert_compact_contains(skill, "a separate English template is neither required nor supported")
+    assert not (SKILL_DIR / "assets" / "report-template-en.md").exists()
+
+
+def test_skill_requires_internal_evidence_sidecar_for_every_stock_audit():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    gates = GATE_PATH.read_text(encoding="utf-8")
+    sidecar = (SKILL_DIR / "assets" / "evidence-working-note.yaml").read_text(encoding="utf-8")
+
+    assert "evidence-<ticker>-<current_date>.yaml" in skill
+    assert "automatically requires and validates" in skill
+    assert "do not import, publish, quote, or link" in gates
+    assert "report_language:" in sidecar
+    assert "checks:" in sidecar
+    assert "valuation_anchors:" in sidecar
+    assert "gates:" in sidecar
+    assert "signal_decision:" in sidecar
 
 
 def test_signal_strength_is_separate_from_thesis_type():
@@ -654,6 +690,7 @@ def test_skill_requires_publication_cleanup_scan():
     assert "fetch_.*\\\\.py" in skill
     assert "screen_.*" not in skill
     assert "underlying data providers or official venues" in skill
+    assert "python scripts/validate_report.py <report.md>" in skill
 
 
 def test_skill_uses_controlled_structured_taxonomy():
