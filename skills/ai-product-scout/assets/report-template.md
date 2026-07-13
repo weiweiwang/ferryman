@@ -25,7 +25,7 @@ Adapt the headings and labels to match the user's requested language and channel
 ## Executive Summary
 
 - **Category Pulse**: [Hot / Stable / Emerging / Mixed]
-- **Top Case**: [Product Name — one-line reason]
+- **Top Case**: [Product Name]
 - **Main Lesson**: [1-2 sentence summary of the strongest learnable pattern]
 
 ## Case Shortlist
@@ -56,7 +56,6 @@ Adapt the headings and labels to match the user's requested language and channel
 - **Product Name**: [Name]
 - **URL**: [Link]
 - **Why This One Wins**: [Why this is the strongest case today]
-- **Format Decision**: [Single featured case / Roundup]
 
 ## Product Media Anchor
 
@@ -97,10 +96,11 @@ Adapt the headings and labels to match the user's requested language and channel
 
 ## Opening Readability Check
 
-- **Thesis**: [One-sentence thesis under 45 Chinese characters, or N/A for non-Chinese output]
-- **First-Screen Signals**: [Exactly 3 short bullets included / not applicable, with reason]
+- **Thesis**: [Concise opening thesis, or N/A with reason]
+- **First-Screen Signals**: [2-4 concrete signals included in a form suited to the case]
+- **Structure Fit**: [Headings and presentation follow the case rather than a fixed article skeleton]
 - **Early Paragraph Length**: [First two sections are skimmable / issue noted]
-- **Source Link Style**: [Markdown links used instead of raw URLs / issue noted]
+- **Article Citations**: [Material factual claims linked at first use / issue noted]
 
 ## Claim Layers
 
@@ -152,7 +152,7 @@ Use this exact structure for the publishable article output. The article file is
 [Final copy-paste-ready article body only]
 ```
 
-Keep research-only material out of the article: metadata, strategy notes, candidate shortlist/comparisons, rejected products, selection rationale, fact-check notes, and handoff instructions. Put them in the brief. Mention rejected products only for user-requested comparison/roundup.
+Keep research-only material out of the article: metadata, strategy notes, candidate shortlist/comparisons, rejected products, selection rationale, fact-check notes, and handoff instructions. Put them in the brief. Mention rejected products only when the user explicitly requests a comparison.
 
 ## Formatted Article HTML
 

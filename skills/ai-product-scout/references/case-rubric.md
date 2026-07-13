@@ -12,8 +12,6 @@ Choose cases that have the strongest combination of:
 - `Distribution Clues`: there is some evidence of how users find or adopt it
 - `Learnability`: a builder can extract an actionable lesson
 
-If a product is interesting but too thin to support those dimensions, keep it in the shortlist but do not force it into the featured case slot.
-
 ## 2. Productization Questions
 
 For the featured case, answer as many of these as the evidence supports:
@@ -58,11 +56,3 @@ A good case study should do all of the following:
 - explain why the case matters
 - distinguish fact from interpretation
 - end with clear lessons for builders
-
-## 6. Chinese Publishing Finish
-
-For Chinese outputs:
-
-- remove non-essential spaces between Chinese and adjacent English or numbers,
-- preserve literal formatting only where needed,
-- make the result read like native Chinese editorial writing.
