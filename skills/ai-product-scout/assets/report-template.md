@@ -36,7 +36,7 @@ Adapt labels to the requested language and channel. Keep the brief analytical an
 - **Adoption Evidence**: [Customer, usage, growth, or deployment signal]
 - **Distribution and Expansion**: [How it reaches buyers and grows account value]
 - **Uncertainty**: [Material unknowns, weak evidence, or risks]
-- **Builder Insight**: [One or two case-specific lessons]
+- **Editorial Judgment**: [Specific, defensible conclusion expressed in concrete language rooted in the case]
 
 ## Evidence
 
@@ -53,7 +53,7 @@ Adapt labels to the requested language and channel. Keep the brief analytical an
 ## Publication Check
 
 - **Reader Appeal**: [Title earns attention; opening makes product, stakes, and reason to continue clear / issue]
-- **Narrative**: [Causal story explains mechanism, outcome, transferable insight, and limits; ending delivers the promised insight / issue]
+- **Narrative**: [An unfamiliar reader can explain the product, retell the decisive choice, and understand why it changed the business / issue]
 - **Evidence**: [Material facts linked and caveated / issue]
 - **Article Boundary**: [No research process or rejected candidates / issue]
 

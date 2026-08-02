@@ -39,6 +39,7 @@ Assess 3-5 candidates after duplicate exclusion. Publish a featured case only wh
 - Evidence includes a concrete monetization signal such as pricing, paid contracts, revenue, or a verified transaction model.
 - Evidence includes a separate adoption or growth signal.
 - The case supports one timely, case-specific editorial thesis with a real consequence and at least two concrete proof points.
+- Evidence supports a reconstructable decision: who chose what, under which constraint, and what commercial consequence followed.
 
 Funding alone, investor enthusiasm, or an unspecified partnership does not establish monetization. If reasonable discovery cannot produce a qualifying case, stop and report the missing evidence; do not produce article deliverables or update coverage history.
 
@@ -50,12 +51,11 @@ Link material facts where they support the argument. Identify company and founde
 
 ## Editorial Standard
 
-- Open with a concrete situation or decision that makes the product, user, value, and stakes immediately legible.
-- Build a causal story around a consequential choice under constraint and its effect on adoption, monetization, or advantage.
-- Sustain momentum by making each section alter the stakes or reveal a new consequence. Use concrete actors, outcomes, and evidence to change what the reader understands.
+- Open with a specific actor facing a concrete choice that makes the product, user, value, and stakes immediately legible.
+- Build the article around a few telling scenes and decisions, not a complete analytical outline. Bring in product mechanics and evidence only where they change the story.
 - Derive the title from the case's distinctive mechanism, customer, or commercial tension. For Chinese articles, keep it within 18-28 characters and make a specific promise the article fulfills.
-- Develop the story far enough to explain the product mechanism, commercial outcome, transferable insight, and material limits. Let it determine its structure and length, then end on the implication with the highest decision value.
-- Write natural Chinese publication prose and remove unnecessary spaces around adjacent Chinese, English, numbers, and units.
+- Make one defensible editorial judgment in concrete language drawn from the case, so readers can remember or disagree with it. Develop it far enough to explain the commercial outcome and material limits, then end when the judgment lands.
+- Write like an informed Chinese columnist: choose details, vary pace, make claims in an authorial voice, and leave obvious implications unstated. Remove unnecessary spaces around adjacent Chinese, English, numbers, and units.
 
 ## Visual Standard
 
@@ -75,6 +75,6 @@ Before completion, confirm:
 
 - The case still passes every Publication Gate requirement.
 - The title earns attention and the opening makes the product, stakes, and reason to continue immediately clear.
-- Choices and consequences sustain momentum; repeated explanation and routine lessons are removed; the ending delivers the promised insight.
+- An unfamiliar reader can explain the product, retell the decisive choice, understand why it changed the business, and recall the case-rooted judgment; repeated explanation and routine lessons are removed.
 - Material facts are linked and caveated, and no research-only content appears in the article.
 - Generated article, HTML, cover, and opener media are internally consistent and usable.
