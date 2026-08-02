@@ -11,6 +11,7 @@ Choose cases that have the strongest combination of:
 - `Commercial Clues`: there are signs of pricing, monetization, or buyer intent
 - `Distribution Clues`: there is some evidence of how users find or adopt it
 - `Learnability`: a builder can extract an actionable lesson
+- `Editorial Potential`: the evidence supports a timely, non-obvious claim with a legible conflict or consequence beyond the company profile
 
 ## 2. Productization Questions
 
@@ -52,7 +53,9 @@ You do not need certainty, but you do need a grounded explanation.
 
 A good case study should do all of the following:
 
-- teach the reader something concrete
-- explain why the case matters
+- move from a concrete reader-facing stake into one clear editorial argument
+- teach one or two case-specific lessons
+- explain why the case matters beyond the company itself
 - distinguish fact from interpretation
-- end with clear lessons for builders
+- sustain the argument with concrete evidence
+- close on the last meaningful implication rather than a routine recap

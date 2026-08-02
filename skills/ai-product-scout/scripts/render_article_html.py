@@ -417,12 +417,13 @@ def render_video(src: str, label: str) -> str:
 
 
 def render_heading_tokens(tokens: list[Token]) -> str:
-    plain_text = normalize_chinese_spacing(_plain_inline_text(tokens)).strip()
-    match = re.match(r"^(\d{2})\s*(.+)$", plain_text)
+    plain_text = _plain_inline_text(tokens).strip()
+    match = re.match(r"^(\d{2})\s+(.+)$", plain_text)
     if not match:
         return render_inline_tokens(tokens)
     number, text = match.groups()
-    return f'<span style="{H2_NUMBER_STYLE}">{html.escape(number)}</span>{html.escape(text)}'
+    normalized_text = normalize_chinese_spacing(text).strip()
+    return f'<span style="{H2_NUMBER_STYLE}">{html.escape(number)}</span>{html.escape(normalized_text)}'
 
 
 def _plain_inline_text(tokens: list[Token]) -> str:

@@ -92,6 +92,18 @@ def test_renders_inline_styles_for_formatted_copy():
     assert "GitHub Copilot从" in render_article_html.render_inline("GitHub Copilot 从")
 
 
+def test_does_not_treat_percentage_as_heading_number():
+    html = render_article_html.render_full_html(
+        render_article_html.Article(
+            title="标题",
+            body="## 306%的关键，是客户有很多个下一站\n\n正文。",
+        )
+    )
+
+    assert "306%的关键" in html
+    assert ">30</span>6%的关键" not in html
+
+
 def test_markdown_it_handles_links_and_code_literals():
     rendered = render_article_html.render_inline("[链接](https://example.com/?a=1&b=2)")
     assert 'href="https://example.com/?a=1&amp;b=2"' in rendered

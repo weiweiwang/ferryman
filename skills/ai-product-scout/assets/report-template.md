@@ -1,7 +1,6 @@
 # Deliverable Template
 
-Use the following Markdown structures as the blueprint for your output.
-Adapt the headings and labels to match the user's requested language and channel.
+Adapt labels to the requested language and channel. Keep the brief analytical and compact; it should support the article without dictating its structure.
 
 ## Research Brief
 
@@ -9,163 +8,73 @@ Adapt the headings and labels to match the user's requested language and channel
 # AI Product Case Brief
 
 **Date**: [YYYY-MM-DD]
-**Scope**: [General / Category-specific / audience-specific]
-**Sources Explored**: [List of meaningful sources actually used]
-**Source Budget Notes**: [How many meaningful sources were used and why that was enough]
+**Scope**: [Audience and learning goal]
+**Sources Used**: [Meaningful sources actually checked]
 
-## Publication Profile
+## Editorial Decision
 
-- **Publication / Channel**: [e.g. rich-text editor / newsletter / blog]
-- **Brand Name**: [Name or "Not provided"]
-- **Audience**: [Who this is for]
-- **Positioning**: [How the publication wants to be perceived]
-- **Learning Goal**: [What kind of case insight the reader wants]
-- **Tone**: [analytical / practical / sharp / restrained / etc.]
-
-## Executive Summary
-
-- **Category Pulse**: [Hot / Stable / Emerging / Mixed]
 - **Top Case**: [Product Name]
-- **Main Lesson**: [1-2 sentence summary of the strongest learnable pattern]
+- **URL**: [Homepage]
+- **Case Type**: [原生新产品 / 老树新花, with basis]
+- **Reader Stake**: [Conflict, consequence, or decision legible without product knowledge]
+- **Narrative Spine**: [Situation -> consequential choice -> observable result -> commercial meaning]
+- **Article Thesis**: [One case-specific argument]
+- **Proof Points**: [At least two concrete facts supporting the thesis]
 
-## Case Shortlist
+## Candidate Shortlist
 
-### 1. [Product Name]
-
-- **URL**: [Link]
-- **Category**: [e.g. coding, design, research, automation]
-- **Core User**: [Who it appears to serve]
-- **Core Problem**: [What pain point or workflow it solves]
-- **Why This Case Matters**: [Why it is worth studying]
-- **Growth Signals**: [Rankings, launch buzz, traffic clues, community discussion, or other traction]
-- **Source Confidence**: [High / Medium / Low]
-- **Why Not Chosen**: [Why this is not the featured case]
-- **What Would Make It Stronger**: [What missing evidence or traction would improve the case]
-
-### 2. [Product Name]
-*(Repeat as needed; usually 3-5 cases are enough)*
-
-## Coverage History Check
-
-- **History Index Used**: [reports/ai-product-scout-history.json / merged from existing index / rebuilt from reports / unavailable]
-- **Previously Covered Matches Checked**: [Product names, slugs, and domains checked]
-- **Duplicate Risk**: [None / Low / Medium / High, with reason]
+| Product | Category | Commercial Evidence | Editorial Potential | Decision |
+|---|---|---|---|---|
+| [Name + URL] | [Category] | [Monetization + adoption/growth] | [Why readers should care] | [Featured / rejected with concise reason] |
 
 ## Featured Case
 
 - **Product Name**: [Name]
-- **URL**: [Link]
-- **Why This One Wins**: [Why this is the strongest case today]
+- **Product Mechanism**: [Workflow and differentiated product behavior]
+- **Buyer and Value**: [Who pays and what result they buy]
+- **Monetization Evidence**: [Pricing, paid contract, revenue, or transaction model]
+- **Adoption Evidence**: [Customer, usage, growth, or deployment signal]
+- **Distribution and Expansion**: [How it reaches buyers and grows account value]
+- **Uncertainty**: [Material unknowns, weak evidence, or risks]
+- **Builder Insight**: [One or two case-specific lessons]
 
-## Product Media Anchor
+## Evidence
 
-- **Attempted**: [Yes / No, with reason if No]
-- **Asset Type**: [Image / Video / None]
-- **Source URL**: [Official source URL or none]
-- **Local Filename**: [ai-product-visual-... / ai-product-media-... / none]
-- **Visual Semantic Check**: [What the asset visibly shows and why it helps readers understand the product]
-- **Validation Result**: [File exists and HTML contains expected img/video tag / failed with reason]
-- **Caveat**: [e.g. official promotional media; not third-party evidence]
+| Claim | Source URL | Status | Caveat |
+|---|---|---|---|
+| [Material claim] | [URL] | [Confirmed / Interpretation / Uncertain] | [Source limitation] |
 
-### Productization Breakdown
+## Coverage and Media
 
-- **What It Does**: [One-sentence value proposition]
-- **Core User**: [Who it serves]
-- **Core Problem**: [What pain point it solves]
-- **Workflow Compression**: [How it turns complexity into a usable product]
-- **Time-to-Value Clues**: [How quickly a new user seems able to get value]
-- **Why It Feels Productized**: [What makes it more than a demo or thin wrapper]
+- **History Check**: [Index used and duplicate result]
+- **Opener Media**: [Source, local filename, semantic value, validation / none found with reason]
+- **Cover**: [Local filename and dimensions / not generated with reason]
 
-### Commercialization Breakdown
+## Publication Check
 
-- **Who Pays**: [Likely buyer]
-- **Monetization Model**: [Subscription / credits / enterprise / hybrid / unclear]
-- **Pricing Clues**: [Observed pricing or strong hints]
-- **Expansion Path**: [How account value could grow]
-- **Moat / Lock-In Hypothesis**: [Reasoned but careful interpretation]
+- **Reader Appeal**: [Title earns attention; opening makes product, stakes, and reason to continue clear / issue]
+- **Narrative**: [Causal story explains mechanism, outcome, transferable insight, and limits; ending delivers the promised insight / issue]
+- **Evidence**: [Material facts linked and caveated / issue]
+- **Article Boundary**: [No research process or rejected candidates / issue]
 
-### Distribution Breakdown
+## Generated Files
 
-- **Discovery Clues**: [How users appear to find it]
-- **Growth Signals**: [Observed traction evidence]
-- **Why It Travels**: [Why it is spreading or earning attention]
-
-### Builder Lessons
-
-- **What Builders Can Learn**: [Concrete lessons or patterns worth copying]
-
-## Opening Readability Check
-
-- **Thesis**: [Concise opening thesis, or N/A with reason]
-- **First-Screen Signals**: [2-4 concrete signals included in a form suited to the case]
-- **Structure Fit**: [Headings and presentation follow the case rather than a fixed article skeleton]
-- **Early Paragraph Length**: [First two sections are skimmable / issue noted]
-- **Article Citations**: [Material factual claims linked at first use / issue noted]
-
-## Claim Layers
-
-### Confirmed Facts
-
-- [Fact 1]
-- [Fact 2]
-
-### Interpretation
-
-- [What the confirmed facts suggest]
-
-### What To Watch
-
-- [Forward-looking implication or uncertainty]
-
-## Evidence Table
-
-Bind each key factual claim to a specific source so readers can quickly verify the basis for the analysis.
-
-| Claim | Source URL | Source Type | Confidence | Notes |
-|---|---|---|---|---|
-| [Specific factual claim] | [URL] | [Official / media / directory / community / data source] | [High / Medium / Low] | [Why this source supports the claim, or any caveat] |
-
-## Source & Methodology Notes
-
-- **Platforms Visited**: [List]
-- **Blocked/Weak Sources**: [Any that failed to load or lacked useful content]
-- **Navigation Notes**: [Brief summary of search strategy and pivots]
-- **Why Research Stopped Here**: [Why the evidence was sufficient or why deeper browsing would have low return]
-
-## Generated Files Checklist
-
-- **Research Brief**: [Path written]
-- **Publishable Article Markdown**: [Path written]
-- **Formatted Article HTML**: [Path written]
-- **Cover Image**: [Path written / not generated, with reason]
-- **Opener Media**: [Path written / none found / failed validation, with reason]
-- **Coverage History Index**: [Path written / unavailable, with reason]
+- **Research Brief**: [Path]
+- **Article Markdown**: [Path]
+- **Article HTML**: [Path]
+- **Cover**: [Path / none]
+- **Opener Media**: [Path / none]
+- **Coverage History**: [Path / unavailable]
 ```
 
-## Article Draft
-
-Use this exact structure for the publishable article output. The article file is the clean publication source; it must contain only the final title and final body.
+## Publishable Article
 
 ```md
-# [One final title only]
+# [One final title]
 
-[Final copy-paste-ready article body only]
+[Final article body only]
 ```
 
-Keep research-only material out of the article: metadata, strategy notes, candidate shortlist/comparisons, rejected products, selection rationale, fact-check notes, and handoff instructions. Put them in the brief. Mention rejected products only when the user explicitly requests a comparison.
+## Formatted HTML
 
-## Formatted Article HTML
-
-After saving the publishable article Markdown, generate the formatted HTML file with the render script from this skill directory. Outside the skill directory, use `python3` with the script's absolute path:
-
-```sh
-python3 scripts/render_article_html.py reports/<yyyy-mm-dd>/ai-product-case-article-<case_slug>.md
-```
-
-The generated file must be named:
-
-```md
-reports/<yyyy-mm-dd>/ai-product-case-article-<case_slug>.html
-```
-
-This HTML file is a copy-paste-ready formatted rendering for a rich-text editor. It renders the clean article Markdown directly.
+Render the publishable Markdown with `scripts/render_article_html.py`. The HTML filename must match the article Markdown basename.
