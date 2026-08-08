@@ -8,7 +8,7 @@ metadata:
   version: 0.1.0
   author: Ferryman
   created: 2026-03-17
-  updated: 2026-08-02
+  updated: 2026-08-08
 ---
 
 # AI Product Scout
@@ -56,6 +56,7 @@ Link material facts where they support the argument. Identify company and founde
 - Derive the title from the case's distinctive mechanism, customer, or commercial tension. For Chinese articles, keep it within 18-28 characters and make a specific promise the article fulfills.
 - Make one defensible editorial judgment in concrete language drawn from the case, so readers can remember or disagree with it. Develop it far enough to explain the commercial outcome and material limits, then end when the judgment lands.
 - Write like an informed Chinese columnist: choose details, vary pace, make claims in an authorial voice, and leave obvious implications unstated. Remove unnecessary spaces around adjacent Chinese, English, numbers, and units.
+- In Chinese articles, translate ordinary English into natural Chinese. Retain English only for product names, standard acronyms, branded terms, or technical precision.
 
 ## Visual Standard
 
